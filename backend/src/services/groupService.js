@@ -2,9 +2,18 @@ import crypto from 'node:crypto';
 import { query, withTransaction } from '../db/index.js';
 
 const groupCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
-const hydrate = async (row) => { const members = await query('SELECT u.id AS "_id", u.username, u.email, u.fullnamae FROM users u JOIN group_members gm ON gm.user_id = u.id WHERE gm.group_id = $1', [row._id]); return { ...row, members: members.rows }; };
+const hydrate = async (row, client = null) => {
+	const runQuery = client ? client.query.bind(client) : query;
+	const members = await runQuery('SELECT u.id AS "_id", u.username, u.email, u.fullnamae FROM users u JOIN group_members gm ON gm.user_id = u.id WHERE gm.group_id = $1', [row._id]);
+	return { ...row, members: members.rows };
+};
 
-export const createGroup = async ({ name, createdBy, memberIds = [] }) => withTransaction(async (client) => { const created = await client.query('INSERT INTO groups (name, group_code, created_by) VALUES ($1,$2,$3) RETURNING id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt"', [name, groupCode(), createdBy]); const id = created.rows[0]._id; for (const member of [...new Set([createdBy, ...memberIds])]) await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, member]); return hydrate(created.rows[0]); });
+export const createGroup = async ({ name, createdBy, memberIds = [] }) => withTransaction(async (client) => {
+	const created = await client.query('INSERT INTO groups (name, group_code, created_by) VALUES ($1,$2,$3) RETURNING id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt"', [name.trim(), groupCode(), createdBy]);
+	const id = created.rows[0]._id;
+	for (const member of [...new Set([createdBy, ...memberIds])]) await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, member]);
+	return hydrate(created.rows[0], client);
+});
 export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map(hydrate)); };
 export const joinGroupByCode = async ({ groupCode: code, userId }) => { const result = await query('SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt" FROM groups WHERE group_code = $1', [code.trim().toUpperCase()]); if (!result.rowCount) throw Object.assign(new Error('Group code not found'), { statusCode: 404 }); await query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [result.rows[0]._id, userId]); return hydrate(result.rows[0]); };
 export const leaveGroup = async (groupId, userId) => withTransaction(async (client) => { const unsettled = await client.query('SELECT 1 FROM balances WHERE group_id = $1 AND (user1 = $2 OR user2 = $2) AND net_owed <> 0 LIMIT 1', [groupId, userId]); if (unsettled.rowCount) throw Object.assign(new Error('Cannot leave group with unsettled balances'), { statusCode: 400 }); const result = await client.query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2 RETURNING group_id', [groupId, userId]); if (!result.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 }); return { groupId, removed: true }; });

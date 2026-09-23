@@ -6,13 +6,14 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { name, memberIds } = req.body;
+  const { name, memberIds } = req.body || {};
   if (!name) throw Object.assign(new Error('Group name is required'), { statusCode: 400 });
-  res.status(201).json({ data: await createGroup({ name, createdBy: req.user._id, memberIds }) });
+  const group = await createGroup({ name, createdBy: req.user._id, memberIds });
+  res.status(201).json({ data: group });
 };
 
 export const join = async (req, res) => {
-  const { groupCode } = req.body;
+  const { groupCode } = req.body || {};
   if (!groupCode) throw Object.assign(new Error('Group code is required'), { statusCode: 400 });
   res.json({ data: await joinGroupByCode({ groupCode, userId: req.user._id }) });
 };

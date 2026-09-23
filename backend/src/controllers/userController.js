@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { query } from '../db/index.js';
+import { uploadImageBuffer } from '../config/cloudinary.js';
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' };
 const publicUser = (user) => { const value = { ...user }; delete value.password; delete value.refreshToken; return value; };
@@ -39,3 +40,25 @@ export const logout = async (req, res) => { await query('UPDATE users SET refres
 export const refreshToken = async (req, res) => { const incoming = req.cookies?.refreshToken || req.body.refreshToken; if (!incoming) throw Object.assign(new Error('Refresh token is required'), { statusCode: 401 }); const decoded = jwt.verify(incoming, process.env.REFRESH_TOKEN_SECRET); const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, created_at AS "createdAt" FROM users WHERE id = $1 AND refresh_token = $2', [decoded._id, incoming]); if (!result.rowCount) throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 }); const data = tokenResponse(result.rows[0]); await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, decoded._id]); setCookies(res, data); res.json({ data: { accessToken: data.accessToken, refreshToken: data.refreshToken, tokenType: data.tokenType } }); };
 export const accessToken = async (req, res) => res.json({ data: { accessToken: makeAccessToken(req.user), tokenType: 'Bearer' } });
 export const currentUser = async (req, res) => res.json({ data: { user: req.user } });
+
+export const updateProfile = async (req, res) => {
+  if (req.params.userId !== req.user._id) throw Object.assign(new Error('You can only update your own profile'), { statusCode: 403 });
+
+  const { username, email, fullnamae, password, phone, coverimage } = req.body || {};
+  const values = {};
+  if (username?.trim()) values.username = username.trim().toLowerCase();
+  if (email?.trim()) values.email = email.trim().toLowerCase();
+  if (fullnamae?.trim()) values.fullnamae = fullnamae.trim();
+  if (phone !== undefined) values.phone = phone.trim();
+  if (coverimage?.trim()) values.coverimage = coverimage.trim();
+  if (password) values.password = await bcrypt.hash(password, 12);
+  if (req.file) values.coverimage = await uploadImageBuffer(req.file.buffer);
+
+  if (!Object.keys(values).length) throw Object.assign(new Error('At least one profile field is required'), { statusCode: 400 });
+  const fields = Object.keys(values);
+  const params = fields.map((field) => values[field]);
+  const assignments = fields.map((field, index) => `${field} = $${index + 1}`).join(', ');
+  params.push(req.user._id);
+  const result = await query(`UPDATE users SET ${assignments} WHERE id = $${params.length} RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, created_at AS "createdAt"`, params);
+  res.json({ data: { user: result.rows[0] } });
+};

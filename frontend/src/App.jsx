@@ -1,14 +1,20 @@
 import { useEffect, useState } from "react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = import.meta.env.VITE_API_URL || "/api";
 const emptyForm = { username: "", email: "", fullnamae: "", password: "" };
 
 async function apiRequest(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...options.headers },
-    ...options,
-  });
+  const isFormData = options.body instanceof FormData;
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      credentials: "include",
+      headers: isFormData ? { ...options.headers } : { "Content-Type": "application/json", ...options.headers },
+    });
+  } catch {
+    throw new Error("Cannot connect to the backend. Start the API on port 5000.");
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Something went wrong");
   return payload.data;
@@ -235,8 +241,15 @@ function Dashboard({ user, accessToken, onLogout }) {
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [groupTransactions, setGroupTransactions] = useState([]);
+  const [groupDetailsBusy, setGroupDetailsBusy] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', password: '', coverimage: null });
+  const [profileBusy, setProfileBusy] = useState(false);
   const [formMessage, setFormMessage] = useState("");
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
@@ -254,16 +267,21 @@ function Dashboard({ user, accessToken, onLogout }) {
 
   const createGroup = async (event) => {
     event.preventDefault();
+    const name = groupName.trim();
+    if (!name) {
+      setFormMessage('Group name is required');
+      return;
+    }
     try {
       const group = await apiRequest("/groups", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({
-          name: new FormData(event.currentTarget).get("name"),
-        }),
+        body: JSON.stringify({ name }),
       });
       setGroups((current) => [group, ...current]);
       setShowGroupForm(false);
+      setGroupName('');
+      setFormMessage(`Group created. Share code: ${group.groupCode}`);
     } catch (error) {
       setFormMessage(error.message);
     }
@@ -271,8 +289,12 @@ function Dashboard({ user, accessToken, onLogout }) {
 
   const joinGroup = async (event) => {
     event.preventDefault();
+    const groupCode = joinCode.trim().toUpperCase();
+    if (!groupCode) {
+      setFormMessage('Group code is required');
+      return;
+    }
     try {
-      const groupCode = new FormData(event.currentTarget).get("groupCode");
       const group = await apiRequest("/groups/join", {
         method: "POST",
         headers: authHeaders,
@@ -283,6 +305,7 @@ function Dashboard({ user, accessToken, onLogout }) {
         ...current.filter((item) => item._id !== group._id),
       ]);
       setShowJoinForm(false);
+      setJoinCode('');
       setFormMessage(`Joined ${group.name}.`);
     } catch (error) {
       setFormMessage(error.message);
@@ -340,6 +363,31 @@ function Dashboard({ user, accessToken, onLogout }) {
     } catch (error) {
       setFormMessage(error.message);
     }
+  };
+  const openGroupDetails = async (group) => {
+    setSelectedGroup(group);
+    setGroupDetailsBusy(true);
+    try {
+      setGroupTransactions(await apiRequest(`/expenses?groupId=${group._id}`, { headers: authHeaders }));
+    } catch (error) {
+      setFormMessage(error.message);
+    } finally {
+      setGroupDetailsBusy(false);
+    }
+  };
+  const updateProfileField = (event) => setProfileForm((current) => ({ ...current, [event.target.name]: event.target.type === 'file' ? event.target.files[0] : event.target.value }));
+  const updateProfile = async (event) => {
+    event.preventDefault();
+    setProfileBusy(true);
+    const body = new FormData();
+    Object.entries(profileForm).forEach(([key, value]) => { if (value) body.append(key, value); });
+    try {
+      const result = await apiRequest(`/users/profile/${user._id}`, { method: 'PUT', headers: authHeaders, body });
+      Object.assign(user, result.user);
+      setShowProfile(false);
+      setFormMessage('Profile updated successfully.');
+    } catch (error) { setFormMessage(error.message); }
+    finally { setProfileBusy(false); }
   };
   const friends = [
     ...new Map(
@@ -555,6 +603,7 @@ function Dashboard({ user, accessToken, onLogout }) {
                     tone="coral"
                     onSimplify={() => simplifyGroup(group._id)}
                     onLeave={() => leaveGroup(group._id)}
+                    onOpen={() => openGroupDetails(group)}
                   />
                 ))
               ) : (
@@ -590,7 +639,7 @@ function Dashboard({ user, accessToken, onLogout }) {
               <form onSubmit={createGroup}>
                 <label>
                   Group name
-                  <input name="name" placeholder="Lisbon weekend" required />
+                  <input name="name" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Lisbon weekend" required />
                 </label>
                 <button className="submit-button">Create group</button>
               </form>
@@ -602,7 +651,7 @@ function Dashboard({ user, accessToken, onLogout }) {
               <form onSubmit={joinGroup}>
                 <label>
                   Group code
-                  <input name="groupCode" placeholder="A1B2C3D4" maxLength="8" autoCapitalize="characters" required />
+                  <input name="groupCode" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="A1B2C3D4" maxLength="8" autoCapitalize="characters" required />
                 </label>
                 <button className="submit-button">Join group</button>
               </form>
@@ -652,33 +701,26 @@ function Dashboard({ user, accessToken, onLogout }) {
           )}
           {showProfile && (
             <Modal title="Your profile" onClose={() => setShowProfile(false)}>
-              <div className="profile-details">
-                <div>
-                  <span>FULL NAME</span>
-                  <strong>{user.fullnamae || "Not provided"}</strong>
-                </div>
-                <div>
-                  <span>USERNAME</span>
-                  <strong>@{user.username}</strong>
-                </div>
-                <div>
-                  <span>EMAIL</span>
-                  <strong>{user.email}</strong>
-                </div>
-                <div>
-                  <span>MEMBER SINCE</span>
-                  <strong>
-                    {new Date(user.createdAt).toLocaleDateString()}
-                  </strong>
-                </div>
-              </div>
-              <button
-                className="submit-button profile-logout"
-                onClick={onLogout}
-              >
-                Log out
-              </button>
+              <form onSubmit={updateProfile} className="profile-edit-form">
+                <label>Username<input name="username" value={profileForm.username} onChange={updateProfileField} required /></label>
+                <label>Email<input name="email" type="email" value={profileForm.email} onChange={updateProfileField} required /></label>
+                <label>Full name<input name="fullnamae" value={profileForm.fullnamae} onChange={updateProfileField} required /></label>
+                <label>Phone<input name="phone" value={profileForm.phone} onChange={updateProfileField} placeholder="Optional" /></label>
+                <label>New password<input name="password" type="password" value={profileForm.password} onChange={updateProfileField} minLength="8" placeholder="Leave blank to keep current" /></label>
+                <label>Cover image<input name="coverimage" type="file" accept="image/*" onChange={updateProfileField} /></label>
+                <button className="submit-button" disabled={profileBusy}>{profileBusy ? 'Saving…' : 'Save profile'}</button>
+              </form>
+              <button className="submit-button profile-logout" onClick={onLogout}>Log out</button>
             </Modal>
+          )}
+          {selectedGroup && (
+            <GroupDetails
+              group={selectedGroup}
+              transactions={groupTransactions}
+              busy={groupDetailsBusy}
+              onClose={() => setSelectedGroup(null)}
+              onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
+            />
           )}
         </section>
         <aside className="dashboard-right-rail">
@@ -719,9 +761,9 @@ function Panel({ eyebrow, title, children }) {
     </section>
   );
 }
-function Group({ initials, name, amount, note, tone, groupCode, onSimplify, onLeave }) {
+function Group({ initials, name, amount, note, tone, groupCode, onSimplify, onLeave, onOpen }) {
   return (
-    <div className="group-row">
+    <div className="group-row group-row-clickable" onClick={onOpen} role="button" tabIndex="0" onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}>
       <span className={`group-icon ${tone}`}>{initials}</span>
       <div>
         <b>{name}</b>
@@ -732,9 +774,27 @@ function Group({ initials, name, amount, note, tone, groupCode, onSimplify, onLe
         <small>{note}</small>
       </div>
       <div className="group-actions">
-        <button onClick={onSimplify}>Settle</button>
-        <button onClick={onLeave}>Leave</button>
+        <button onClick={(event) => { event.stopPropagation(); onSimplify(); }}>Settle</button>
+        <button onClick={(event) => { event.stopPropagation(); onLeave(); }}>Leave</button>
       </div>
+    </div>
+  );
+}
+
+function GroupDetails({ group, transactions, busy, onClose, onJoin }) {
+  return (
+    <div className="group-details-backdrop" onMouseDown={onClose}>
+      <section className="group-details" onMouseDown={(event) => event.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
+        <div className="group-details-header">
+          <div><p className="eyebrow">GROUP DETAILS</p><h2>{group.name}</h2><span>{group.members?.length || 0} members</span></div>
+          <div className="join-code-card"><small>JOINING CODE</small><strong>{group.groupCode || "Not assigned"}</strong><button onClick={onJoin}>Join another group</button></div>
+        </div>
+        <div className="group-details-grid">
+          <div><p className="eyebrow">MEMBERS</p><div className="member-list">{(group.members || []).map((member) => <div className="member-row" key={member._id}><span className="member-avatar">{(member.fullnamae || member.username).slice(0, 1).toUpperCase()}</span><div><b>{member.fullnamae || member.username}</b><small>@{member.username}</small></div></div>)}</div></div>
+          <div><p className="eyebrow">TRANSACTIONS</p>{busy ? <p className="empty-state">Loading transactions…</p> : transactions.length ? <div className="transaction-list">{transactions.map((transaction) => <div className="transaction-row" key={transaction._id}><div><b>{transaction.description}</b><small>{transaction.paidByName || transaction.paidByUsername || "Member"} paid · {new Date(transaction.createdAt).toLocaleDateString()}</small></div><strong>{transaction.currency} {transaction.totalAmount}</strong></div>)}</div> : <p className="empty-state">No transactions in this group yet.</p>}</div>
+        </div>
+      </section>
     </div>
   );
 }
