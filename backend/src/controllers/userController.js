@@ -35,7 +35,8 @@ export const register = async (req, res) => {
   if (existingUser) throw Object.assign(new Error('Username or email already exists'), { statusCode: 409 });
   const user = await User.create({ username, email, fullnamae, password, phone, coverimage });
   const tokens = tokenResponse(user);
-  await User.updateOne({ _id: user._id }, { refreshToken: tokens.refreshToken });
+  user.refreshToken = tokens.refreshToken;
+  await user.save({ validateBeforeSave: false });
   setAuthCookies(res, tokens);
   res.status(201).json({ data: { ...tokens, user: publicUser(user) } });
 };
