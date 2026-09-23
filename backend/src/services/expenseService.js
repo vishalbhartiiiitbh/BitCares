@@ -1,42 +1,12 @@
-import mongoose from 'mongoose';
 import { SplitStrategyFactory } from './splitStrategies.js';
-import Expense from '../models/Expense.js';
-import Balance from '../models/Balance.js';
-import Group from '../models/Group.js';
+import { query, withTransaction } from '../db/index.js';
 import { eventEmitter, EVENTS } from '../events/eventEmitter.js';
 
-const idString = (id) => id.toString();
+export const listExpenses = async (groupId) => {
+     const result = await query
+     (`SELECT e.id AS "_id",
+         e.group_id AS "groupId", 
+         e.description, 
+         e.total_amount::text AS "totalAmount", e.currency, e.type, e.split_strategy AS "splitStrategy", e.paid_by AS "paidBy", e.created_at AS "createdAt", u.username AS "paidByUsername", u.fullnamae AS "paidByName" FROM expenses e JOIN users u ON u.id = e.paid_by ${groupId ? 'WHERE e.group_id = $1' : ''} ORDER BY e.created_at DESC LIMIT 100`, groupId ? [groupId] : []); return result.rows; };
 
-export const addExpense = async ({ groupId = null, paidBy, totalAmount, splitStrategy, participants, values, description, currency = 'INR' }) => {
-  const session = await mongoose.startSession();
-  let createdExpense;
-  try {
-    await session.withTransaction(async () => {
-      if (groupId) {
-        const group = await Group.findById(groupId).session(session).select('members');
-        if (!group) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
-        const allowed = new Set(group.members.map(idString));
-        if (!allowed.has(idString(paidBy)) || participants.some((id) => !allowed.has(idString(id)))) throw Object.assign(new Error('All users must belong to the group'), { statusCode: 400 });
-      }
-      const splits = SplitStrategyFactory.get(splitStrategy).calculateSplits(totalAmount, participants, values);
-      createdExpense = await Expense.create([{ groupId, description, totalAmount, currency, type: 'EXPENSE', splitStrategy, paidBy, splits }], { session }).then(([expense]) => expense);
-
-      for (const split of splits) {
-        if (idString(split.userId) === idString(paidBy)) continue;
-        const paidByIsUser1 = idString(paidBy) < idString(split.userId);
-        const user1 = paidByIsUser1 ? paidBy : split.userId;
-        const user2 = paidByIsUser1 ? split.userId : paidBy;
-        const delta = paidByIsUser1 ? split.amountOwed : -split.amountOwed;
-        await Balance.findOneAndUpdate(
-          { groupId, user1, user2 },
-          { $inc: { netOwed: delta }, $set: { updatedAt: new Date() } },
-          { upsert: true, new: true, setDefaultsOnInsert: true, session }
-        );
-      }
-    });
-    eventEmitter.emit(EVENTS.EXPENSE_CREATED, createdExpense);
-    return createdExpense;
-  } finally {
-    await session.endSession();
-  }
-};
+export const addExpense = async ({ groupId = null, paidBy, totalAmount, splitStrategy, participants, values, description, currency = 'INR' }) => { const splits = SplitStrategyFactory.get(splitStrategy).calculateSplits(totalAmount, participants, values); const expense = await withTransaction(async (client) => { if (groupId) { const allowed = await client.query('SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2::uuid[])', [groupId, [paidBy, ...participants]]); if (allowed.rowCount !== new Set([paidBy, ...participants]).size) throw Object.assign(new Error('All users must belong to the group'), { statusCode: 400 }); } const created = await client.query('INSERT INTO expenses (group_id, description, total_amount, currency, split_strategy, paid_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", group_id AS "groupId", description, total_amount::text AS "totalAmount", currency, type, split_strategy AS "splitStrategy", paid_by AS "paidBy", created_at AS "createdAt"', [groupId, description, totalAmount, currency, splitStrategy, paidBy]); const row = created.rows[0]; for (const split of splits) { const amount = split.amountOwed.toString(); await client.query('INSERT INTO expense_splits (expense_id, user_id, amount_owed, split_value) VALUES ($1,$2,$3,$4)', [row._id, split.userId, amount, split.splitValue.toString()]); if (split.userId !== paidBy && groupId) { const [user1, user2] = [paidBy, split.userId].sort(); const delta = user1 === paidBy ? amount : `-${amount}`; await client.query('INSERT INTO balances (group_id,user1,user2,net_owed) VALUES ($1,$2,$3,$4) ON CONFLICT (group_id,user1,user2) DO UPDATE SET net_owed = balances.net_owed + EXCLUDED.net_owed, updated_at = NOW()', [groupId, user1, user2, delta]); } } return row; }); eventEmitter.emit(EVENTS.EXPENSE_CREATED, expense); return expense; };

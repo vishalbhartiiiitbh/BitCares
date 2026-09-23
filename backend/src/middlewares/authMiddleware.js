@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { User } from '../models/User.js';
+import { query } from '../db/index.js';
 
 const getAccessToken = (req) => {
   const authorization = req.headers.authorization;
@@ -12,7 +12,8 @@ export const requireAuth = async (req, _res, next) => {
     const token = getAccessToken(req);
     if (!token) return next(Object.assign(new Error('Access token is required'), { statusCode: 401 }));
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-    const user = await User.findById(decoded._id).select('-password -refreshToken');
+    const { rows } = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, created_at AS "createdAt" FROM users WHERE id = $1', [decoded._id]);
+    const user = rows[0];
     if (!user) return next(Object.assign(new Error('User not found'), { statusCode: 401 }));
     req.user = user;
     next();

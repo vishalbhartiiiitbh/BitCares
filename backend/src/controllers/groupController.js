@@ -1,8 +1,24 @@
-import { leaveGroup } from '../services/groupService.js';
+import { createGroup, joinGroupByCode, leaveGroup, listGroupsForUser } from '../services/groupService.js';
 import { simplifyDebts } from '../services/debtSimplifier.js';
 
+export const list = async (req, res) => {
+  res.json({ data: await listGroupsForUser(req.user._id) });
+};
+
+export const create = async (req, res) => {
+  const { name, memberIds } = req.body;
+  if (!name) throw Object.assign(new Error('Group name is required'), { statusCode: 400 });
+  res.status(201).json({ data: await createGroup({ name, createdBy: req.user._id, memberIds }) });
+};
+
+export const join = async (req, res) => {
+  const { groupCode } = req.body;
+  if (!groupCode) throw Object.assign(new Error('Group code is required'), { statusCode: 400 });
+  res.json({ data: await joinGroupByCode({ groupCode, userId: req.user._id }) });
+};
+
 export const leave = async (req, res) => {
-  const group = await leaveGroup(req.params.groupId, req.body.userId);
+  const group = await leaveGroup(req.params.groupId, req.user._id);
   res.json({ data: group });
 };
 

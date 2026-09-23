@@ -10,6 +10,7 @@ connectDB()
       console.log(`SplitCare API listening on port ${port}`);
     });
   })
-  .catch(() => {
+  .catch((error) => {
+    console.error('Backend startup failed:', error.message);
     process.exit(1);
   });
