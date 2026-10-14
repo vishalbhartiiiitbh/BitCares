@@ -78,7 +78,10 @@ The connected dashboard uses these authenticated endpoints:
 - `GET /api/users/me`
 - `GET /api/groups`
 - `POST /api/groups`
+- `POST /api/groups` can include `memberIds` (friend user IDs) and/or `memberIdentifiers` (usernames or registered email addresses); the creator is added automatically.
 - `POST /api/groups/join` with `{ "groupCode": "A1B2C3D4" }`
+- `GET /api/groups/:groupId/balances`
+- `PATCH /api/groups/:groupId` (group creator only; accepts `{ "name": "New name" }`)
 - `GET /api/expenses`
 - `POST /api/expenses`
 - `POST /api/groups/:groupId/leave`
