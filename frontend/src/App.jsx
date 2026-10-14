@@ -243,9 +243,18 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [friends, setFriends] = useState([]);
+  const [friendRequests, setFriendRequests] = useState([]);
+  const [friendSort, setFriendSort] = useState('alphabetical');
+  const [friendIdentifierType, setFriendIdentifierType] = useState('email');
+  const [friendIdentifier, setFriendIdentifier] = useState('');
+  const [friendBusy, setFriendBusy] = useState(false);
+  const [friendError, setFriendError] = useState('');
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupTransactions, setGroupTransactions] = useState([]);
   const [groupDetailsBusy, setGroupDetailsBusy] = useState(false);
@@ -308,6 +317,77 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       })
       .catch((error) => setFormMessage(error.message));
   }, [accessToken]);
+
+  const refreshFriendData = async () => {
+    const [friendData, requestData] = await Promise.all([
+      apiRequest('/friends', { headers: authHeaders }),
+      apiRequest('/friends/requests', { headers: authHeaders }),
+    ]);
+    setFriends(friendData);
+    setFriendRequests(requestData);
+  };
+
+  useEffect(() => {
+    let active = true;
+    const loadFriends = () => Promise.all([
+      apiRequest('/friends', { headers: authHeaders }),
+      apiRequest('/friends/requests', { headers: authHeaders }),
+    ])
+      .then(([friendData, requestData]) => {
+        if (!active) return;
+        setFriends(friendData);
+        setFriendRequests(requestData);
+      })
+      .catch((error) => {
+        if (active) setFormMessage(error.message);
+      });
+
+    void loadFriends();
+    const interval = window.setInterval(() => void loadFriends(), 20000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [accessToken]);
+
+  const sendFriendRequest = async (event) => {
+    event.preventDefault();
+    setFriendBusy(true);
+    setFriendError('');
+    try {
+      await apiRequest('/friends/requests', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          [friendIdentifierType === 'email' ? 'email' : 'userId']: friendIdentifier.trim(),
+        }),
+      });
+      setFriendIdentifier('');
+      setShowAddFriend(false);
+      setFormMessage('Friend request sent.');
+    } catch (error) {
+      setFriendError(error.message);
+    } finally {
+      setFriendBusy(false);
+    }
+  };
+
+  const respondToFriendRequest = async (requestId, action) => {
+    setFriendBusy(true);
+    setFriendError('');
+    try {
+      await apiRequest(`/friends/requests/${requestId}/respond`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ action }),
+      });
+      await refreshFriendData();
+    } catch (error) {
+      setFriendError(error.message);
+    } finally {
+      setFriendBusy(false);
+    }
+  };
 
   const createGroup = async (event) => {
     event.preventDefault();
@@ -479,13 +559,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setProfileBusy(false);
     }
   };
-  const friends = [
-    ...new Map(
-      groups
-        .flatMap((group) => group.members || [])
-        .map((member) => [member._id, member]),
-    ).values(),
-  ];
+  const sortedFriends = [...friends].sort((first, second) => friendSort === 'alphabetical'
+    ? (first.fullnamae || first.username).localeCompare(second.fullnamae || second.username, undefined, { sensitivity: 'base' })
+    : new Date(second.addedAt) - new Date(first.addedAt));
+  const pendingFriendRequests = friendRequests.filter((request) => request.status === 'pending');
 
   return (
     <main className="dashboard-page">
@@ -495,6 +572,42 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           <span className="active">Overview</span>
           <span>Groups</span>
           <span>Activity</span>
+        </div>
+        <div className="notification-control">
+          <button
+            className="notification-trigger"
+            type="button"
+            aria-label={`Notifications, ${pendingFriendRequests.length} pending friend requests`}
+            aria-expanded={showNotifications}
+            onClick={() => setShowNotifications((shown) => !shown)}
+          >
+            <span aria-hidden="true">♧</span>
+            {pendingFriendRequests.length > 0 && <span className="notification-count">{pendingFriendRequests.length}</span>}
+          </button>
+          {showNotifications && (
+            <div className="notification-panel">
+              <div className="notification-panel-heading">
+                <strong>Notifications</strong>
+                <button type="button" onClick={() => setShowNotifications(false)} aria-label="Close notifications">×</button>
+              </div>
+              {friendRequests.length ? friendRequests.map((request) => (
+                <div className="notification-item" key={request._id}>
+                  <div className="notification-copy">
+                    <strong>{request.senderName || request.senderUsername}</strong>
+                    <span>{request.status === 'pending' ? 'sent you a friend request' : `Friend request ${request.status}`}</span>
+                    <small>{new Date(request.createdAt).toLocaleDateString()}</small>
+                  </div>
+                  {request.status === 'pending' && (
+                    <div className="notification-actions">
+                      <button type="button" disabled={friendBusy} onClick={() => respondToFriendRequest(request._id, 'accept')}>Accept</button>
+                      <button type="button" disabled={friendBusy} onClick={() => respondToFriendRequest(request._id, 'decline')}>Decline</button>
+                    </div>
+                  )}
+                </div>
+              )) : <p className="notification-empty">No notifications yet.</p>}
+              {friendError && <p className="error-message notification-error">{friendError}</p>}
+            </div>
+          )}
         </div>
         <div className="profile-control">
           <button
@@ -575,22 +688,28 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           <div className="side-section">
             <div className="side-heading">
               <span>FRIENDS</span>
-              <button>+ add</button>
+              <button type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>+ add</button>
             </div>
-            {friends.slice(0, 5).map((member) => (
-              <span className="side-friend" key={member._id}>
-                ♟ {member.fullnamae || member.username}
+            <label className="friend-sort-control">
+              <span>Sort friends</span>
+              <select value={friendSort} onChange={(event) => setFriendSort(event.target.value)}>
+                <option value="alphabetical">Alphabetical</option>
+                <option value="recent">Recently added</option>
+              </select>
+            </label>
+            {sortedFriends.map((friend) => (
+              <span className="side-friend" key={friend._id}>
+                {friend.coverimage
+                  ? <img src={friend.coverimage} alt="" />
+                  : <span className="side-friend-avatar">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
+                {friend.fullnamae || friend.username}
               </span>
             ))}
             {!friends.length && (
               <p className="side-empty">Your friends appear here</p>
             )}
           </div>
-          <div className="invite-card">
-            <strong>Invite friends</strong>
-            <input placeholder="Enter an email address" />
-            <button>Send invite</button>
-          </div>
+          <button className="friend-add-card" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>Add friend by email or user ID</button>
         </aside>
         <section className="dashboard-content">
           <div className="welcome-row">
@@ -636,9 +755,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               note="shared spaces"
             />
             <Stat
-              label="MEMBERS"
+              label="FRIENDS"
               value={friends.length.toString().padStart(2, "0")}
-              note="across your groups"
+              note="accepted connections"
             />
           </div>
           <div className="balance-strip">
@@ -754,6 +873,32 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   <input name="groupCode" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="A1B2C3D4" maxLength="8" autoCapitalize="characters" required />
                 </label>
                 <button className="submit-button">Join group</button>
+              </form>
+            </Modal>
+          )}
+          {showAddFriend && (
+            <Modal title="Add a friend" onClose={() => setShowAddFriend(false)}>
+              <p className="modal-help">Send a request using their SplitCare user ID or account email. They will appear in your friends list after accepting.</p>
+              <form onSubmit={sendFriendRequest}>
+                <label>
+                  Find by
+                  <select value={friendIdentifierType} onChange={(event) => setFriendIdentifierType(event.target.value)}>
+                    <option value="email">Email address</option>
+                    <option value="userId">User ID</option>
+                  </select>
+                </label>
+                <label>
+                  {friendIdentifierType === 'email' ? 'Email address' : 'User ID'}
+                  <input
+                    type={friendIdentifierType === 'email' ? 'email' : 'text'}
+                    value={friendIdentifier}
+                    onChange={(event) => setFriendIdentifier(event.target.value)}
+                    placeholder={friendIdentifierType === 'email' ? 'friend@example.com' : 'Paste their user ID'}
+                    required
+                  />
+                </label>
+                {friendError && <p className="error-message">{friendError}</p>}
+                <button className="submit-button" disabled={friendBusy}>{friendBusy ? 'Sending…' : 'Send friend request'}</button>
               </form>
             </Modal>
           )}
