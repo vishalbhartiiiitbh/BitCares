@@ -22,7 +22,16 @@ export const withTransaction = async (callback) => {
 const connectDB = async () => {
     await query(`
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
-    CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), username VARCHAR(40) NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE, fullnamae VARCHAR(120) NOT NULL, phone TEXT, coverimage TEXT, password TEXT NOT NULL, refresh_token TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), 
+    username VARCHAR(40) NOT NULL UNIQUE, 
+    email TEXT NOT NULL UNIQUE, 
+    fullnamae VARCHAR(120) NOT NULL, 
+    phone TEXT, coverimage TEXT, 
+    password TEXT NOT NULL, 
+    refresh_token TEXT, 
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS friendships (user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, user_high UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (user_low, user_high), CHECK (user_low < user_high));
     CREATE TABLE IF NOT EXISTS friend_requests (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, status VARCHAR(12) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined')), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CHECK (sender_id <> receiver_id));
     CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_one_pending_per_pair ON friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id)) WHERE status = 'pending';
