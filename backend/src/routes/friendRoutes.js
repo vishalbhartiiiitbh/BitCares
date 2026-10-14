@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   listFriendRequests,
   listFriends,
+  removeFriend,
   respondToFriendRequest,
   sendFriendRequest,
 } from '../controllers/friendController.js';
@@ -15,5 +16,6 @@ router.get('/', asyncHandler(listFriends));
 router.get('/requests', asyncHandler(listFriendRequests));
 router.post('/requests', asyncHandler(sendFriendRequest));
 router.post('/requests/:requestId/respond', asyncHandler(respondToFriendRequest));
+router.delete('/:friendId', asyncHandler(removeFriend));
 
 export default router;

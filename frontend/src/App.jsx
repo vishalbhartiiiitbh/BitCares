@@ -246,7 +246,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
-  const [friendIdentifierType, setFriendIdentifierType] = useState('email');
+  const [friendIdentifierType, setFriendIdentifierType] = useState('username');
   const [friendIdentifier, setFriendIdentifier] = useState('');
   const [friendBusy, setFriendBusy] = useState(false);
   const [friendError, setFriendError] = useState('');
@@ -255,6 +255,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [friendToRemove, setFriendToRemove] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupTransactions, setGroupTransactions] = useState([]);
   const [groupDetailsBusy, setGroupDetailsBusy] = useState(false);
@@ -359,7 +360,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({
-          [friendIdentifierType === 'email' ? 'email' : 'userId']: friendIdentifier.trim(),
+          [friendIdentifierType]: friendIdentifier.trim(),
         }),
       });
       setFriendIdentifier('');
@@ -382,6 +383,25 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
         body: JSON.stringify({ action }),
       });
       await refreshFriendData();
+    } catch (error) {
+      setFriendError(error.message);
+    } finally {
+      setFriendBusy(false);
+    }
+  };
+
+  const removeFriend = async () => {
+    if (!friendToRemove) return;
+    setFriendBusy(true);
+    setFriendError('');
+    try {
+      const result = await apiRequest(`/friends/${friendToRemove._id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      await refreshFriendData();
+      setFriendToRemove(null);
+      setFormMessage(result.message);
     } catch (error) {
       setFriendError(error.message);
     } finally {
@@ -698,18 +718,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               </select>
             </label>
             {sortedFriends.map((friend) => (
-              <span className="side-friend" key={friend._id}>
+              <div className="side-friend" key={friend._id}>
                 {friend.coverimage
                   ? <img src={friend.coverimage} alt="" />
                   : <span className="side-friend-avatar">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
-                {friend.fullnamae || friend.username}
-              </span>
+                <span className="side-friend-name">{friend.fullnamae || friend.username}</span>
+                <button
+                  className="remove-friend-button"
+                  type="button"
+                  aria-label={`Remove ${friend.fullnamae || friend.username} as a friend`}
+                  title="Remove friend"
+                  onClick={() => { setFriendError(''); setFriendToRemove(friend); }}
+                >
+                  ×
+                </button>
+              </div>
             ))}
             {!friends.length && (
               <p className="side-empty">Your friends appear here</p>
             )}
           </div>
-          <button className="friend-add-card" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>Add friend by email or user ID</button>
+          <button className="friend-add-card" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>Add friend by username or email</button>
         </aside>
         <section className="dashboard-content">
           <div className="welcome-row">
@@ -878,28 +907,50 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           )}
           {showAddFriend && (
             <Modal title="Add a friend" onClose={() => setShowAddFriend(false)}>
-              <p className="modal-help">Send a request using their SplitCare user ID or account email. They will appear in your friends list after accepting.</p>
+              <p className="modal-help">Send a request using their username or the email address they registered with on SplitCare. They will appear in your friends list after accepting.</p>
               <form onSubmit={sendFriendRequest}>
                 <label>
                   Find by
                   <select value={friendIdentifierType} onChange={(event) => setFriendIdentifierType(event.target.value)}>
+                    <option value="username">Username</option>
                     <option value="email">Email address</option>
-                    <option value="userId">User ID</option>
                   </select>
                 </label>
                 <label>
-                  {friendIdentifierType === 'email' ? 'Email address' : 'User ID'}
+                  {friendIdentifierType === 'email' ? 'Email address' : 'Username'}
                   <input
                     type={friendIdentifierType === 'email' ? 'email' : 'text'}
                     value={friendIdentifier}
                     onChange={(event) => setFriendIdentifier(event.target.value)}
-                    placeholder={friendIdentifierType === 'email' ? 'friend@example.com' : 'Paste their user ID'}
+                    placeholder={friendIdentifierType === 'email' ? 'Friend’s registered email' : '@username'}
                     required
                   />
                 </label>
                 {friendError && <p className="error-message">{friendError}</p>}
                 <button className="submit-button" disabled={friendBusy}>{friendBusy ? 'Sending…' : 'Send friend request'}</button>
               </form>
+            </Modal>
+          )}
+          {friendToRemove && (
+            <Modal title="Remove friend?" onClose={() => {
+              if (!friendBusy) {
+                setFriendError('');
+                setFriendToRemove(null);
+              }
+            }}>
+              <p className="modal-help">
+                Remove <strong>{friendToRemove.fullnamae || friendToRemove.username}</strong> from your friends? You will both be removed from each other’s friend lists. You can send a new friend request later.
+              </p>
+              {friendError && <p className="error-message">{friendError}</p>}
+              <div className="remove-friend-actions">
+                <button type="button" className="cancel-friend-removal" disabled={friendBusy} onClick={() => {
+                  setFriendError('');
+                  setFriendToRemove(null);
+                }}>Keep friend</button>
+                <button type="button" className="confirm-friend-removal" disabled={friendBusy} onClick={removeFriend}>
+                  {friendBusy ? 'Removing…' : 'Remove friend'}
+                </button>
+              </div>
             </Modal>
           )}
           {showExpenseForm && (

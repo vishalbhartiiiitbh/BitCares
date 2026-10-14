@@ -1132,7 +1132,36 @@ input::placeholder {
 }
 
 .side-friend {
+    min-width: 0;
     color: #8c938d;
+}
+
+.side-friend-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.remove-friend-button {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #9aa098;
+    font-size: 17px;
+    opacity: 0;
+}
+
+.side-friend:hover .remove-friend-button,
+.remove-friend-button:focus-visible {
+    background: #f7e5df;
+    color: #b44d3d;
+    opacity: 1;
 }
 
 .side-friend img,
@@ -1316,6 +1345,35 @@ input::placeholder {
 
 .notification-error {
     padding: 0 15px 12px;
+}
+
+.remove-friend-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 9px;
+    margin-top: 18px;
+}
+
+.remove-friend-actions button {
+    padding: 10px 13px;
+    border: 0;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.cancel-friend-removal {
+    background: #e5e2d8;
+    color: #4b554c;
+}
+
+.confirm-friend-removal {
+    background: #b44d3d;
+    color: #fff;
+}
+
+.remove-friend-actions button:disabled {
+    cursor: wait;
+    opacity: .6;
 }
 
 .side-empty {
