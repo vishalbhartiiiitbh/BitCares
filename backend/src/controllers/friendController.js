@@ -25,9 +25,7 @@ export const listFriendRequests = async (req, res) => {
      LIMIT 100`,
     [req.user._id],
   );
-  res.json({ data: result.rows 
-    
-  });
+  res.json({ data: result.rows   });
 };
 
 export const sendFriendRequest = async (req, res) => {
