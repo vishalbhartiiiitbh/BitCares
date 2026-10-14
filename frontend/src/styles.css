@@ -919,6 +919,20 @@ input::placeholder {
     color: rgba(247, 255, 249, .78);
 }
 
+.dashboard-nav .nav-links button {
+    padding: 6px 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-transform: inherit;
+}
+
+.dashboard-nav .nav-links button.active,
+.dashboard-nav .nav-links button:hover {
+    color: #fff;
+}
+
 .profile-trigger {
     display: flex;
     align-items: center;
@@ -1056,6 +1070,333 @@ input::placeholder {
     min-height: calc(100vh - 64px);
     margin: 0 auto;
     background: #fff;
+}
+
+.friend-management-shell {
+    display: block;
+    width: min(1120px, 92%);
+    background: transparent;
+}
+
+.friend-management-shell .dashboard-sidebar,
+.friend-management-shell .dashboard-right-rail {
+    display: none;
+}
+
+.friend-management-content {
+    padding: 42px 0 70px;
+}
+
+.friend-management-page {
+    color: #19231d;
+}
+
+.friend-management-heading,
+.friend-requests-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.friend-management-heading {
+    padding-bottom: 24px;
+    border-bottom: 1px solid #dedbd0;
+}
+
+.friend-management-heading h1 {
+    margin: 7px 0;
+    font-size: clamp(30px, 4vw, 42px);
+    letter-spacing: -.07em;
+}
+
+.friend-management-heading p:not(.eyebrow) {
+    margin: 0;
+    color: #7c857b;
+    font-size: 13px;
+}
+
+.friend-management-heading .primary-action {
+    white-space: nowrap;
+}
+
+.friend-page-message {
+    margin: 14px 0 0;
+    color: #52623e;
+    font-size: 12px;
+}
+
+.friend-management-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 0;
+    color: #7c857b;
+    font-size: 12px;
+}
+
+.friend-management-toolbar .friend-sort-control {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0;
+    color: #687269;
+    font-size: 11px;
+}
+
+.friend-management-toolbar .friend-sort-control select {
+    width: auto;
+    min-width: 150px;
+    padding: 8px 10px;
+}
+
+.friend-profile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 14px;
+}
+
+.friend-profile-card {
+    display: grid;
+    gap: 18px;
+    padding: 20px;
+    border: 1px solid #e2dfd5;
+    background: #fff;
+}
+
+.friend-profile-main {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    min-width: 0;
+}
+
+.friend-profile-photo {
+    display: grid;
+    width: 58px;
+    height: 58px;
+    flex: 0 0 58px;
+    place-items: center;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.friend-profile-photo-fallback {
+    background: #d8ee4c;
+    color: #19231d;
+    font-size: 21px;
+    font-weight: 800;
+}
+
+.friend-profile-identity {
+    min-width: 0;
+}
+
+.friend-profile-identity h2 {
+    overflow: hidden;
+    margin: 0 0 5px;
+    font-size: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.friend-profile-identity span {
+    color: #879087;
+    font-size: 11px;
+}
+
+.friend-profile-details {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding-top: 13px;
+    border-top: 1px solid #eeeae1;
+}
+
+.friend-profile-details span {
+    color: #92998f;
+    font-size: 10px;
+}
+
+.friend-profile-details strong {
+    overflow-wrap: anywhere;
+    margin-bottom: 7px;
+    color: #4a554b;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.friend-profile-remove {
+    width: fit-content;
+    padding: 7px 10px;
+    border: 1px solid #ead7d1;
+    background: transparent;
+    color: #a64a3b;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.friend-profile-remove:hover {
+    background: #fbf1ee;
+}
+
+.friends-empty-state {
+    display: grid;
+    justify-items: center;
+    gap: 8px;
+    padding: 50px 20px;
+    border: 1px dashed #d8d5ca;
+    text-align: center;
+}
+
+.friends-empty-state > span {
+    color: #53ae98;
+    font-size: 31px;
+}
+
+.friends-empty-state h2 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.friends-empty-state p {
+    max-width: 390px;
+    margin: 0 0 10px;
+    color: #7c857b;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.friend-requests-section {
+    margin-top: 42px;
+}
+
+.friend-requests-heading {
+    padding-bottom: 13px;
+    border-bottom: 1px solid #dedbd0;
+}
+
+.friend-requests-heading .eyebrow {
+    margin-bottom: 5px;
+}
+
+.friend-requests-heading h2 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: -.04em;
+}
+
+.friend-requests-heading > span {
+    color: #7c857b;
+    font-size: 11px;
+}
+
+.friend-request-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 12px 2px;
+    border-bottom: 1px solid #e9e6de;
+}
+
+.friend-request-row > img,
+.friend-request-avatar {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    place-items: center;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.friend-request-avatar {
+    background: #d8ee4c;
+    color: #19231d;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.friend-request-row > div:nth-child(2) {
+    display: grid;
+    flex: 1;
+    gap: 4px;
+    min-width: 0;
+}
+
+.friend-request-row > div:nth-child(2) strong {
+    font-size: 12px;
+}
+
+.friend-request-row > div:nth-child(2) span {
+    color: #879087;
+    font-size: 10px;
+}
+
+.friend-request-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.friend-request-actions button {
+    padding: 7px 9px;
+    border: 0;
+    background: #5cc7ad;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.friend-request-actions button + button {
+    background: #e5e2d8;
+    color: #687269;
+}
+
+.friend-request-status {
+    color: #7c857b;
+    font-size: 10px;
+    text-transform: capitalize;
+}
+
+.friends-request-empty {
+    color: #879087;
+    font-size: 12px;
+}
+
+@media (max-width: 800px) {
+    .dashboard-nav .nav-links {
+        display: flex;
+        gap: 16px;
+        margin-left: auto;
+        margin-right: 12px;
+        font-size: 10px;
+    }
+
+    .friend-management-content {
+        padding: 28px 0 50px;
+    }
+}
+
+@media (max-width: 520px) {
+    .friend-management-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .friend-management-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .friend-request-row {
+        flex-wrap: wrap;
+    }
+
+    .friend-request-actions {
+        width: 100%;
+        padding-left: 47px;
+    }
 }
 
 .dashboard-sidebar {
