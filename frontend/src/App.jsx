@@ -20,6 +20,73 @@ async function apiRequest(path, options = {}) {
   return payload.data;
 }
 
+function calculateItemizedShares(items, participants) {
+  const totals = new Map(participants.map((id) => [id, 0]));
+  items.forEach((item) => {
+    const assigned = item.participantIds.filter((id) => totals.has(id));
+    if (!assigned.length) return;
+    const cents = Math.round((Number(item.amount) || 0) * 100);
+    const share = Math.floor(cents / assigned.length);
+    let remainder = cents - share * assigned.length;
+    assigned.forEach((id) => {
+      totals.set(id, totals.get(id) + share + (remainder > 0 ? 1 : 0));
+      if (remainder > 0) remainder -= 1;
+    });
+  });
+  return participants.map((id) => (totals.get(id) / 100).toFixed(2));
+}
+
+function getDefaultSplitValues(strategy, participants, totalAmount) {
+  const defaults = {};
+  if (strategy === 'EQUAL' || strategy === 'ITEMIZED') return defaults;
+  if (strategy === 'PERCENTAGE') {
+    const cents = 10000;
+    const share = Math.floor(cents / participants.length);
+    let remainder = cents - share * participants.length;
+    participants.forEach((id) => {
+      defaults[id] = ((share + (remainder > 0 ? 1 : 0)) / 100).toFixed(2);
+      if (remainder > 0) remainder -= 1;
+    });
+    return defaults;
+  }
+  if (strategy === 'SHARES') {
+    participants.forEach((id) => { defaults[id] = '1'; });
+    return defaults;
+  }
+  if (strategy === 'ADJUSTMENT') {
+    participants.forEach((id) => { defaults[id] = '0'; });
+    return defaults;
+  }
+  const totalCents = Math.round((Number(totalAmount) || 0) * 100);
+  const share = Math.floor(totalCents / participants.length);
+  let remainder = totalCents - share * participants.length;
+  participants.forEach((id) => {
+    defaults[id] = ((share + (remainder > 0 ? 1 : 0)) / 100).toFixed(2);
+    if (remainder > 0) remainder -= 1;
+  });
+  return defaults;
+}
+
+const expenseSplitModes = [
+  { id: 'EQUAL', label: 'Split equally' },
+  { id: 'EXACT', label: 'Split by exact amounts' },
+  { id: 'PERCENTAGE', label: 'Split by percentages' },
+  { id: 'SHARES', label: 'Split by shares' },
+  { id: 'ADJUSTMENT', label: 'Split by adjustment' },
+  { id: 'REIMBURSEMENT', label: 'Split by reimbursement' },
+  { id: 'ITEMIZED', label: 'Itemized expenses' },
+];
+
+const expenseCategories = [
+  { name: 'Entertainment', icon: '🎮', subcategories: ['Games', 'Music', 'Movies', 'Sports', 'Events'] },
+  { name: 'Food and drink', icon: '🍽️', subcategories: ['Dining out', 'Groceries', 'Drinks', 'Coffee', 'Takeaway'] },
+  { name: 'Home', icon: '🏠', subcategories: ['Furniture', 'Household supplies', 'Rent', 'Repairs', 'Pets'] },
+  { name: 'Life', icon: '🎁', subcategories: ['Gifts', 'Health', 'Education', 'Clothing', 'Personal'] },
+  { name: 'Transportation', icon: '🚗', subcategories: ['Fuel', 'Public transit', 'Taxi', 'Parking', 'Flights'] },
+  { name: 'Uncategorized', icon: '🧾', subcategories: [] },
+  { name: 'Utilities', icon: '💡', subcategories: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'] },
+];
+
 function App() {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState(emptyForm);
@@ -259,8 +326,41 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [friendToRemove, setFriendToRemove] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupTransactions, setGroupTransactions] = useState([]);
+  const [groupBalances, setGroupBalances] = useState([]);
+  const [groupSettlements, setGroupSettlements] = useState([]);
+  const [groupDetailsError, setGroupDetailsError] = useState('');
+  const [groupSettlementError, setGroupSettlementError] = useState('');
   const [groupDetailsBusy, setGroupDetailsBusy] = useState(false);
+  const [groupBalancesBusy, setGroupBalancesBusy] = useState(false);
+  const [settlementsBusy, setSettlementsBusy] = useState(false);
+  const [groupSettingsBusy, setGroupSettingsBusy] = useState(false);
+  const [groupSettingsError, setGroupSettingsError] = useState('');
+  const [addMemberIdentifier, setAddMemberIdentifier] = useState('');
+  const [addMemberError, setAddMemberError] = useState('');
+  const [addMemberBusy, setAddMemberBusy] = useState(false);
+  const [showExpenseCategories, setShowExpenseCategories] = useState(false);
+  const [expenseDraft, setExpenseDraft] = useState({
+    description: '',
+    totalAmount: '',
+    currency: 'INR',
+    category: 'Uncategorized',
+    subcategory: '',
+    groupId: '',
+    paidBy: user._id,
+    participantIds: [user._id],
+    strategy: 'EQUAL',
+    splitValues: {},
+    items: [],
+    note: '',
+    paymentProof: null,
+  });
+  const [expenseError, setExpenseError] = useState('');
+  const [expenseBusy, setExpenseBusy] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [groupMemberIds, setGroupMemberIds] = useState([]);
+  const [groupMemberIdentifier, setGroupMemberIdentifier] = useState('');
+  const [groupError, setGroupError] = useState('');
+  const [groupBusy, setGroupBusy] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -410,25 +510,44 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     }
   };
 
+  const closeGroupForm = () => {
+    setShowGroupForm(false);
+    setGroupName('');
+    setGroupMemberIds([]);
+    setGroupMemberIdentifier('');
+    setGroupError('');
+  };
+
   const createGroup = async (event) => {
     event.preventDefault();
     const name = groupName.trim();
     if (!name) {
-      setFormMessage('Group name is required');
+      setGroupError('Group name is required');
       return;
     }
+    setGroupBusy(true);
+    setGroupError('');
     try {
       const group = await apiRequest("/groups", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({
+          name,
+          memberIds: groupMemberIds,
+          memberIdentifiers: groupMemberIdentifier.trim() ? [groupMemberIdentifier.trim()] : [],
+        }),
       });
       setGroups((current) => [group, ...current]);
       setShowGroupForm(false);
       setGroupName('');
+      setGroupMemberIds([]);
+      setGroupMemberIdentifier('');
+      setGroupError('');
       setFormMessage(`Group created. Share code: ${group.groupCode}`);
     } catch (error) {
-      setFormMessage(error.message);
+      setGroupError(error.message);
+    } finally {
+      setGroupBusy(false);
     }
   };
 
@@ -459,28 +578,121 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
 
   const addExpense = async (event) => {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    const group = groups.find((item) => item._id === values.groupId);
+    const group = groups.find((item) => item._id === expenseDraft.groupId);
+    const participants = expenseDraft.participantIds;
+    if (!participants.length) {
+      setExpenseError('Select at least one person to split this expense with.');
+      return;
+    }
+    if (expenseDraft.strategy === 'ITEMIZED' && expenseDraft.items.some((item) =>
+      !item.description.trim() || !(Number(item.amount) > 0) || !item.participantIds.some((id) => participants.includes(id)))) {
+      setExpenseError('Each item needs a description, a positive amount, and at least one selected person.');
+      return;
+    }
+    const splitValues = expenseDraft.strategy === 'ITEMIZED'
+      ? calculateItemizedShares(expenseDraft.items, participants)
+      : participants.map((id) => {
+        if (expenseDraft.strategy === 'EQUAL') return null;
+        return expenseDraft.splitValues[id] ?? getDefaultSplitValues(expenseDraft.strategy, participants, expenseDraft.totalAmount)[id];
+      });
+    const amount = expenseDraft.strategy === 'ITEMIZED'
+      ? (expenseDraft.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)).toFixed(2)
+      : expenseDraft.totalAmount;
+    if (['EXACT', 'REIMBURSEMENT'].includes(expenseDraft.strategy)
+      && Math.abs(splitValues.reduce((sum, value) => sum + Number(value), 0) - Number(amount)) > 0.001) {
+      setExpenseError('The split amounts must add up to the expense total.');
+      return;
+    }
+    if (expenseDraft.strategy === 'PERCENTAGE'
+      && Math.abs(splitValues.reduce((sum, value) => sum + Number(value), 0) - 100) > 0.001) {
+      setExpenseError('The percentages must add up to 100%.');
+      return;
+    }
+    if (expenseDraft.strategy === 'ADJUSTMENT'
+      && Math.abs(splitValues.reduce((sum, value) => sum + Number(value), 0)) > 0.001) {
+      setExpenseError('Adjustments must balance to zero.');
+      return;
+    }
+    if (expenseDraft.strategy === 'SHARES' && splitValues.some((value) => !(Number(value) > 0))) {
+      setExpenseError('Each person must have at least one share.');
+      return;
+    }
+    const body = new FormData();
+    body.set('groupId', expenseDraft.groupId);
+    body.set('paidBy', expenseDraft.paidBy);
+    body.set('totalAmount', amount);
+    body.set('description', expenseDraft.description);
+    body.set('currency', expenseDraft.currency);
+    body.set('category', expenseDraft.category);
+    body.set('subcategory', expenseDraft.subcategory);
+    body.set('splitStrategy', expenseDraft.strategy);
+    body.set('type', expenseDraft.strategy === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'EXPENSE');
+    body.set('participants', JSON.stringify(participants));
+    if (expenseDraft.strategy !== 'EQUAL') body.set('values', JSON.stringify(splitValues));
+    if (expenseDraft.strategy === 'ITEMIZED') {
+      body.set('items', JSON.stringify(expenseDraft.items.map(({ description, amount: itemAmount, participantIds }) => ({
+        description,
+        amount: itemAmount,
+        participantIds: participantIds.filter((id) => participants.includes(id)),
+      }))));
+    }
+    if (expenseDraft.note.trim()) body.set('note', expenseDraft.note.trim());
+    if (expenseDraft.paymentProof) body.set('paymentProof', expenseDraft.paymentProof);
+    setExpenseBusy(true);
+    setExpenseError('');
     try {
-      const expense = await apiRequest("/expenses", {
+      const expense = await apiRequest('/expenses', {
         method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({
-          groupId: values.groupId,
-          paidBy: user._id,
-          totalAmount: values.totalAmount,
-          description: values.description,
-          splitStrategy: "EQUAL",
-          participants: group?.members?.map((member) => member._id) || [
-            user._id,
-          ],
-        }),
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body,
       });
       setExpenses((current) => [expense, ...current]);
       setShowExpenseForm(false);
+      if (selectedGroup?._id === expenseDraft.groupId) {
+        await openGroupDetails({ ...selectedGroup, ...group });
+      }
     } catch (error) {
-      setFormMessage(error.message);
+      setExpenseError(error.message);
+    } finally {
+      setExpenseBusy(false);
     }
+  };
+
+  const openExpenseForm = (groupId = '') => {
+    const group = groups.find((item) => item._id === groupId);
+    const participantIds = group?.members?.map((member) => member._id) || [user._id];
+    setExpenseDraft({
+      description: '',
+      totalAmount: '',
+      currency: 'INR',
+      category: 'Uncategorized',
+      subcategory: '',
+      groupId,
+      paidBy: user._id,
+      participantIds,
+      strategy: 'EQUAL',
+      splitValues: {},
+      items: [],
+      note: '',
+      paymentProof: null,
+    });
+    setExpenseError('');
+    setShowExpenseCategories(false);
+    setShowExpenseForm(true);
+  };
+
+  const updateExpenseDraft = (key, value) => setExpenseDraft((current) => ({ ...current, [key]: value }));
+  const changeExpenseGroup = (groupId) => {
+    const group = groups.find((item) => item._id === groupId);
+    const participantIds = group?.members?.map((member) => member._id) || [user._id];
+    setExpenseDraft((current) => ({
+      ...current,
+      groupId,
+      paidBy: participantIds.includes(current.paidBy) ? current.paidBy : user._id,
+      participantIds,
+      splitValues: {},
+      items: current.items.map((item) => ({ ...item, participantIds: item.participantIds.filter((id) => participantIds.includes(id)) })),
+    }));
   };
 
   const simplifyGroup = async (groupId) => {
@@ -505,19 +717,109 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
         headers: authHeaders,
       });
       setGroups((current) => current.filter((group) => group._id !== groupId));
+      setFormMessage('You left the group. If you were the last member, the settled group and its data were deleted.');
+      return true;
     } catch (error) {
       setFormMessage(error.message);
+      setGroupSettingsError(error.message);
+      return false;
+    }
+  };
+  const removeGroup = async (groupId) => {
+    setGroupSettingsBusy(true);
+    setGroupSettingsError('');
+    try {
+      await apiRequest(`/groups/${groupId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      setGroups((current) => current.filter((group) => group._id !== groupId));
+      setSelectedGroup(null);
+      setFormMessage('Group and its expenses were deleted.');
+      return true;
+    } catch (error) {
+      setGroupSettingsError(error.message);
+      return false;
+    } finally {
+      setGroupSettingsBusy(false);
     }
   };
   const openGroupDetails = async (group) => {
     setSelectedGroup(group);
     setGroupDetailsBusy(true);
+    setGroupBalancesBusy(true);
+    setGroupSettlements([]);
+    setGroupDetailsError('');
     try {
-      setGroupTransactions(await apiRequest(`/expenses?groupId=${group._id}`, { headers: authHeaders }));
+      const [transactions, balances] = await Promise.all([
+        apiRequest(`/expenses?groupId=${group._id}`, { headers: authHeaders }),
+        apiRequest(`/groups/${group._id}/balances`, { headers: authHeaders }),
+      ]);
+      setGroupTransactions(transactions);
+      setGroupBalances(balances);
     } catch (error) {
+      setGroupDetailsError(error.message);
       setFormMessage(error.message);
     } finally {
       setGroupDetailsBusy(false);
+      setGroupBalancesBusy(false);
+    }
+  };
+  const loadGroupSettlements = async (groupId) => {
+    setSettlementsBusy(true);
+    setGroupSettlementError('');
+    try {
+      setGroupSettlements(await apiRequest(`/groups/${groupId}/simplify-debts`, { headers: authHeaders }));
+    } catch (error) {
+      setGroupSettlementError(error.message);
+    } finally {
+      setSettlementsBusy(false);
+    }
+  };
+  const recordGroupSettlement = async (groupId, settlement) => {
+    await apiRequest(`/groups/${groupId}/settlements`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: settlement,
+    });
+    await openGroupDetails(selectedGroup);
+    await loadGroupSettlements(groupId);
+  };
+  const renameGroup = async (groupId, name) => {
+    setGroupSettingsBusy(true);
+    setGroupSettingsError('');
+    try {
+      const updatedGroup = await apiRequest(`/groups/${groupId}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({ name }),
+      });
+      setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
+      setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
+    } catch (error) {
+      setGroupSettingsError(error.message);
+    } finally {
+      setGroupSettingsBusy(false);
+    }
+  };
+  const addMemberToGroup = async (groupId, identifier) => {
+    setAddMemberBusy(true);
+    setAddMemberError('');
+    try {
+      const updatedGroup = await apiRequest(`/groups/${groupId}/members`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ identifier }),
+      });
+      setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
+      setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
+      setAddMemberIdentifier('');
+      return true;
+    } catch (error) {
+      setAddMemberError(error.message);
+      return false;
+    } finally {
+      setAddMemberBusy(false);
     }
   };
   const updateProfileField = (event) => setProfileForm((current) => ({ ...current, [event.target.name]: event.target.type === 'file' ? event.target.files[0] : event.target.value }));
@@ -584,6 +886,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     ? (first.fullnamae || first.username).localeCompare(second.fullnamae || second.username, undefined, { sensitivity: 'base' })
     : new Date(second.addedAt) - new Date(first.addedAt));
   const pendingFriendRequests = friendRequests.filter((request) => request.status === 'pending');
+  const expenseGroup = groups.find((group) => group._id === expenseDraft.groupId);
+  const expenseMembers = expenseGroup?.members || [user];
+  const selectedExpenseMembers = expenseMembers.filter((member) => expenseDraft.participantIds.includes(member._id));
+  const itemizedTotal = expenseDraft.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const expenseSplitDefaults = getDefaultSplitValues(expenseDraft.strategy, expenseDraft.participantIds, expenseDraft.totalAmount);
+  const splitModeTotal = selectedExpenseMembers.reduce((sum, member) => sum + (
+    Number(expenseDraft.splitValues[member._id] ?? expenseSplitDefaults[member._id]) || 0
+  ), 0);
 
   return (
     <main className="dashboard-page">
@@ -694,7 +1004,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </div>
             {groups.length ? (
               groups.map((group) => (
-                <button className="side-group" key={group._id}>
+                <button className="side-group" key={group._id} type="button" onClick={() => openGroupDetails(group)}>
                   <span className="mini-group-icon">
                     {group.name.slice(0, 1).toUpperCase()}
                   </span>
@@ -858,7 +1168,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               </button>
               <button
                 className="primary-action"
-                onClick={() => setShowExpenseForm(true)}
+                onClick={() => openExpenseForm('')}
               >
                 Add an expense
               </button>
@@ -980,14 +1290,46 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           {showGroupForm && (
             <Modal
               title="Create a group"
-              onClose={() => setShowGroupForm(false)}
+              onClose={closeGroupForm}
             >
               <form onSubmit={createGroup}>
                 <label>
                   Group name
                   <input name="name" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Lisbon weekend" required />
                 </label>
-                <button className="submit-button">Create group</button>
+                <fieldset className="group-member-picker">
+                  <legend>Add friends</legend>
+                  {friends.length ? friends.map((friend) => (
+                    <label className="group-friend-option" key={friend._id}>
+                      <input
+                        type="checkbox"
+                        checked={groupMemberIds.includes(friend._id)}
+                        onChange={(event) => {
+                          setGroupMemberIds((current) => event.target.checked
+                            ? [...current, friend._id]
+                            : current.filter((id) => id !== friend._id));
+                        }}
+                      />
+                      <span>
+                        <strong>{friend.fullnamae || friend.username}</strong>
+                        <small>@{friend.username}</small>
+                      </span>
+                    </label>
+                  )) : <p className="group-member-empty">You can add friends here after connecting with them.</p>}
+                </fieldset>
+                <label>
+                  Add by username or email
+                  <input
+                    type="text"
+                    value={groupMemberIdentifier}
+                    onChange={(event) => setGroupMemberIdentifier(event.target.value)}
+                    placeholder="username or friend@example.com"
+                    autoComplete="off"
+                  />
+                </label>
+                <p className="modal-help group-member-help">The person must have a SplitCare account. You’ll be added to the group automatically.</p>
+                {groupError && <p className="error-message">{groupError}</p>}
+                <button className="submit-button" disabled={groupBusy}>{groupBusy ? 'Creating…' : 'Create group'}</button>
               </form>
             </Modal>
           )}
@@ -1054,42 +1396,181 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           {showExpenseForm && (
             <Modal
               title="Add an expense"
+              className={selectedGroup ? 'group-expense-modal' : ''}
               onClose={() => setShowExpenseForm(false)}
             >
-              <form onSubmit={addExpense}>
-                <label>
-                  Description
-                  <input
-                    name="description"
-                    placeholder="Dinner at Prego"
-                    required
-                  />
-                </label>
-                <label>
-                  Amount
-                  <input
-                    name="totalAmount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    placeholder="42.50"
-                    required
-                  />
-                </label>
-                <label>
-                  Group
-                  <select name="groupId" required defaultValue="">
-                    <option value="" disabled>
-                      Select a group
-                    </option>
-                    {groups.map((group) => (
-                      <option key={group._id} value={group._id}>
-                        {group.name}
-                      </option>
-                    ))}
+              <form className="expense-entry-form" onSubmit={addExpense}>
+                <div className="expense-description-row">
+                  <label>Description<input value={expenseDraft.description} onChange={(event) => updateExpenseDraft('description', event.target.value)} placeholder="Dinner at Prego" maxLength="500" required /></label>
+                  <label>Amount<input value={expenseDraft.strategy === 'ITEMIZED' ? itemizedTotal.toFixed(2) : expenseDraft.totalAmount} onChange={(event) => updateExpenseDraft('totalAmount', event.target.value)} type="number" min="0.01" step="0.01" placeholder="0.00" readOnly={expenseDraft.strategy === 'ITEMIZED'} required /></label>
+                  <label>Currency
+                    <select value={expenseDraft.currency} onChange={(event) => updateExpenseDraft('currency', event.target.value)}>
+                      <option value="INR">INR ₹</option><option value="USD">USD $</option><option value="EUR">EUR €</option>
+                      <option value="GBP">GBP £</option><option value="CAD">CAD $</option><option value="AUD">AUD $</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="expense-category-picker">
+                  <button
+                    type="button"
+                    className="expense-category-trigger"
+                    aria-expanded={showExpenseCategories}
+                    onClick={() => setShowExpenseCategories((shown) => !shown)}
+                  >
+                    <span>{expenseCategories.find((category) => category.name === expenseDraft.category)?.icon}</span>
+                    <span><small>Category</small><strong>{expenseDraft.category}{expenseDraft.subcategory ? ` · ${expenseDraft.subcategory}` : ''}</strong></span>
+                    <span aria-hidden="true">{showExpenseCategories ? '⌃' : '⌄'}</span>
+                  </button>
+                  {showExpenseCategories && (
+                    <div className="expense-category-options">
+                      {expenseCategories.map((category) => (
+                        <button
+                          type="button"
+                          key={category.name}
+                          className={expenseDraft.category === category.name ? 'selected' : ''}
+                          onClick={() => {
+                            setExpenseDraft((current) => ({ ...current, category: category.name, subcategory: '' }));
+                            if (!category.subcategories.length) setShowExpenseCategories(false);
+                          }}
+                        >
+                          <span>{category.icon}</span>{category.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {expenseCategories.find((category) => category.name === expenseDraft.category)?.subcategories.length > 0 && (
+                    <label className="expense-subcategory">
+                      Subcategory (optional)
+                      <select value={expenseDraft.subcategory} onChange={(event) => updateExpenseDraft('subcategory', event.target.value)}>
+                        <option value="">No subcategory</option>
+                        {expenseCategories.find((category) => category.name === expenseDraft.category).subcategories.map((subcategory) => (
+                          <option key={subcategory} value={subcategory}>{subcategory}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
+
+                <label>Group
+                  <select value={expenseDraft.groupId} onChange={(event) => changeExpenseGroup(event.target.value)}>
+                    <option value="">Personal expense</option>
+                    {groups.map((group) => <option key={group._id} value={group._id}>{group.name}</option>)}
                   </select>
                 </label>
-                <button className="submit-button">Save expense</button>
+
+                <label>Who paid?
+                  <select value={expenseDraft.paidBy} onChange={(event) => updateExpenseDraft('paidBy', event.target.value)}>
+                    {expenseMembers.map((member) => <option key={member._id} value={member._id}>{member._id === user._id ? 'You' : member.fullnamae || member.username}</option>)}
+                  </select>
+                </label>
+
+                <fieldset className="expense-participants">
+                  <legend>Who is included in this expense?</legend>
+                  <div className="expense-participant-list">
+                    {expenseMembers.map((member) => (
+                      <label key={member._id}>
+                        <input
+                          type="checkbox"
+                          checked={expenseDraft.participantIds.includes(member._id)}
+                          onChange={(event) => setExpenseDraft((current) => {
+                            const participantIds = event.target.checked
+                              ? [...current.participantIds, member._id]
+                              : current.participantIds.filter((id) => id !== member._id);
+                            return {
+                              ...current,
+                              participantIds,
+                              splitValues: { ...current.splitValues, [member._id]: undefined },
+                              items: current.items.map((item) => ({
+                                ...item,
+                                participantIds: event.target.checked
+                                  ? item.participantIds
+                                  : item.participantIds.filter((id) => id !== member._id),
+                              })),
+                            };
+                          })}
+                        />
+                        <span>{member._id === user._id ? 'You' : member.fullnamae || member.username}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <fieldset className="expense-split-picker">
+                  <legend>How should the expense be split?</legend>
+                  <div className="expense-split-tabs">
+                    {expenseSplitModes.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        className={expenseDraft.strategy === mode.id ? 'selected' : ''}
+                        onClick={() => setExpenseDraft((current) => ({
+                          ...current,
+                          strategy: mode.id,
+                          splitValues: {},
+                        }))}
+                      >{mode.label}</button>
+                    ))}
+                  </div>
+                  <div className="expense-split-editor">
+                    <h3>{expenseSplitModes.find((mode) => mode.id === expenseDraft.strategy)?.label}</h3>
+                    {expenseDraft.strategy === 'EQUAL' && <p>The total will be divided evenly between the selected people.</p>}
+                    {['EXACT', 'PERCENTAGE', 'SHARES', 'ADJUSTMENT', 'REIMBURSEMENT'].includes(expenseDraft.strategy) && (
+                      <>
+                        {selectedExpenseMembers.map((member) => (
+                          <label className="expense-split-value" key={member._id}>
+                            <span>{member._id === user._id ? 'You' : member.fullnamae || member.username}</span>
+                            <input
+                              type="number"
+                              min={expenseDraft.strategy === 'ADJUSTMENT' ? undefined : '0'}
+                              step="0.01"
+                              value={expenseDraft.splitValues[member._id] ?? expenseSplitDefaults[member._id] ?? ''}
+                              onChange={(event) => setExpenseDraft((current) => ({ ...current, splitValues: { ...current.splitValues, [member._id]: event.target.value } }))}
+                              placeholder={expenseDraft.strategy === 'ADJUSTMENT' ? '+/- amount' : '0'}
+                              required
+                            />
+                            <small>{expenseDraft.strategy === 'PERCENTAGE' ? '%' : expenseDraft.strategy === 'SHARES' ? 'share(s)' : expenseDraft.strategy === 'ADJUSTMENT' ? 'adjustment' : expenseDraft.currency}</small>
+                          </label>
+                        ))}
+                        <div className="expense-split-total">
+                          <span>{expenseDraft.strategy === 'PERCENTAGE' ? 'PERCENT TOTAL' : expenseDraft.strategy === 'ADJUSTMENT' ? 'ADJUSTMENT TOTAL' : expenseDraft.strategy === 'SHARES' ? 'SHARES TOTAL' : 'AMOUNT TOTAL'}</span>
+                          <strong>{splitModeTotal.toFixed(2)}{expenseDraft.strategy === 'PERCENTAGE' ? '%' : expenseDraft.strategy === 'SHARES' ? ' shares' : ` ${expenseDraft.currency}`}</strong>
+                          {(expenseDraft.strategy === 'EXACT' || expenseDraft.strategy === 'REIMBURSEMENT') && <small>{(Number(expenseDraft.totalAmount) - splitModeTotal).toFixed(2)} remaining</small>}
+                        </div>
+                      </>
+                    )}
+                    {expenseDraft.strategy === 'ITEMIZED' && (
+                      <div className="expense-itemized-editor">
+                        {expenseDraft.items.map((item) => (
+                          <article key={item.id}>
+                            <div className="expense-item-fields">
+                              <input aria-label="Item description" value={item.description} onChange={(event) => setExpenseDraft((current) => ({ ...current, items: current.items.map((candidate) => candidate.id === item.id ? { ...candidate, description: event.target.value } : candidate) }))} placeholder="Item name" required />
+                              <input aria-label="Item amount" type="number" min="0.01" step="0.01" value={item.amount} onChange={(event) => setExpenseDraft((current) => ({ ...current, items: current.items.map((candidate) => candidate.id === item.id ? { ...candidate, amount: event.target.value } : candidate) }))} placeholder="0.00" required />
+                              <button type="button" onClick={() => setExpenseDraft((current) => ({ ...current, items: current.items.filter((candidate) => candidate.id !== item.id) }))} aria-label="Remove item">×</button>
+                            </div>
+                            <div className="expense-item-participants">
+                              {selectedExpenseMembers.map((member) => (
+                                <label key={member._id}><input type="checkbox" checked={item.participantIds.includes(member._id)} onChange={(event) => setExpenseDraft((current) => ({ ...current, items: current.items.map((candidate) => candidate.id === item.id ? { ...candidate, participantIds: event.target.checked ? [...candidate.participantIds, member._id] : candidate.participantIds.filter((id) => id !== member._id) } : candidate) }))} />{member._id === user._id ? 'You' : member.username}</label>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
+                        <button type="button" className="expense-add-item" onClick={() => setExpenseDraft((current) => ({ ...current, items: [...current.items, { id: `${Date.now()}-${Math.random()}`, description: '', amount: '', participantIds: current.participantIds }] }))}>＋ Add item</button>
+                      </div>
+                    )}
+                  </div>
+                </fieldset>
+
+                {expenseDraft.strategy === 'REIMBURSEMENT' && <p className="modal-help">Enter how much each selected person should reimburse; amounts must add up to the total.</p>}
+                <div className="expense-proof-fields">
+                  <label>Payment proof (optional)<input type="file" accept="image/*" onChange={(event) => updateExpenseDraft('paymentProof', event.target.files?.[0] || null)} /></label>
+                  {expenseDraft.paymentProof && <small>{expenseDraft.paymentProof.name}</small>}
+                  <label>Note (optional)<textarea value={expenseDraft.note} onChange={(event) => updateExpenseDraft('note', event.target.value)} rows="3" placeholder="Add a note about this expense" /></label>
+                </div>
+                {expenseError && <p className="error-message" role="alert">{expenseError}</p>}
+                <div className="expense-form-actions">
+                  <button type="button" className="quiet-button" onClick={() => setShowExpenseForm(false)}>Cancel</button>
+                  <button className="submit-button" disabled={expenseBusy || !selectedExpenseMembers.length || (expenseDraft.strategy === 'ITEMIZED' && !expenseDraft.items.length)}>{expenseBusy ? 'Saving…' : 'Save expense'}</button>
+                </div>
               </form>
             </Modal>
           )}
@@ -1154,9 +1635,31 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             <GroupDetails
               group={selectedGroup}
               transactions={groupTransactions}
-              busy={groupDetailsBusy}
+              transactionsBusy={groupDetailsBusy}
+              balances={groupBalances}
+              balancesBusy={groupBalancesBusy}
+              settlements={groupSettlements}
+              detailsError={groupDetailsError}
+              settlementError={groupSettlementError}
+              settlementsBusy={settlementsBusy}
+              settingsBusy={groupSettingsBusy}
+              settingsError={groupSettingsError}
+              addMemberBusy={addMemberBusy}
+              addMemberError={addMemberError}
+              user={user}
               onClose={() => setSelectedGroup(null)}
               onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
+              onAddExpense={() => openExpenseForm(selectedGroup._id)}
+              onSettle={() => loadGroupSettlements(selectedGroup._id)}
+              onRecordSettlement={(settlement) => recordGroupSettlement(selectedGroup._id, settlement)}
+              onRename={(name) => renameGroup(selectedGroup._id, name)}
+              onAddMember={(identifier) => addMemberToGroup(selectedGroup._id, identifier)}
+              onDelete={async () => {
+                if (await removeGroup(selectedGroup._id)) setSelectedGroup(null);
+              }}
+              onLeave={async () => {
+                if (await leaveGroup(selectedGroup._id)) setSelectedGroup(null);
+              }}
             />
           )}
         </section>
@@ -1218,20 +1721,276 @@ function Group({ initials, name, amount, note, tone, groupCode, onSimplify, onLe
   );
 }
 
-function GroupDetails({ group, transactions, busy, onClose, onJoin }) {
+function GroupDetails({
+  group,
+  transactions,
+  transactionsBusy,
+  balances,
+  balancesBusy,
+  settlements,
+  detailsError,
+  settlementError,
+  settlementsBusy,
+  settingsBusy,
+  settingsError,
+  addMemberBusy,
+  addMemberError,
+  user,
+  onClose,
+  onJoin,
+  onAddExpense,
+  onSettle,
+  onRename,
+  onAddMember,
+  onRecordSettlement,
+  onDelete,
+  onLeave,
+}) {
+  const [activeTab, setActiveTab] = useState('activity');
+  const [hideUninvolved, setHideUninvolved] = useState(false);
+  const [nameDraft, setNameDraft] = useState(group.name);
+  const [memberIdentifierDraft, setMemberIdentifierDraft] = useState('');
+  const [settlementOpen, setSettlementOpen] = useState(false);
+  const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: 'INR', amount: '', note: '', paymentProof: null });
+  const [settlementSaveError, setSettlementSaveError] = useState('');
+  const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
+  const isOwner = group.createdBy === user._id;
+  const visibleTransactions = hideUninvolved
+    ? transactions.filter((transaction) => transaction.paidBy === user._id || transaction.participantIds?.includes(user._id))
+    : transactions;
+  const memberName = (id) => {
+    const member = group.members?.find((item) => item._id === id);
+    return member?.fullnamae || member?.username || 'Group member';
+  };
+  const exportTransactions = () => {
+    const rows = [
+      ['Date', 'Description', 'Paid by', 'Amount', 'Currency'],
+      ...transactions.map((transaction) => [
+        new Date(transaction.createdAt).toLocaleDateString(),
+        transaction.description,
+        transaction.paidByName || transaction.paidByUsername || 'Member',
+        transaction.totalAmount,
+        transaction.currency,
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${group.name.replace(/[^a-z0-9-_]+/gi, '-')}-expenses.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const openSettlementForm = () => {
+    setSettlementDraft({
+      payeeId: '',
+      currency: balances.find((balance) => balance.currency)?.currency || 'INR',
+      amount: '',
+      note: '',
+      paymentProof: null,
+    });
+    setSettlementSaveError('');
+    setSettlementOpen(true);
+  };
+  const submitSettlement = async (event) => {
+    event.preventDefault();
+    setSettlementSaveBusy(true);
+    setSettlementSaveError('');
+    const form = new FormData();
+    form.append('payeeId', settlementDraft.payeeId);
+    form.append('currency', settlementDraft.currency);
+    form.append('amount', settlementDraft.amount);
+    form.append('note', settlementDraft.note);
+    if (settlementDraft.paymentProof) form.append('paymentProof', settlementDraft.paymentProof);
+    try {
+      await onRecordSettlement(form);
+      setSettlementOpen(false);
+    } catch (error) {
+      setSettlementSaveError(error.message);
+    } finally {
+      setSettlementSaveBusy(false);
+    }
+  };
+
+  useEffect(() => setNameDraft(group.name), [group._id, group.name]);
+
   return (
     <div className="group-details-backdrop" onMouseDown={onClose}>
-      <section className="group-details" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="group-details group-workspace" onMouseDown={(event) => event.stopPropagation()}>
         <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
-        <div className="group-details-header">
-          <div><p className="eyebrow">GROUP DETAILS</p><h2>{group.name}</h2><span>{group.members?.length || 0} members</span></div>
-          <div className="join-code-card"><small>JOINING CODE</small><strong>{group.groupCode || "Not assigned"}</strong><button onClick={onJoin}>Join another group</button></div>
-        </div>
-        <div className="group-details-grid">
-          <div><p className="eyebrow">MEMBERS</p><div className="member-list">{(group.members || []).map((member) => <div className="member-row" key={member._id}><span className="member-avatar">{(member.fullnamae || member.username).slice(0, 1).toUpperCase()}</span><div><b>{member.fullnamae || member.username}</b><small>@{member.username}</small></div></div>)}</div></div>
-          <div><p className="eyebrow">TRANSACTIONS</p>{busy ? <p className="empty-state">Loading transactions…</p> : transactions.length ? <div className="transaction-list">{transactions.map((transaction) => <div className="transaction-row" key={transaction._id}><div><b>{transaction.description}</b><small>{transaction.paidByName || transaction.paidByUsername || "Member"} paid · {new Date(transaction.createdAt).toLocaleDateString()}</small></div><strong>{transaction.currency} {transaction.totalAmount}</strong></div>)}</div> : <p className="empty-state">No transactions in this group yet.</p>}</div>
+        <header className="group-workspace-header">
+          <div className="group-workspace-identity">
+            <span className="group-workspace-avatar">{group.name.slice(0, 1).toUpperCase()}</span>
+            <div>
+              <p className="eyebrow">GROUP</p>
+              <h2>{group.name}</h2>
+              <span>{group.members?.length || 0} {(group.members?.length || 0) === 1 ? 'person' : 'people'}</span>
+            </div>
+          </div>
+          <div className="group-workspace-actions">
+            <button className="group-add-expense" onClick={onAddExpense}>＋ Add an expense</button>
+            <button className="group-settle-button" onClick={() => { setActiveTab('balances'); onSettle(); openSettlementForm(); }}>Settle up</button>
+          </div>
+          <div className="group-id-card">
+            <span>GROUP ID</span><strong>{group.groupCode || 'Not assigned'}</strong>
+            <small>ID: {group._id}</small>
+            <button onClick={onJoin}>Join another group</button>
+          </div>
+        </header>
+
+        <nav className="group-workspace-tabs" aria-label="Group sections">
+          <button className={activeTab === 'activity' ? 'active' : ''} onClick={() => setActiveTab('activity')}>☷ Activity</button>
+          <button className={activeTab === 'balances' ? 'active' : ''} onClick={() => setActiveTab('balances')}>◉ Balances</button>
+          <button className={activeTab === 'settings' ? 'active' : ''} onClick={() => setActiveTab('settings')}>⚙ Settings</button>
+        </nav>
+
+        {detailsError && <p className="error-message group-detail-error" role="alert">{detailsError}</p>}
+
+        <div className="group-workspace-body">
+          <main className="group-workspace-content">
+            {activeTab === 'activity' && (
+              <section>
+                <div className="group-section-heading">
+                  <div><p className="eyebrow">THE PAPER TRAIL</p><h3>Group activity</h3></div>
+                  <span>{transactions.length} transactions</span>
+                </div>
+                {transactionsBusy ? <p className="empty-state">Loading group activity…</p> : visibleTransactions.length ? (
+                  <div className="transaction-list">
+                    {visibleTransactions.map((transaction) => (
+                      <article className="transaction-row" key={transaction._id}>
+                        <span className="transaction-icon">▤</span>
+                        <div><b>{transaction.description}</b><small>{transaction.category || 'Uncategorized'}{transaction.subcategory ? ` · ${transaction.subcategory}` : ''} · {transaction.paidByName || transaction.paidByUsername || 'Member'} {transaction.type === 'SETTLEMENT' ? `paid ${transaction.paidToName || 'a member'}` : 'paid'} · {new Date(transaction.createdAt).toLocaleDateString()}</small>{transaction.note && <small>{transaction.note}</small>}{transaction.items?.map((item, itemIndex) => <small key={`${transaction._id}-${itemIndex}`}>{item.description}: {transaction.currency} {item.amount}</small>)}{transaction.paymentProofUrl && <a className="expense-proof-link" href={transaction.paymentProofUrl} target="_blank" rel="noreferrer">View payment proof</a>}</div>
+                        <strong>{transaction.currency} {transaction.totalAmount}</strong>
+                      </article>
+                    ))}
+                  </div>
+                ) : <p className="empty-state">{hideUninvolved ? 'No group expenses involving you.' : 'No expenses in this group yet. Add the first one to get started.'}</p>}
+              </section>
+            )}
+            {activeTab === 'balances' && (
+              <section>
+                <div className="group-section-heading">
+                  <div><p className="eyebrow">WHO OWES WHOM</p><h3>Group balances</h3></div>
+                  <button className="group-inline-action" onClick={onSettle} disabled={settlementsBusy}>{settlementsBusy ? 'Calculating…' : 'Refresh settle-up plan'}</button>
+                </div>
+                {balancesBusy ? <p className="empty-state">Loading group balances…</p> : balances.length ? (
+                  <div className="group-balances-list">
+                    {balances.map((balance) => {
+                      const amount = Number(balance.netBalance);
+                      const label = Math.abs(amount) < 0.005 ? 'settled up' : amount > 0 ? 'gets back' : 'owes';
+                      return (
+                        <article className="group-balance-row" key={`${balance._id}-${balance.currency || 'INR'}`}>
+                          <span className={`member-avatar ${amount > 0 ? 'mint' : amount < 0 ? 'coral-bg' : ''}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
+                          <div><strong>{balance.fullnamae || balance.username}</strong><small>@{balance.username}</small></div>
+                          <p className={amount > 0 ? 'balance-positive' : amount < 0 ? 'balance-negative' : ''}>{label}{Math.abs(amount) >= 0.005 && <> <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></>}</p>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : <p className="empty-state">No group balances to show.</p>}
+                <div className="settlement-plan">
+                  <h4>Suggested settlements</h4>
+                  <button className="group-inline-action" onClick={() => openSettlementForm()}>Record a payment</button>
+                  {settlementsBusy ? <p>Finding the simplest way to settle…</p> : settlements.length ? settlements.map((settlement, index) => (
+                    <div className="settlement-plan-row" key={`${settlement.from}-${settlement.to}-${settlement.currency}-${index}`}>
+                      <span><strong>{memberName(settlement.from)}</strong> pays <strong>{memberName(settlement.to)}</strong></span>
+                      <b>{settlement.currency} {Number(settlement.amount).toFixed(2)}</b>
+                    </div>
+                  )) : settlementError ? <p className="error-message">{settlementError}</p> : <p>Choose “Settle up” to calculate suggested payments, or this group may already be settled.</p>}
+                </div>
+              </section>
+            )}
+            {activeTab === 'settings' && (
+              <section className="group-settings-panel">
+                <div className="group-section-heading"><div><p className="eyebrow">GROUP SETTINGS</p><h3>Manage this group</h3></div></div>
+                {isOwner ? (
+                  <form onSubmit={(event) => { event.preventDefault(); onRename(nameDraft.trim()); }}>
+                    <label>Group name<input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength="120" required /></label>
+                    {settingsError && <p className="error-message">{settingsError}</p>}
+                    <button className="group-setting-button" disabled={settingsBusy || nameDraft.trim() === group.name}>{settingsBusy ? 'Saving…' : 'Save group name'}</button>
+                  </form>
+                ) : <p className="modal-help">Only {memberName(group.createdBy)} can change this group’s name.</p>}
+                <label className="group-hide-toggle"><input type="checkbox" checked={hideUninvolved} onChange={(event) => setHideUninvolved(event.target.checked)} /> Hide expenses I’m not involved in</label>
+                <button className="group-setting-button" onClick={exportTransactions}>Export expenses as CSV</button>
+                {isOwner && <button className="group-setting-button group-delete-button" disabled={settingsBusy} onClick={() => {
+                  if (window.confirm('Permanently delete this group and all its expenses? This is only allowed after every balance is settled.')) onDelete();
+                }}>{settingsBusy ? 'Deleting…' : 'Delete group and all its data'}</button>}
+                <button className="group-setting-button group-leave-button" onClick={() => {
+                  if (window.confirm('Leave this group? All group balances must be settled first. If you are the last member, the group and its data will be deleted.')) onLeave();
+                }}>Leave group</button>
+              </section>
+            )}
+          </main>
+
+          <aside className="group-workspace-sidebar">
+            <div className="group-sidebar-heading"><span>◉</span><h3>Group balances</h3></div>
+            {balancesBusy ? <p className="empty-state">Loading…</p> : balances.map((balance) => {
+              const amount = Number(balance.netBalance);
+              if (Math.abs(amount) < 0.005) return null;
+              return (
+                <div className="group-sidebar-balance" key={`${balance._id}-${balance.currency || 'INR'}`}>
+                  <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
+                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'gets back' : 'owes'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
+                </div>
+              );
+            })}
+            {!balancesBusy && !balances.some((balance) => Math.abs(Number(balance.netBalance)) >= 0.005) && <p className="empty-state">Everyone is settled up.</p>}
+            <button className="group-view-balances" onClick={() => setActiveTab('balances')}>View details →</button>
+            <div className="group-sidebar-members">
+              <div className="group-members-heading"><h3>People in this group</h3><span>{group.members?.length || 0}</span></div>
+              {(group.members || []).map((member) => (
+                <div className="group-sidebar-member" key={member._id}>
+                  <span className="member-avatar">{(member.fullnamae || member.username).slice(0, 1).toUpperCase()}</span>
+                  <span>{member.fullnamae || member.username}</span>
+                </div>
+              ))}
+              <form className="group-add-member-form" onSubmit={async (event) => {
+                event.preventDefault();
+                if (await onAddMember(memberIdentifierDraft.trim())) setMemberIdentifierDraft('');
+              }}>
+                <label>Add someone by username or email
+                  <input type="text" value={memberIdentifierDraft} onChange={(event) => setMemberIdentifierDraft(event.target.value)} placeholder="@username or email" required />
+                </label>
+                {addMemberError && <p className="error-message" role="alert">{addMemberError}</p>}
+                <button type="submit" disabled={addMemberBusy || !memberIdentifierDraft.trim()}>{addMemberBusy ? 'Adding…' : 'Add to group'}</button>
+              </form>
+            </div>
+          </aside>
         </div>
       </section>
+      {settlementOpen && (
+        <Modal title="Record a payment" onClose={() => setSettlementOpen(false)} className="settlement-modal">
+          <form className="group-settlement-form" onSubmit={submitSettlement}>
+            <p className="modal-help">Record a payment you made to someone you directly owe. It can’t exceed the outstanding amount between you in that currency.</p>
+            <label>Paid to
+              <select value={settlementDraft.payeeId} onChange={(event) => setSettlementDraft((current) => ({ ...current, payeeId: event.target.value }))} required>
+                <option value="">Choose a group member</option>
+                {(group.members || []).filter((member) => member._id !== user._id).map((member) => (
+                  <option key={member._id} value={member._id}>{member.fullnamae || member.username} (@{member.username})</option>
+                ))}
+              </select>
+            </label>
+            <div className="group-settlement-amount-fields">
+              <label>Currency
+                <select value={settlementDraft.currency} onChange={(event) => setSettlementDraft((current) => ({ ...current, currency: event.target.value }))}>
+                  {[...new Set(['INR', ...balances.map((balance) => balance.currency).filter(Boolean)])].map((currency) => <option key={currency}>{currency}</option>)}
+                </select>
+              </label>
+              <label>Amount
+                <input type="number" min="0.01" step="0.01" value={settlementDraft.amount} onChange={(event) => setSettlementDraft((current) => ({ ...current, amount: event.target.value }))} required />
+              </label>
+            </div>
+            <label>Payment proof (optional)
+              <input type="file" accept="image/*" onChange={(event) => setSettlementDraft((current) => ({ ...current, paymentProof: event.target.files?.[0] || null }))} />
+            </label>
+            <label>Note (optional)
+              <textarea value={settlementDraft.note} onChange={(event) => setSettlementDraft((current) => ({ ...current, note: event.target.value }))} maxLength="1000" rows="3" />
+            </label>
+            {settlementSaveError && <p className="error-message" role="alert">{settlementSaveError}</p>}
+            <button className="submit-button" disabled={settlementSaveBusy || !settlementDraft.payeeId}>{settlementSaveBusy ? 'Saving payment…' : 'Record payment'}</button>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1261,9 +2020,12 @@ function BalanceRow({ name, amount, tone }) {
     </div>
   );
 }
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, className = '' }) {
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className={`modal-backdrop ${className}`} onMouseDown={(event) => {
+      event.stopPropagation();
+      if (event.target === event.currentTarget) onClose();
+    }}>
       <section
         className="modal"
         onMouseDown={(event) => event.stopPropagation()}

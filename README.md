@@ -78,8 +78,15 @@ The connected dashboard uses these authenticated endpoints:
 - `GET /api/users/me`
 - `GET /api/groups`
 - `POST /api/groups`
+- `POST /api/groups` can include `memberIds` (friend user IDs) and/or `memberIdentifiers` (usernames or registered email addresses); the creator is added automatically.
 - `POST /api/groups/join` with `{ "groupCode": "A1B2C3D4" }`
+- `POST /api/groups/:groupId/members` with `{ "identifier": "username or registered email" }` (any current group member can add an account directly).
+- `GET /api/groups/:groupId/balances`
+- `POST /api/groups/:groupId/settlements` accepts `multipart/form-data` with `payeeId`, `amount`, `currency`, optional `note`, and optional `paymentProof` image (up to 5 MB). The authenticated member is the payer. Payments are recorded in group activity and reduce their outstanding debt to the selected member; amounts above the outstanding debt are rejected.
+- `PATCH /api/groups/:groupId` (group creator only; accepts `{ "name": "New name" }`)
+- `DELETE /api/groups/:groupId` (group creator only; deletes the group and its expenses after all balances are settled)
+- `POST /api/groups/:groupId/leave` (leaving requires the entire group to be settled; leaving as the last member deletes the group and its related data)
 - `GET /api/expenses`
-- `POST /api/expenses`
+- `POST /api/expenses` accepts `multipart/form-data` with `description`, `totalAmount`, `currency`, `category`, optional `subcategory`, `groupId`, `paidBy`, `participants` (JSON array), `splitStrategy` (`EQUAL`, `EXACT`, `PERCENTAGE`, `SHARES`, `ADJUSTMENT`, `REIMBURSEMENT`, or `ITEMIZED`), `values` (JSON array when required), optional `items` (JSON array for itemized expenses), optional `paymentProof` image (up to 5 MB), and optional `note`. Categories are Entertainment, Food and drink, Home, Life, Transportation, Uncategorized, and Utilities. Payment proof uploads use the configured Cloudinary account.
 - `POST /api/groups/:groupId/leave`
 - `GET /api/groups/:groupId/simplify-debts`
