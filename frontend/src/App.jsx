@@ -256,6 +256,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
   const [passwordUpdateEnabled, setPasswordUpdateEnabled] = useState(false);
   const [currentPasswordVerified, setCurrentPasswordVerified] = useState(false);
+  const [usernameAvailability, setUsernameAvailability] = useState({ username: '', status: 'checking' });
   const [photoPreview, setPhotoPreview] = useState('');
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState('');
@@ -271,6 +272,30 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setPhotoPreview(preview);
     return () => URL.revokeObjectURL(preview);
   }, [profileForm.coverimage]);
+
+  useEffect(() => {
+    const username = profileForm.username.trim().toLowerCase();
+    if (!showProfile || !username || username.length > 40) return undefined;
+
+    let active = true;
+    setUsernameAvailability({ username, status: 'checking' });
+    const timeout = setTimeout(() => {
+      apiRequest(`/users/profile/username-availability?username=${encodeURIComponent(username)}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+        .then(({ available }) => {
+          if (active) setUsernameAvailability({ username, status: available ? 'available' : 'taken' });
+        })
+        .catch(() => {
+          if (active) setUsernameAvailability({ username, status: 'error' });
+        });
+    }, 300);
+
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+    };
+  }, [profileForm.username, showProfile, user._id, accessToken]);
 
   useEffect(() => {
     Promise.all([
@@ -413,6 +438,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   };
   const updateProfile = async (event) => {
     event.preventDefault();
+    const username = profileForm.username.trim().toLowerCase();
+    if (username !== user.username.toLowerCase() && usernameAvailability.status !== 'available') {
+      setProfileError(usernameAvailability.status === 'taken'
+        ? 'That username is already taken. Please choose a different one.'
+        : usernameAvailability.status === 'error'
+          ? 'Could not check username availability. Please try again.'
+          : 'Please wait for the username availability check to finish.');
+      return;
+    }
     if (passwordUpdateEnabled && !currentPasswordVerified) {
       setProfileError('Verify your current password before setting a new one.');
       return;
@@ -433,10 +467,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setPasswordUpdateEnabled(false);
       setCurrentPasswordVerified(false);
       setShowProfile(false);
-      setFormMessage('Profile updated successfully.');
+      setFormMessage(result.cleanupWarning || 'Profile updated successfully.');
     } catch (error) {
-      setFormMessage(error.message);
-      setProfileError(error.message);
+      if (error.message.includes('username is already taken')) {
+        setUsernameAvailability({ username, status: 'taken' });
+      } else {
+        setFormMessage(error.message);
+        setProfileError(error.message);
+      }
     } finally {
       setProfileBusy(false);
     }
@@ -486,6 +524,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   setPasswordUpdateEnabled(false);
                   setCurrentPasswordVerified(false);
                   setProfileError('');
+                  setUsernameAvailability({ username: user.username.toLowerCase(), status: 'checking' });
                   setShowProfile(true);
                   setShowProfileMenu(false);
                 }}
@@ -773,7 +812,20 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   </div>
                 </div>
                 <label className="profile-photo-picker">Profile photo<input name="coverimage" type="file" accept="image/*" onChange={updateProfileField} /></label>
-                <label>Username<input name="username" value={profileForm.username} onChange={updateProfileField} required /></label>
+                <label>Username<input name="username" value={profileForm.username} onChange={updateProfileField} maxLength="40" required /></label>
+                {profileForm.username.trim() && (
+                  <p className={`username-status ${usernameAvailability.status}`} role="status" aria-live="polite">
+                    {usernameAvailability.username !== profileForm.username.trim().toLowerCase() || usernameAvailability.status === 'checking'
+                      ? 'Checking username…'
+                      : usernameAvailability.status === 'available'
+                        ? 'Username is available.'
+                        : usernameAvailability.status === 'taken'
+                          ? 'That username is already taken. Please choose a different one.'
+                          : usernameAvailability.status === 'error'
+                            ? 'Could not check username availability. Please try again.'
+                            : 'Enter a username of 1 to 40 characters.'}
+                  </p>
+                )}
                 <label>Email<input name="email" type="email" value={profileForm.email} onChange={updateProfileField} required /></label>
                 <label>Full name<input name="fullnamae" value={profileForm.fullnamae} onChange={updateProfileField} required /></label>
                 <label>Phone<input name="phone" value={profileForm.phone} onChange={updateProfileField} placeholder="Optional" /></label>

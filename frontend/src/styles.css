@@ -988,6 +988,24 @@ input::placeholder {
     font-size: 12px;
 }
 
+.username-status {
+    margin: -9px 0 0;
+    font-size: 11px;
+}
+
+.username-status.checking,
+.username-status.error {
+    color: #858d84;
+}
+
+.username-status.available {
+    color: #52623e;
+}
+
+.username-status.taken {
+    color: #ba4c3b;
+}
+
 .password-update-toggle {
     width: fit-content;
     padding: 4px 0;

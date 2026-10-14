@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { accessToken, currentUser, login, logout, refreshToken, register, updateProfile, verifyCurrentPassword } from '../controllers/userController.js';
+import { accessToken, checkUsernameAvailability, currentUser, login, logout, refreshToken, register, updateProfile, verifyCurrentPassword } from '../controllers/userController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import multer from 'multer';
@@ -15,6 +15,7 @@ router.post('/logout', requireAuth, asyncHandler(logout));
 router.get('/access-token', requireAuth, asyncHandler(accessToken));
 router.get('/me', requireAuth, asyncHandler(currentUser));
 router.post('/profile/verify-password', requireAuth, asyncHandler(verifyCurrentPassword));
+router.get('/profile/username-availability', requireAuth, asyncHandler(checkUsernameAvailability));
 router.put('/profile/:userId', requireAuth, upload.single('coverimage'), asyncHandler(updateProfile));
 
 export default router;
