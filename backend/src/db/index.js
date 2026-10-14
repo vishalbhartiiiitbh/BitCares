@@ -37,7 +37,11 @@ const connectDB = async () => {
     CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_one_pending_per_pair ON friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id)) WHERE status = 'pending';
     CREATE TABLE IF NOT EXISTS groups (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name VARCHAR(120) NOT NULL, group_code VARCHAR(8) NOT NULL UNIQUE, created_by UUID NOT NULL REFERENCES users(id), simplify_debts BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS group_members (group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY (group_id, user_id));
-    CREATE TABLE IF NOT EXISTS expenses (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), group_id UUID REFERENCES groups(id), description VARCHAR(500) NOT NULL, total_amount NUMERIC(12,2) NOT NULL, currency VARCHAR(3) NOT NULL DEFAULT 'INR', type VARCHAR(20) NOT NULL DEFAULT 'EXPENSE', split_strategy VARCHAR(20) NOT NULL, paid_by UUID NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS expenses (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), group_id UUID REFERENCES groups(id) ON DELETE CASCADE, description VARCHAR(500) NOT NULL, total_amount NUMERIC(12,2) NOT NULL, currency VARCHAR(3) NOT NULL DEFAULT 'INR', type VARCHAR(20) NOT NULL DEFAULT 'EXPENSE', split_strategy VARCHAR(20) NOT NULL, paid_by UUID NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    ALTER TABLE expenses DROP CONSTRAINT IF EXISTS expenses_group_id_fkey;
+    ALTER TABLE expenses ADD CONSTRAINT expenses_group_id_fkey FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE;
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS category VARCHAR(40) NOT NULL DEFAULT 'Uncategorized';
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS subcategory VARCHAR(60);
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS note TEXT;
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_proof_url TEXT;
     CREATE TABLE IF NOT EXISTS expense_splits (expense_id UUID NOT NULL REFERENCES expenses(id) ON DELETE CASCADE, user_id UUID NOT NULL REFERENCES users(id), amount_owed NUMERIC(12,2) NOT NULL, split_value NUMERIC(12,2) NOT NULL, PRIMARY KEY (expense_id, user_id));

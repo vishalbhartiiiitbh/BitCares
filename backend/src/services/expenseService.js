@@ -3,10 +3,21 @@ import { query, withTransaction } from '../db/index.js';
 import { eventEmitter, EVENTS } from '../events/eventEmitter.js';
 import { uploadImageBuffer } from '../config/cloudinary.js';
 
+const expenseSubcategories = {
+  Entertainment: ['Games', 'Music', 'Movies', 'Sports', 'Events'],
+  'Food and drink': ['Dining out', 'Groceries', 'Drinks', 'Coffee', 'Takeaway'],
+  Home: ['Furniture', 'Household supplies', 'Rent', 'Repairs', 'Pets'],
+  Life: ['Gifts', 'Health', 'Education', 'Clothing', 'Personal'],
+  Transportation: ['Fuel', 'Public transit', 'Taxi', 'Parking', 'Flights'],
+  Uncategorized: [],
+  Utilities: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'],
+};
+
 export const listExpenses = async (groupId) => {
   const result = await query(
     `SELECT e.id AS "_id", e.group_id AS "groupId", e.description,
             e.total_amount::text AS "totalAmount", e.currency, e.type,
+            e.category, e.subcategory,
             e.split_strategy AS "splitStrategy", e.paid_by AS "paidBy",
             e.created_at AS "createdAt", e.note, e.payment_proof_url AS "paymentProofUrl",
             u.username AS "paidByUsername", u.fullnamae AS "paidByName",
@@ -37,6 +48,8 @@ export const addExpense = async ({
   note = null,
   proofBuffer = null,
   type = 'EXPENSE',
+  category = 'Uncategorized',
+  subcategory = null,
 }) => {
   groupId = groupId || null;
   if (!Array.isArray(participants) || !participants.length || new Set(participants).size !== participants.length) {
@@ -57,6 +70,15 @@ export const addExpense = async ({
   }
   if (note !== null && typeof note !== 'string') {
     throw Object.assign(new Error('Expense note must be text'), { statusCode: 400 });
+  }
+  if (!['Entertainment', 'Food and drink', 'Home', 'Life', 'Transportation', 'Uncategorized', 'Utilities'].includes(category)) {
+    throw Object.assign(new Error('Choose a supported expense category'), { statusCode: 400 });
+  }
+  if (subcategory !== null && typeof subcategory !== 'string') {
+    throw Object.assign(new Error('Expense subcategory must be text'), { statusCode: 400 });
+  }
+  if (subcategory && !expenseSubcategories[category].includes(subcategory)) {
+    throw Object.assign(new Error('Choose a supported subcategory for this expense category'), { statusCode: 400 });
   }
 
   let splits;
@@ -100,12 +122,12 @@ export const addExpense = async ({
       ? await uploadImageBuffer(proofBuffer, 'splitcare/expense-proofs')
       : null;
     const created = await client.query(
-      `INSERT INTO expenses (group_id, description, total_amount, currency, split_strategy, paid_by, type, note, payment_proof_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO expenses (group_id, description, total_amount, currency, split_strategy, paid_by, type, category, subcategory, note, payment_proof_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        RETURNING id AS "_id", group_id AS "groupId", description, total_amount::text AS "totalAmount",
                  currency, type, split_strategy AS "splitStrategy", paid_by AS "paidBy",
-                 created_at AS "createdAt", note, payment_proof_url AS "paymentProofUrl"`,
-      [groupId, description.trim(), totalAmount, currency, splitStrategy, paidBy, type, note?.trim() || null, proofUrl],
+                 category, subcategory, created_at AS "createdAt", note, payment_proof_url AS "paymentProofUrl"`,
+      [groupId, description.trim(), totalAmount, currency, splitStrategy, paidBy, type, category, subcategory?.trim() || null, note?.trim() || null, proofUrl],
     );
     const row = created.rows[0];
     for (const item of itemSplits) {

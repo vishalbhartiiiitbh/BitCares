@@ -42,6 +42,42 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 	return hydrate(created.rows[0], client);
 });
 export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
+export const addGroupMember = async ({ groupId, requesterId, identifier }) => withTransaction(async (client) => {
+	const groupResult = await client.query(
+		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt" FROM groups WHERE id = $1',
+		[groupId],
+	);
+	const group = groupResult.rows[0];
+	if (!group) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+
+	const requester = await client.query(
+		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+		[groupId, requesterId],
+	);
+	if (!requester.rowCount) throw Object.assign(new Error('Only group members can add people'), { statusCode: 403 });
+
+	const normalizedIdentifier = identifier.trim().toLowerCase();
+	const targetResult = await client.query(
+		'SELECT id AS "_id" FROM users WHERE LOWER(username) = $1 OR LOWER(email) = $1',
+		[normalizedIdentifier],
+	);
+	if (!targetResult.rowCount) {
+		throw Object.assign(new Error('No SplitCare account was found with that username or email'), { statusCode: 404 });
+	}
+	const targetId = targetResult.rows[0]._id;
+	if (targetId === requesterId) {
+		throw Object.assign(new Error('You are already a member of this group'), { statusCode: 409 });
+	}
+
+	const inserted = await client.query(
+		'INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING user_id',
+		[groupId, targetId],
+	);
+	if (!inserted.rowCount) {
+		throw Object.assign(new Error('That person is already in this group'), { statusCode: 409 });
+	}
+	return hydrate(group, client);
+});
 export const getGroupBalances = async (groupId, userId) => {
 	const membership = await query(
 		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
@@ -83,4 +119,48 @@ export const updateGroupName = async (groupId, userId, name) => {
 	throw Object.assign(new Error('Only the group creator can change group settings'), { statusCode: 403 });
 };
 export const joinGroupByCode = async ({ groupCode: code, userId }) => { const result = await query('SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt" FROM groups WHERE group_code = $1', [code.trim().toUpperCase()]); if (!result.rowCount) throw Object.assign(new Error('Group code not found'), { statusCode: 404 }); await query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [result.rows[0]._id, userId]); return hydrate(result.rows[0]); };
-export const leaveGroup = async (groupId, userId) => withTransaction(async (client) => { const unsettled = await client.query('SELECT 1 FROM balances WHERE group_id = $1 AND (user1 = $2 OR user2 = $2) AND net_owed <> 0 LIMIT 1', [groupId, userId]); if (unsettled.rowCount) throw Object.assign(new Error('Cannot leave group with unsettled balances'), { statusCode: 400 }); const result = await client.query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2 RETURNING group_id', [groupId, userId]); if (!result.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 }); return { groupId, removed: true }; });
+const ensureGroupIsSettled = async (client, groupId) => {
+	const unsettled = await client.query(
+		'SELECT 1 FROM balances WHERE group_id = $1 AND net_owed <> 0 LIMIT 1',
+		[groupId],
+	);
+	if (unsettled.rowCount) {
+		throw Object.assign(new Error('Settle all group balances before leaving or deleting this group'), { statusCode: 400 });
+	}
+};
+
+export const leaveGroup = async (groupId, userId) => withTransaction(async (client) => {
+	const group = await client.query('SELECT id FROM groups WHERE id = $1 FOR UPDATE', [groupId]);
+	if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+
+	const membership = await client.query(
+		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+		[groupId, userId],
+	);
+	if (!membership.rowCount) throw Object.assign(new Error('Group membership not found'), { statusCode: 404 });
+
+	await ensureGroupIsSettled(client, groupId);
+	await client.query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
+	const remainingMembers = await client.query('SELECT 1 FROM group_members WHERE group_id = $1 LIMIT 1', [groupId]);
+	if (!remainingMembers.rowCount) {
+		await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
+		return { groupId, removed: true, groupDeleted: true };
+	}
+	return { groupId, removed: true, groupDeleted: false };
+});
+
+export const deleteGroup = async (groupId, userId) => withTransaction(async (client) => {
+	const group = await client.query(
+		'SELECT id FROM groups WHERE id = $1 AND created_by = $2 FOR UPDATE',
+		[groupId, userId],
+	);
+	if (!group.rowCount) {
+		const exists = await client.query('SELECT 1 FROM groups WHERE id = $1', [groupId]);
+		if (!exists.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+		throw Object.assign(new Error('Only the group creator can delete this group'), { statusCode: 403 });
+	}
+
+	await ensureGroupIsSettled(client, groupId);
+	await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
+	return { groupId, deleted: true };
+});

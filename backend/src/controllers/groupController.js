@@ -1,4 +1,4 @@
-import { createGroup, getGroupBalances, joinGroupByCode, leaveGroup, listGroupsForUser, updateGroupName } from '../services/groupService.js';
+import { addGroupMember, createGroup, deleteGroup, getGroupBalances, joinGroupByCode, leaveGroup, listGroupsForUser, updateGroupName } from '../services/groupService.js';
 import { simplifyDebts } from '../services/debtSimplifier.js';
 
 export const list = async (req, res) => {
@@ -34,6 +34,10 @@ export const leave = async (req, res) => {
   res.json({ data: group });
 };
 
+export const remove = async (req, res) => {
+  res.json({ data: await deleteGroup(req.params.groupId, req.user._id) });
+};
+
 export const balances = async (req, res) => {
   res.json({ data: await getGroupBalances(req.params.groupId, req.user._id) });
 };
@@ -47,6 +51,20 @@ export const update = async (req, res) => {
     throw Object.assign(new Error('Group name must be 120 characters or fewer'), { statusCode: 400 });
   }
   res.json({ data: await updateGroupName(req.params.groupId, req.user._id, name) });
+};
+
+export const addMember = async (req, res) => {
+  const { identifier } = req.body || {};
+  if (typeof identifier !== 'string' || !identifier.trim()) {
+    throw Object.assign(new Error('Enter a username or email address'), { statusCode: 400 });
+  }
+  res.status(201).json({
+    data: await addGroupMember({
+      groupId: req.params.groupId,
+      requesterId: req.user._id,
+      identifier,
+    }),
+  });
 };
 
 export const simplify = async (req, res) => {

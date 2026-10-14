@@ -5,6 +5,10 @@ export const list = async (req, res) => {
 };
 
 export const createExpense = async (req, res) => {
+  const allowedCategories = ['Entertainment', 'Food and drink', 'Home', 'Life', 'Transportation', 'Uncategorized', 'Utilities'];
+  if (!allowedCategories.includes(req.body.category || 'Uncategorized')) {
+    throw Object.assign(new Error('Choose a supported expense category'), { statusCode: 400 });
+  }
   const allowedStrategies = ['EQUAL', 'EXACT', 'PERCENTAGE', 'SHARES', 'ADJUSTMENT', 'REIMBURSEMENT', 'ITEMIZED'];
   if (!allowedStrategies.includes(req.body.splitStrategy)) {
     throw Object.assign(new Error('Choose a supported expense split method'), { statusCode: 400 });
@@ -31,6 +35,8 @@ export const createExpense = async (req, res) => {
     paidBy: req.body.paidBy || req.user._id,
     proofBuffer: req.file?.buffer || null,
     type: req.body.type === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'EXPENSE',
+    category: req.body.category || 'Uncategorized',
+    subcategory: req.body.subcategory || null,
   });
   res.status(201).json({ data: expense });
 };
