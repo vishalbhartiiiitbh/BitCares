@@ -83,6 +83,6 @@ The connected dashboard uses these authenticated endpoints:
 - `GET /api/groups/:groupId/balances`
 - `PATCH /api/groups/:groupId` (group creator only; accepts `{ "name": "New name" }`)
 - `GET /api/expenses`
-- `POST /api/expenses`
+- `POST /api/expenses` accepts `multipart/form-data` with `description`, `totalAmount`, `currency`, `groupId`, `paidBy`, `participants` (JSON array), `splitStrategy` (`EQUAL`, `EXACT`, `PERCENTAGE`, `SHARES`, `ADJUSTMENT`, `REIMBURSEMENT`, or `ITEMIZED`), `values` (JSON array when required), optional `items` (JSON array for itemized expenses), optional `paymentProof` image (up to 5 MB), and optional `note`. Payment proof uploads use the configured Cloudinary account.
 - `POST /api/groups/:groupId/leave`
 - `GET /api/groups/:groupId/simplify-debts`

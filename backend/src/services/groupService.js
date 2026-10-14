@@ -52,7 +52,7 @@ export const getGroupBalances = async (groupId, userId) => {
 	}
 
 	const result = await query(
-		`SELECT u.id AS "_id", u.username, u.fullnamae,
+		`SELECT u.id AS "_id", u.username, u.fullnamae, b.currency,
 		        COALESCE(SUM(CASE
 		          WHEN b.user1 = u.id THEN b.net_owed
 		          WHEN b.user2 = u.id THEN -b.net_owed
@@ -62,7 +62,7 @@ export const getGroupBalances = async (groupId, userId) => {
 		 JOIN users u ON u.id = gm.user_id
 		 LEFT JOIN balances b ON b.group_id = gm.group_id
 		 WHERE gm.group_id = $1
-		 GROUP BY u.id, u.username, u.fullnamae
+		 GROUP BY u.id, u.username, u.fullnamae, b.currency
 		 ORDER BY u.fullnamae`,
 		[groupId],
 	);

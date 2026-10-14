@@ -20,6 +20,63 @@ async function apiRequest(path, options = {}) {
   return payload.data;
 }
 
+function calculateItemizedShares(items, participants) {
+  const totals = new Map(participants.map((id) => [id, 0]));
+  items.forEach((item) => {
+    const assigned = item.participantIds.filter((id) => totals.has(id));
+    if (!assigned.length) return;
+    const cents = Math.round((Number(item.amount) || 0) * 100);
+    const share = Math.floor(cents / assigned.length);
+    let remainder = cents - share * assigned.length;
+    assigned.forEach((id) => {
+      totals.set(id, totals.get(id) + share + (remainder > 0 ? 1 : 0));
+      if (remainder > 0) remainder -= 1;
+    });
+  });
+  return participants.map((id) => (totals.get(id) / 100).toFixed(2));
+}
+
+function getDefaultSplitValues(strategy, participants, totalAmount) {
+  const defaults = {};
+  if (strategy === 'EQUAL' || strategy === 'ITEMIZED') return defaults;
+  if (strategy === 'PERCENTAGE') {
+    const cents = 10000;
+    const share = Math.floor(cents / participants.length);
+    let remainder = cents - share * participants.length;
+    participants.forEach((id) => {
+      defaults[id] = ((share + (remainder > 0 ? 1 : 0)) / 100).toFixed(2);
+      if (remainder > 0) remainder -= 1;
+    });
+    return defaults;
+  }
+  if (strategy === 'SHARES') {
+    participants.forEach((id) => { defaults[id] = '1'; });
+    return defaults;
+  }
+  if (strategy === 'ADJUSTMENT') {
+    participants.forEach((id) => { defaults[id] = '0'; });
+    return defaults;
+  }
+  const totalCents = Math.round((Number(totalAmount) || 0) * 100);
+  const share = Math.floor(totalCents / participants.length);
+  let remainder = totalCents - share * participants.length;
+  participants.forEach((id) => {
+    defaults[id] = ((share + (remainder > 0 ? 1 : 0)) / 100).toFixed(2);
+    if (remainder > 0) remainder -= 1;
+  });
+  return defaults;
+}
+
+const expenseSplitModes = [
+  { id: 'EQUAL', label: 'Split equally' },
+  { id: 'EXACT', label: 'Split by exact amounts' },
+  { id: 'PERCENTAGE', label: 'Split by percentages' },
+  { id: 'SHARES', label: 'Split by shares' },
+  { id: 'ADJUSTMENT', label: 'Split by adjustment' },
+  { id: 'REIMBURSEMENT', label: 'Split by reimbursement' },
+  { id: 'ITEMIZED', label: 'Itemized expenses' },
+];
+
 function App() {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState(emptyForm);
@@ -268,7 +325,21 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [settlementsBusy, setSettlementsBusy] = useState(false);
   const [groupSettingsBusy, setGroupSettingsBusy] = useState(false);
   const [groupSettingsError, setGroupSettingsError] = useState('');
-  const [expenseGroupId, setExpenseGroupId] = useState('');
+  const [expenseDraft, setExpenseDraft] = useState({
+    description: '',
+    totalAmount: '',
+    currency: 'INR',
+    groupId: '',
+    paidBy: user._id,
+    participantIds: [user._id],
+    strategy: 'EQUAL',
+    splitValues: {},
+    items: [],
+    note: '',
+    paymentProof: null,
+  });
+  const [expenseError, setExpenseError] = useState('');
+  const [expenseBusy, setExpenseBusy] = useState(false);
   const [groupName, setGroupName] = useState('');
   const [groupMemberIds, setGroupMemberIds] = useState([]);
   const [groupMemberIdentifier, setGroupMemberIdentifier] = useState('');
@@ -491,31 +562,116 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
 
   const addExpense = async (event) => {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    const group = groups.find((item) => item._id === values.groupId);
+    const group = groups.find((item) => item._id === expenseDraft.groupId);
+    const participants = expenseDraft.participantIds;
+    if (!participants.length) {
+      setExpenseError('Select at least one person to split this expense with.');
+      return;
+    }
+    if (expenseDraft.strategy === 'ITEMIZED' && expenseDraft.items.some((item) =>
+      !item.description.trim() || !(Number(item.amount) > 0) || !item.participantIds.some((id) => participants.includes(id)))) {
+      setExpenseError('Each item needs a description, a positive amount, and at least one selected person.');
+      return;
+    }
+    const splitValues = expenseDraft.strategy === 'ITEMIZED'
+      ? calculateItemizedShares(expenseDraft.items, participants)
+      : participants.map((id) => {
+        if (expenseDraft.strategy === 'EQUAL') return null;
+        return expenseDraft.splitValues[id] ?? getDefaultSplitValues(expenseDraft.strategy, participants, expenseDraft.totalAmount)[id];
+      });
+    const amount = expenseDraft.strategy === 'ITEMIZED'
+      ? (expenseDraft.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)).toFixed(2)
+      : expenseDraft.totalAmount;
+    if (['EXACT', 'REIMBURSEMENT'].includes(expenseDraft.strategy)
+      && Math.abs(splitValues.reduce((sum, value) => sum + Number(value), 0) - Number(amount)) > 0.001) {
+      setExpenseError('The split amounts must add up to the expense total.');
+      return;
+    }
+    if (expenseDraft.strategy === 'PERCENTAGE'
+      && Math.abs(splitValues.reduce((sum, value) => sum + Number(value), 0) - 100) > 0.001) {
+      setExpenseError('The percentages must add up to 100%.');
+      return;
+    }
+    if (expenseDraft.strategy === 'ADJUSTMENT'
+      && Math.abs(splitValues.reduce((sum, value) => sum + Number(value), 0)) > 0.001) {
+      setExpenseError('Adjustments must balance to zero.');
+      return;
+    }
+    if (expenseDraft.strategy === 'SHARES' && splitValues.some((value) => !(Number(value) > 0))) {
+      setExpenseError('Each person must have at least one share.');
+      return;
+    }
+    const body = new FormData();
+    body.set('groupId', expenseDraft.groupId);
+    body.set('paidBy', expenseDraft.paidBy);
+    body.set('totalAmount', amount);
+    body.set('description', expenseDraft.description);
+    body.set('currency', expenseDraft.currency);
+    body.set('splitStrategy', expenseDraft.strategy);
+    body.set('type', expenseDraft.strategy === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'EXPENSE');
+    body.set('participants', JSON.stringify(participants));
+    if (expenseDraft.strategy !== 'EQUAL') body.set('values', JSON.stringify(splitValues));
+    if (expenseDraft.strategy === 'ITEMIZED') {
+      body.set('items', JSON.stringify(expenseDraft.items.map(({ description, amount: itemAmount, participantIds }) => ({
+        description,
+        amount: itemAmount,
+        participantIds: participantIds.filter((id) => participants.includes(id)),
+      }))));
+    }
+    if (expenseDraft.note.trim()) body.set('note', expenseDraft.note.trim());
+    if (expenseDraft.paymentProof) body.set('paymentProof', expenseDraft.paymentProof);
+    setExpenseBusy(true);
+    setExpenseError('');
     try {
-      const expense = await apiRequest("/expenses", {
+      const expense = await apiRequest('/expenses', {
         method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({
-          groupId: values.groupId,
-          paidBy: user._id,
-          totalAmount: values.totalAmount,
-          description: values.description,
-          splitStrategy: "EQUAL",
-          participants: group?.members?.map((member) => member._id) || [
-            user._id,
-          ],
-        }),
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body,
       });
       setExpenses((current) => [expense, ...current]);
       setShowExpenseForm(false);
-      if (selectedGroup?._id === values.groupId) {
+      if (selectedGroup?._id === expenseDraft.groupId) {
         await openGroupDetails({ ...selectedGroup, ...group });
       }
     } catch (error) {
-      setFormMessage(error.message);
+      setExpenseError(error.message);
+    } finally {
+      setExpenseBusy(false);
     }
+  };
+
+  const openExpenseForm = (groupId = '') => {
+    const group = groups.find((item) => item._id === groupId);
+    const participantIds = group?.members?.map((member) => member._id) || [user._id];
+    setExpenseDraft({
+      description: '',
+      totalAmount: '',
+      currency: 'INR',
+      groupId,
+      paidBy: user._id,
+      participantIds,
+      strategy: 'EQUAL',
+      splitValues: {},
+      items: [],
+      note: '',
+      paymentProof: null,
+    });
+    setExpenseError('');
+    setShowExpenseForm(true);
+  };
+
+  const updateExpenseDraft = (key, value) => setExpenseDraft((current) => ({ ...current, [key]: value }));
+  const changeExpenseGroup = (groupId) => {
+    const group = groups.find((item) => item._id === groupId);
+    const participantIds = group?.members?.map((member) => member._id) || [user._id];
+    setExpenseDraft((current) => ({
+      ...current,
+      groupId,
+      paidBy: participantIds.includes(current.paidBy) ? current.paidBy : user._id,
+      participantIds,
+      splitValues: {},
+      items: current.items.map((item) => ({ ...item, participantIds: item.participantIds.filter((id) => participantIds.includes(id)) })),
+    }));
   };
 
   const simplifyGroup = async (groupId) => {
@@ -659,6 +815,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     ? (first.fullnamae || first.username).localeCompare(second.fullnamae || second.username, undefined, { sensitivity: 'base' })
     : new Date(second.addedAt) - new Date(first.addedAt));
   const pendingFriendRequests = friendRequests.filter((request) => request.status === 'pending');
+  const expenseGroup = groups.find((group) => group._id === expenseDraft.groupId);
+  const expenseMembers = expenseGroup?.members || [user];
+  const selectedExpenseMembers = expenseMembers.filter((member) => expenseDraft.participantIds.includes(member._id));
+  const itemizedTotal = expenseDraft.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  const expenseSplitDefaults = getDefaultSplitValues(expenseDraft.strategy, expenseDraft.participantIds, expenseDraft.totalAmount);
+  const splitModeTotal = selectedExpenseMembers.reduce((sum, member) => sum + (
+    Number(expenseDraft.splitValues[member._id] ?? expenseSplitDefaults[member._id]) || 0
+  ), 0);
 
   return (
     <main className="dashboard-page">
@@ -769,7 +933,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </div>
             {groups.length ? (
               groups.map((group) => (
-                <button className="side-group" key={group._id}>
+                <button className="side-group" key={group._id} type="button" onClick={() => openGroupDetails(group)}>
                   <span className="mini-group-icon">
                     {group.name.slice(0, 1).toUpperCase()}
                   </span>
@@ -933,7 +1097,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               </button>
               <button
                 className="primary-action"
-                onClick={() => { setExpenseGroupId(''); setShowExpenseForm(true); }}
+                onClick={() => openExpenseForm('')}
               >
                 Add an expense
               </button>
@@ -1162,42 +1326,140 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             <Modal
               title="Add an expense"
               className={selectedGroup ? 'group-expense-modal' : ''}
-              onClose={() => { setShowExpenseForm(false); setExpenseGroupId(''); }}
+              onClose={() => setShowExpenseForm(false)}
             >
-              <form onSubmit={addExpense}>
-                <label>
-                  Description
-                  <input
-                    name="description"
-                    placeholder="Dinner at Prego"
-                    required
-                  />
-                </label>
-                <label>
-                  Amount
-                  <input
-                    name="totalAmount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    placeholder="42.50"
-                    required
-                  />
-                </label>
-                <label>
-                  Group
-                  <select name="groupId" required value={expenseGroupId} onChange={(event) => setExpenseGroupId(event.target.value)}>
-                    <option value="" disabled>
-                      Select a group
-                    </option>
-                    {groups.map((group) => (
-                      <option key={group._id} value={group._id}>
-                        {group.name}
-                      </option>
-                    ))}
+              <form className="expense-entry-form" onSubmit={addExpense}>
+                <div className="expense-description-row">
+                  <label>Description<input value={expenseDraft.description} onChange={(event) => updateExpenseDraft('description', event.target.value)} placeholder="Dinner at Prego" maxLength="500" required /></label>
+                  <label>Amount<input value={expenseDraft.strategy === 'ITEMIZED' ? itemizedTotal.toFixed(2) : expenseDraft.totalAmount} onChange={(event) => updateExpenseDraft('totalAmount', event.target.value)} type="number" min="0.01" step="0.01" placeholder="0.00" readOnly={expenseDraft.strategy === 'ITEMIZED'} required /></label>
+                  <label>Currency
+                    <select value={expenseDraft.currency} onChange={(event) => updateExpenseDraft('currency', event.target.value)}>
+                      <option value="INR">INR ₹</option><option value="USD">USD $</option><option value="EUR">EUR €</option>
+                      <option value="GBP">GBP £</option><option value="CAD">CAD $</option><option value="AUD">AUD $</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label>Group
+                  <select value={expenseDraft.groupId} onChange={(event) => changeExpenseGroup(event.target.value)}>
+                    <option value="">Personal expense</option>
+                    {groups.map((group) => <option key={group._id} value={group._id}>{group.name}</option>)}
                   </select>
                 </label>
-                <button className="submit-button">Save expense</button>
+
+                <label>Who paid?
+                  <select value={expenseDraft.paidBy} onChange={(event) => updateExpenseDraft('paidBy', event.target.value)}>
+                    {expenseMembers.map((member) => <option key={member._id} value={member._id}>{member._id === user._id ? 'You' : member.fullnamae || member.username}</option>)}
+                  </select>
+                </label>
+
+                <fieldset className="expense-participants">
+                  <legend>Who is included in this expense?</legend>
+                  <div className="expense-participant-list">
+                    {expenseMembers.map((member) => (
+                      <label key={member._id}>
+                        <input
+                          type="checkbox"
+                          checked={expenseDraft.participantIds.includes(member._id)}
+                          onChange={(event) => setExpenseDraft((current) => {
+                            const participantIds = event.target.checked
+                              ? [...current.participantIds, member._id]
+                              : current.participantIds.filter((id) => id !== member._id);
+                            return {
+                              ...current,
+                              participantIds,
+                              splitValues: { ...current.splitValues, [member._id]: undefined },
+                              items: current.items.map((item) => ({
+                                ...item,
+                                participantIds: event.target.checked
+                                  ? item.participantIds
+                                  : item.participantIds.filter((id) => id !== member._id),
+                              })),
+                            };
+                          })}
+                        />
+                        <span>{member._id === user._id ? 'You' : member.fullnamae || member.username}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <fieldset className="expense-split-picker">
+                  <legend>How should the expense be split?</legend>
+                  <div className="expense-split-tabs">
+                    {expenseSplitModes.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        className={expenseDraft.strategy === mode.id ? 'selected' : ''}
+                        onClick={() => setExpenseDraft((current) => ({
+                          ...current,
+                          strategy: mode.id,
+                          splitValues: {},
+                        }))}
+                      >{mode.label}</button>
+                    ))}
+                  </div>
+                  <div className="expense-split-editor">
+                    <h3>{expenseSplitModes.find((mode) => mode.id === expenseDraft.strategy)?.label}</h3>
+                    {expenseDraft.strategy === 'EQUAL' && <p>The total will be divided evenly between the selected people.</p>}
+                    {['EXACT', 'PERCENTAGE', 'SHARES', 'ADJUSTMENT', 'REIMBURSEMENT'].includes(expenseDraft.strategy) && (
+                      <>
+                        {selectedExpenseMembers.map((member) => (
+                          <label className="expense-split-value" key={member._id}>
+                            <span>{member._id === user._id ? 'You' : member.fullnamae || member.username}</span>
+                            <input
+                              type="number"
+                              min={expenseDraft.strategy === 'ADJUSTMENT' ? undefined : '0'}
+                              step="0.01"
+                              value={expenseDraft.splitValues[member._id] ?? expenseSplitDefaults[member._id] ?? ''}
+                              onChange={(event) => setExpenseDraft((current) => ({ ...current, splitValues: { ...current.splitValues, [member._id]: event.target.value } }))}
+                              placeholder={expenseDraft.strategy === 'ADJUSTMENT' ? '+/- amount' : '0'}
+                              required
+                            />
+                            <small>{expenseDraft.strategy === 'PERCENTAGE' ? '%' : expenseDraft.strategy === 'SHARES' ? 'share(s)' : expenseDraft.strategy === 'ADJUSTMENT' ? 'adjustment' : expenseDraft.currency}</small>
+                          </label>
+                        ))}
+                        <div className="expense-split-total">
+                          <span>{expenseDraft.strategy === 'PERCENTAGE' ? 'PERCENT TOTAL' : expenseDraft.strategy === 'ADJUSTMENT' ? 'ADJUSTMENT TOTAL' : expenseDraft.strategy === 'SHARES' ? 'SHARES TOTAL' : 'AMOUNT TOTAL'}</span>
+                          <strong>{splitModeTotal.toFixed(2)}{expenseDraft.strategy === 'PERCENTAGE' ? '%' : expenseDraft.strategy === 'SHARES' ? ' shares' : ` ${expenseDraft.currency}`}</strong>
+                          {(expenseDraft.strategy === 'EXACT' || expenseDraft.strategy === 'REIMBURSEMENT') && <small>{(Number(expenseDraft.totalAmount) - splitModeTotal).toFixed(2)} remaining</small>}
+                        </div>
+                      </>
+                    )}
+                    {expenseDraft.strategy === 'ITEMIZED' && (
+                      <div className="expense-itemized-editor">
+                        {expenseDraft.items.map((item) => (
+                          <article key={item.id}>
+                            <div className="expense-item-fields">
+                              <input aria-label="Item description" value={item.description} onChange={(event) => setExpenseDraft((current) => ({ ...current, items: current.items.map((candidate) => candidate.id === item.id ? { ...candidate, description: event.target.value } : candidate) }))} placeholder="Item name" required />
+                              <input aria-label="Item amount" type="number" min="0.01" step="0.01" value={item.amount} onChange={(event) => setExpenseDraft((current) => ({ ...current, items: current.items.map((candidate) => candidate.id === item.id ? { ...candidate, amount: event.target.value } : candidate) }))} placeholder="0.00" required />
+                              <button type="button" onClick={() => setExpenseDraft((current) => ({ ...current, items: current.items.filter((candidate) => candidate.id !== item.id) }))} aria-label="Remove item">×</button>
+                            </div>
+                            <div className="expense-item-participants">
+                              {selectedExpenseMembers.map((member) => (
+                                <label key={member._id}><input type="checkbox" checked={item.participantIds.includes(member._id)} onChange={(event) => setExpenseDraft((current) => ({ ...current, items: current.items.map((candidate) => candidate.id === item.id ? { ...candidate, participantIds: event.target.checked ? [...candidate.participantIds, member._id] : candidate.participantIds.filter((id) => id !== member._id) } : candidate) }))} />{member._id === user._id ? 'You' : member.username}</label>
+                              ))}
+                            </div>
+                          </article>
+                        ))}
+                        <button type="button" className="expense-add-item" onClick={() => setExpenseDraft((current) => ({ ...current, items: [...current.items, { id: `${Date.now()}-${Math.random()}`, description: '', amount: '', participantIds: current.participantIds }] }))}>＋ Add item</button>
+                      </div>
+                    )}
+                  </div>
+                </fieldset>
+
+                {expenseDraft.strategy === 'REIMBURSEMENT' && <p className="modal-help">Enter how much each selected person should reimburse; amounts must add up to the total.</p>}
+                <div className="expense-proof-fields">
+                  <label>Payment proof (optional)<input type="file" accept="image/*" onChange={(event) => updateExpenseDraft('paymentProof', event.target.files?.[0] || null)} /></label>
+                  {expenseDraft.paymentProof && <small>{expenseDraft.paymentProof.name}</small>}
+                  <label>Note (optional)<textarea value={expenseDraft.note} onChange={(event) => updateExpenseDraft('note', event.target.value)} rows="3" placeholder="Add a note about this expense" /></label>
+                </div>
+                {expenseError && <p className="error-message" role="alert">{expenseError}</p>}
+                <div className="expense-form-actions">
+                  <button type="button" className="quiet-button" onClick={() => setShowExpenseForm(false)}>Cancel</button>
+                  <button className="submit-button" disabled={expenseBusy || !selectedExpenseMembers.length || (expenseDraft.strategy === 'ITEMIZED' && !expenseDraft.items.length)}>{expenseBusy ? 'Saving…' : 'Save expense'}</button>
+                </div>
               </form>
             </Modal>
           )}
@@ -1274,7 +1536,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               user={user}
               onClose={() => setSelectedGroup(null)}
               onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
-              onAddExpense={() => { setExpenseGroupId(selectedGroup._id); setShowExpenseForm(true); }}
+              onAddExpense={() => openExpenseForm(selectedGroup._id)}
               onSettle={() => loadGroupSettlements(selectedGroup._id)}
               onRename={(name) => renameGroup(selectedGroup._id, name)}
               onLeave={async () => {
@@ -1439,7 +1701,7 @@ function GroupDetails({
                     {visibleTransactions.map((transaction) => (
                       <article className="transaction-row" key={transaction._id}>
                         <span className="transaction-icon">▤</span>
-                        <div><b>{transaction.description}</b><small>{transaction.paidByName || transaction.paidByUsername || 'Member'} paid · {new Date(transaction.createdAt).toLocaleDateString()}</small></div>
+                        <div><b>{transaction.description}</b><small>{transaction.paidByName || transaction.paidByUsername || 'Member'} paid · {new Date(transaction.createdAt).toLocaleDateString()}</small>{transaction.note && <small>{transaction.note}</small>}{transaction.items?.map((item, itemIndex) => <small key={`${transaction._id}-${itemIndex}`}>{item.description}: {transaction.currency} {item.amount}</small>)}{transaction.paymentProofUrl && <a className="expense-proof-link" href={transaction.paymentProofUrl} target="_blank" rel="noreferrer">View payment proof</a>}</div>
                         <strong>{transaction.currency} {transaction.totalAmount}</strong>
                       </article>
                     ))}
@@ -1459,10 +1721,10 @@ function GroupDetails({
                       const amount = Number(balance.netBalance);
                       const label = Math.abs(amount) < 0.005 ? 'settled up' : amount > 0 ? 'gets back' : 'owes';
                       return (
-                        <article className="group-balance-row" key={balance._id}>
+                        <article className="group-balance-row" key={`${balance._id}-${balance.currency || 'INR'}`}>
                           <span className={`member-avatar ${amount > 0 ? 'mint' : amount < 0 ? 'coral-bg' : ''}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
                           <div><strong>{balance.fullnamae || balance.username}</strong><small>@{balance.username}</small></div>
-                          <p className={amount > 0 ? 'balance-positive' : amount < 0 ? 'balance-negative' : ''}>{label}{Math.abs(amount) >= 0.005 && <> <b>INR {Math.abs(amount).toFixed(2)}</b></>}</p>
+                          <p className={amount > 0 ? 'balance-positive' : amount < 0 ? 'balance-negative' : ''}>{label}{Math.abs(amount) >= 0.005 && <> <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></>}</p>
                         </article>
                       );
                     })}
@@ -1471,9 +1733,9 @@ function GroupDetails({
                 <div className="settlement-plan">
                   <h4>Suggested settlements</h4>
                   {settlementsBusy ? <p>Finding the simplest way to settle…</p> : settlements.length ? settlements.map((settlement, index) => (
-                    <div className="settlement-plan-row" key={`${settlement.from}-${settlement.to}-${index}`}>
+                    <div className="settlement-plan-row" key={`${settlement.from}-${settlement.to}-${settlement.currency}-${index}`}>
                       <span><strong>{memberName(settlement.from)}</strong> pays <strong>{memberName(settlement.to)}</strong></span>
-                      <b>INR {Number(settlement.amount).toFixed(2)}</b>
+                      <b>{settlement.currency} {Number(settlement.amount).toFixed(2)}</b>
                     </div>
                   )) : settlementError ? <p className="error-message">{settlementError}</p> : <p>Choose “Settle up” to calculate suggested payments, or this group may already be settled.</p>}
                 </div>
@@ -1504,9 +1766,9 @@ function GroupDetails({
               const amount = Number(balance.netBalance);
               if (Math.abs(amount) < 0.005) return null;
               return (
-                <div className="group-sidebar-balance" key={balance._id}>
+                <div className="group-sidebar-balance" key={`${balance._id}-${balance.currency || 'INR'}`}>
                   <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
-                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'gets back' : 'owes'} INR {Math.abs(amount).toFixed(2)}</small></div>
+                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'gets back' : 'owes'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
                 </div>
               );
             })}
