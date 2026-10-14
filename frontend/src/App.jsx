@@ -246,6 +246,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
+  const [activePage, setActivePage] = useState('overview');
   const [friendIdentifierType, setFriendIdentifierType] = useState('username');
   const [friendIdentifier, setFriendIdentifier] = useState('');
   const [friendBusy, setFriendBusy] = useState(false);
@@ -589,9 +590,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       <nav className="dashboard-nav">
         <Brand />
         <div className="nav-links">
-          <span className="active">Overview</span>
-          <span>Groups</span>
-          <span>Activity</span>
+          <button className={activePage === 'overview' ? 'active' : ''} type="button" onClick={() => setActivePage('overview')}>Overview</button>
+          <button className={activePage === 'friends' ? 'active' : ''} type="button" onClick={() => setActivePage('friends')}>Friends</button>
         </div>
         <div className="notification-control">
           <button
@@ -671,7 +671,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           )}
         </div>
       </nav>
-      <div className="dashboard-shell">
+      <div className={`dashboard-shell ${activePage === 'friends' ? 'friend-management-shell' : ''}`}>
         <aside className="dashboard-sidebar">
           <div className="side-links">
             <button className="side-link active">
@@ -741,6 +741,102 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           <button className="friend-add-card" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>Add friend by username or email</button>
         </aside>
         <section className="dashboard-content">
+          {activePage === 'friends' ? (
+            <div className="friend-management-page">
+              <div className="friend-management-heading">
+                <div>
+                  <p className="eyebrow">YOUR PEOPLE</p>
+                  <h1>Friends</h1>
+                  <p>Manage your friends, requests, and connections.</p>
+                </div>
+                <button className="primary-action" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>+ Add a friend</button>
+              </div>
+
+              {formMessage && <p className="friend-page-message">{formMessage}</p>}
+              {friendError && <p className="error-message">{friendError}</p>}
+
+              <div className="friend-management-toolbar">
+                <span>{friends.length} {friends.length === 1 ? 'friend' : 'friends'}</span>
+                <label className="friend-sort-control">
+                  <span>Sort friends</span>
+                  <select value={friendSort} onChange={(event) => setFriendSort(event.target.value)}>
+                    <option value="alphabetical">Alphabetical</option>
+                    <option value="recent">Recently added</option>
+                  </select>
+                </label>
+              </div>
+
+              {sortedFriends.length ? (
+                <div className="friend-profile-grid">
+                  {sortedFriends.map((friend) => (
+                    <article className="friend-profile-card" key={friend._id}>
+                      <div className="friend-profile-main">
+                        {friend.coverimage
+                          ? <img className="friend-profile-photo" src={friend.coverimage} alt={`${friend.fullnamae || friend.username}'s profile`} />
+                          : <span className="friend-profile-photo friend-profile-photo-fallback">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
+                        <div className="friend-profile-identity">
+                          <h2>{friend.fullnamae || friend.username}</h2>
+                          <span>@{friend.username}</span>
+                        </div>
+                      </div>
+                      <div className="friend-profile-details">
+                        <span>Email</span>
+                        <strong>{friend.email}</strong>
+                        <span>Friends since</span>
+                        <strong>{new Date(friend.addedAt).toLocaleDateString()}</strong>
+                      </div>
+                      <button
+                        className="friend-profile-remove"
+                        type="button"
+                        onClick={() => { setFriendError(''); setFriendToRemove(friend); }}
+                      >
+                        Remove friend
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="friends-empty-state">
+                  <span>♟</span>
+                  <h2>Your friend list is empty</h2>
+                  <p>Add a friend by their SplitCare username or registered email. They’ll appear here after accepting.</p>
+                  <button className="primary-action" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>Add your first friend</button>
+                </div>
+              )}
+
+              <section className="friend-requests-section">
+                <div className="friend-requests-heading">
+                  <div>
+                    <p className="eyebrow">CONNECTIONS</p>
+                    <h2>Friend request history</h2>
+                  </div>
+                  <span>{pendingFriendRequests.length} pending</span>
+                </div>
+                {friendRequests.length ? (
+                  <div className="friend-request-list">
+                    {friendRequests.map((request) => (
+                      <article className="friend-request-row" key={request._id}>
+                        {request.senderPhoto
+                          ? <img src={request.senderPhoto} alt="" />
+                          : <span className="friend-request-avatar">{(request.senderName || request.senderUsername).slice(0, 1).toUpperCase()}</span>}
+                        <div>
+                          <strong>{request.senderName || request.senderUsername}</strong>
+                          <span>@{request.senderUsername} · {new Date(request.createdAt).toLocaleDateString()}</span>
+                        </div>
+                        {request.status === 'pending'
+                          ? <div className="friend-request-actions">
+                              <button type="button" disabled={friendBusy} onClick={() => respondToFriendRequest(request._id, 'accept')}>Accept</button>
+                              <button type="button" disabled={friendBusy} onClick={() => respondToFriendRequest(request._id, 'decline')}>Decline</button>
+                            </div>
+                          : <span className={`friend-request-status ${request.status}`}>{request.status}</span>}
+                      </article>
+                    ))}
+                  </div>
+                ) : <p className="friends-request-empty">No friend requests yet.</p>}
+              </section>
+            </div>
+          ) : (
+          <>
           <div className="welcome-row">
             <div>
               <p className="eyebrow">Tuesday, September 23</p>
@@ -879,6 +975,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               )}
             </Panel>
           </div>
+          </>
+          )}
           {showGroupForm && (
             <Modal
               title="Create a group"
@@ -1062,7 +1160,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             />
           )}
         </section>
-        <aside className="dashboard-right-rail">
+        {activePage !== 'friends' && <aside className="dashboard-right-rail">
           <p className="eyebrow">SPLITCARE PLUS</p>
           <div className="plus-mark">✦</div>
           <h2>Make every split feel effortless.</h2>
@@ -1072,7 +1170,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           </p>
           <button onClick={() => setShowGroupForm(true)}>Create a group</button>
           <button onClick={() => setShowJoinForm(true)}>Join with code</button>
-        </aside>
+        </aside>}
       </div>
     </main>
   );
