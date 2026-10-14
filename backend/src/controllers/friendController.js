@@ -13,6 +13,7 @@ export const listFriends = async (req, res) => {
   res.json({ data: result.rows });
 };
 
+
 export const listFriendRequests = async (req, res) => {
   const result = await query(
     `SELECT r.id AS "_id", r.status, r.created_at AS "createdAt", r.updated_at AS "updatedAt",
@@ -24,7 +25,9 @@ export const listFriendRequests = async (req, res) => {
      LIMIT 100`,
     [req.user._id],
   );
-  res.json({ data: result.rows });
+  res.json({ data: result.rows 
+    
+  });
 };
 
 export const sendFriendRequest = async (req, res) => {
