@@ -1,5 +1,6 @@
 import { addGroupMember, createGroup, deleteGroup, getGroupBalances, joinGroupByCode, leaveGroup, listGroupsForUser, updateGroupName } from '../services/groupService.js';
 import { simplifyDebts } from '../services/debtSimplifier.js';
+import { recordSettlement } from '../services/settlementService.js';
 
 export const list = async (req, res) => {
   res.json({ data: await listGroupsForUser(req.user._id) });
@@ -63,6 +64,20 @@ export const addMember = async (req, res) => {
       groupId: req.params.groupId,
       requesterId: req.user._id,
       identifier,
+    }),
+  });
+};
+
+export const settle = async (req, res) => {
+  res.status(201).json({
+    data: await recordSettlement({
+      groupId: req.params.groupId,
+      payerId: req.user._id,
+      payeeId: req.body?.payeeId,
+      amount: req.body?.amount,
+      currency: req.body?.currency,
+      note: req.body?.note || null,
+      proofBuffer: req.file?.buffer || null,
     }),
   });
 };

@@ -32,7 +32,29 @@ export const listExpenses = async (groupId) => {
      ORDER BY e.created_at DESC LIMIT 100`,
     groupId ? [groupId] : [],
   );
-  return result.rows;
+  if (!groupId) return result.rows;
+
+  const settlements = await query(
+    `SELECT s.id AS "_id", s.group_id AS "groupId",
+            'Settlement to ' || recipient.fullnamae AS description,
+            s.amount::text AS "totalAmount", s.currency, 'SETTLEMENT' AS type,
+            'Settlement' AS category, NULL::text AS subcategory,
+            'SETTLEMENT' AS "splitStrategy", s.paid_by AS "paidBy",
+            s.created_at AS "createdAt", s.note,
+            s.payment_proof_url AS "paymentProofUrl",
+            payer.username AS "paidByUsername", payer.fullnamae AS "paidByName",
+            ARRAY[s.paid_by::text, s.paid_to::text] AS "participantIds",
+            '[]'::json AS items, s.paid_to AS "paidTo",
+            recipient.username AS "paidToUsername", recipient.fullnamae AS "paidToName"
+     FROM group_settlements s
+     JOIN users payer ON payer.id = s.paid_by
+     JOIN users recipient ON recipient.id = s.paid_to
+     WHERE s.group_id = $1`,
+    [groupId],
+  );
+  return [...result.rows, ...settlements.rows]
+    .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
+    .slice(0, 100);
 };
 
 export const addExpense = async ({

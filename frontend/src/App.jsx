@@ -776,6 +776,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setSettlementsBusy(false);
     }
   };
+  const recordGroupSettlement = async (groupId, settlement) => {
+    await apiRequest(`/groups/${groupId}/settlements`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: settlement,
+    });
+    await openGroupDetails(selectedGroup);
+    await loadGroupSettlements(groupId);
+  };
   const renameGroup = async (groupId, name) => {
     setGroupSettingsBusy(true);
     setGroupSettingsError('');
@@ -1642,6 +1651,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
               onAddExpense={() => openExpenseForm(selectedGroup._id)}
               onSettle={() => loadGroupSettlements(selectedGroup._id)}
+              onRecordSettlement={(settlement) => recordGroupSettlement(selectedGroup._id, settlement)}
               onRename={(name) => renameGroup(selectedGroup._id, name)}
               onAddMember={(identifier) => addMemberToGroup(selectedGroup._id, identifier)}
               onDelete={async () => {
@@ -1732,6 +1742,7 @@ function GroupDetails({
   onSettle,
   onRename,
   onAddMember,
+  onRecordSettlement,
   onDelete,
   onLeave,
 }) {
@@ -1739,6 +1750,10 @@ function GroupDetails({
   const [hideUninvolved, setHideUninvolved] = useState(false);
   const [nameDraft, setNameDraft] = useState(group.name);
   const [memberIdentifierDraft, setMemberIdentifierDraft] = useState('');
+  const [settlementOpen, setSettlementOpen] = useState(false);
+  const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: 'INR', amount: '', note: '', paymentProof: null });
+  const [settlementSaveError, setSettlementSaveError] = useState('');
+  const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
   const isOwner = group.createdBy === user._id;
   const visibleTransactions = hideUninvolved
     ? transactions.filter((transaction) => transaction.paidBy === user._id || transaction.participantIds?.includes(user._id))
@@ -1766,6 +1781,36 @@ function GroupDetails({
     link.click();
     URL.revokeObjectURL(url);
   };
+  const openSettlementForm = () => {
+    setSettlementDraft({
+      payeeId: '',
+      currency: balances.find((balance) => balance.currency)?.currency || 'INR',
+      amount: '',
+      note: '',
+      paymentProof: null,
+    });
+    setSettlementSaveError('');
+    setSettlementOpen(true);
+  };
+  const submitSettlement = async (event) => {
+    event.preventDefault();
+    setSettlementSaveBusy(true);
+    setSettlementSaveError('');
+    const form = new FormData();
+    form.append('payeeId', settlementDraft.payeeId);
+    form.append('currency', settlementDraft.currency);
+    form.append('amount', settlementDraft.amount);
+    form.append('note', settlementDraft.note);
+    if (settlementDraft.paymentProof) form.append('paymentProof', settlementDraft.paymentProof);
+    try {
+      await onRecordSettlement(form);
+      setSettlementOpen(false);
+    } catch (error) {
+      setSettlementSaveError(error.message);
+    } finally {
+      setSettlementSaveBusy(false);
+    }
+  };
 
   useEffect(() => setNameDraft(group.name), [group._id, group.name]);
 
@@ -1784,7 +1829,7 @@ function GroupDetails({
           </div>
           <div className="group-workspace-actions">
             <button className="group-add-expense" onClick={onAddExpense}>＋ Add an expense</button>
-            <button className="group-settle-button" onClick={() => { setActiveTab('balances'); onSettle(); }}>Settle up</button>
+            <button className="group-settle-button" onClick={() => { setActiveTab('balances'); onSettle(); openSettlementForm(); }}>Settle up</button>
           </div>
           <div className="group-id-card">
             <span>GROUP ID</span><strong>{group.groupCode || 'Not assigned'}</strong>
@@ -1807,14 +1852,14 @@ function GroupDetails({
               <section>
                 <div className="group-section-heading">
                   <div><p className="eyebrow">THE PAPER TRAIL</p><h3>Group activity</h3></div>
-                  <span>{transactions.length} expenses</span>
+                  <span>{transactions.length} transactions</span>
                 </div>
                 {transactionsBusy ? <p className="empty-state">Loading group activity…</p> : visibleTransactions.length ? (
                   <div className="transaction-list">
                     {visibleTransactions.map((transaction) => (
                       <article className="transaction-row" key={transaction._id}>
                         <span className="transaction-icon">▤</span>
-                        <div><b>{transaction.description}</b><small>{transaction.category || 'Uncategorized'}{transaction.subcategory ? ` · ${transaction.subcategory}` : ''} · {transaction.paidByName || transaction.paidByUsername || 'Member'} paid · {new Date(transaction.createdAt).toLocaleDateString()}</small>{transaction.note && <small>{transaction.note}</small>}{transaction.items?.map((item, itemIndex) => <small key={`${transaction._id}-${itemIndex}`}>{item.description}: {transaction.currency} {item.amount}</small>)}{transaction.paymentProofUrl && <a className="expense-proof-link" href={transaction.paymentProofUrl} target="_blank" rel="noreferrer">View payment proof</a>}</div>
+                        <div><b>{transaction.description}</b><small>{transaction.category || 'Uncategorized'}{transaction.subcategory ? ` · ${transaction.subcategory}` : ''} · {transaction.paidByName || transaction.paidByUsername || 'Member'} {transaction.type === 'SETTLEMENT' ? `paid ${transaction.paidToName || 'a member'}` : 'paid'} · {new Date(transaction.createdAt).toLocaleDateString()}</small>{transaction.note && <small>{transaction.note}</small>}{transaction.items?.map((item, itemIndex) => <small key={`${transaction._id}-${itemIndex}`}>{item.description}: {transaction.currency} {item.amount}</small>)}{transaction.paymentProofUrl && <a className="expense-proof-link" href={transaction.paymentProofUrl} target="_blank" rel="noreferrer">View payment proof</a>}</div>
                         <strong>{transaction.currency} {transaction.totalAmount}</strong>
                       </article>
                     ))}
@@ -1845,6 +1890,7 @@ function GroupDetails({
                 ) : <p className="empty-state">No group balances to show.</p>}
                 <div className="settlement-plan">
                   <h4>Suggested settlements</h4>
+                  <button className="group-inline-action" onClick={() => openSettlementForm()}>Record a payment</button>
                   {settlementsBusy ? <p>Finding the simplest way to settle…</p> : settlements.length ? settlements.map((settlement, index) => (
                     <div className="settlement-plan-row" key={`${settlement.from}-${settlement.to}-${settlement.currency}-${index}`}>
                       <span><strong>{memberName(settlement.from)}</strong> pays <strong>{memberName(settlement.to)}</strong></span>
@@ -1912,6 +1958,39 @@ function GroupDetails({
           </aside>
         </div>
       </section>
+      {settlementOpen && (
+        <Modal title="Record a payment" onClose={() => setSettlementOpen(false)} className="settlement-modal">
+          <form className="group-settlement-form" onSubmit={submitSettlement}>
+            <p className="modal-help">Record a payment you made to someone you directly owe. It can’t exceed the outstanding amount between you in that currency.</p>
+            <label>Paid to
+              <select value={settlementDraft.payeeId} onChange={(event) => setSettlementDraft((current) => ({ ...current, payeeId: event.target.value }))} required>
+                <option value="">Choose a group member</option>
+                {(group.members || []).filter((member) => member._id !== user._id).map((member) => (
+                  <option key={member._id} value={member._id}>{member.fullnamae || member.username} (@{member.username})</option>
+                ))}
+              </select>
+            </label>
+            <div className="group-settlement-amount-fields">
+              <label>Currency
+                <select value={settlementDraft.currency} onChange={(event) => setSettlementDraft((current) => ({ ...current, currency: event.target.value }))}>
+                  {[...new Set(['INR', ...balances.map((balance) => balance.currency).filter(Boolean)])].map((currency) => <option key={currency}>{currency}</option>)}
+                </select>
+              </label>
+              <label>Amount
+                <input type="number" min="0.01" step="0.01" value={settlementDraft.amount} onChange={(event) => setSettlementDraft((current) => ({ ...current, amount: event.target.value }))} required />
+              </label>
+            </div>
+            <label>Payment proof (optional)
+              <input type="file" accept="image/*" onChange={(event) => setSettlementDraft((current) => ({ ...current, paymentProof: event.target.files?.[0] || null }))} />
+            </label>
+            <label>Note (optional)
+              <textarea value={settlementDraft.note} onChange={(event) => setSettlementDraft((current) => ({ ...current, note: event.target.value }))} maxLength="1000" rows="3" />
+            </label>
+            {settlementSaveError && <p className="error-message" role="alert">{settlementSaveError}</p>}
+            <button className="submit-button" disabled={settlementSaveBusy || !settlementDraft.payeeId}>{settlementSaveBusy ? 'Saving payment…' : 'Record payment'}</button>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -1943,7 +2022,10 @@ function BalanceRow({ name, amount, tone }) {
 }
 function Modal({ title, onClose, children, className = '' }) {
   return (
-    <div className={`modal-backdrop ${className}`} onMouseDown={onClose}>
+    <div className={`modal-backdrop ${className}`} onMouseDown={(event) => {
+      event.stopPropagation();
+      if (event.target === event.currentTarget) onClose();
+    }}>
       <section
         className="modal"
         onMouseDown={(event) => event.stopPropagation()}
