@@ -86,7 +86,12 @@ function App() {
 
   if (user)
     return (
-      <Dashboard user={user} accessToken={accessToken} onLogout={signOut} />
+      <Dashboard
+        user={user}
+        accessToken={accessToken}
+        onLogout={signOut}
+        onProfileUpdated={setUser}
+      />
     );
 
   return (
@@ -234,7 +239,7 @@ function Brand() {
   );
 }
 
-function Dashboard({ user, accessToken, onLogout }) {
+function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -248,10 +253,24 @@ function Dashboard({ user, accessToken, onLogout }) {
   const [joinCode, setJoinCode] = useState('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', password: '', coverimage: null });
+  const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
+  const [passwordUpdateEnabled, setPasswordUpdateEnabled] = useState(false);
+  const [currentPasswordVerified, setCurrentPasswordVerified] = useState(false);
+  const [photoPreview, setPhotoPreview] = useState('');
   const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState('');
   const [formMessage, setFormMessage] = useState("");
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  useEffect(() => {
+    if (!profileForm.coverimage) {
+      setPhotoPreview('');
+      return undefined;
+    }
+    const preview = URL.createObjectURL(profileForm.coverimage);
+    setPhotoPreview(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [profileForm.coverimage]);
 
   useEffect(() => {
     Promise.all([
@@ -376,18 +395,51 @@ function Dashboard({ user, accessToken, onLogout }) {
     }
   };
   const updateProfileField = (event) => setProfileForm((current) => ({ ...current, [event.target.name]: event.target.type === 'file' ? event.target.files[0] : event.target.value }));
+  const verifyProfilePassword = async () => {
+    setProfileBusy(true);
+    setProfileError('');
+    try {
+      await apiRequest('/users/profile/verify-password', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ currentPassword: profileForm.currentPassword }),
+      });
+      setCurrentPasswordVerified(true);
+    } catch (error) {
+      setProfileError(error.message);
+    } finally {
+      setProfileBusy(false);
+    }
+  };
   const updateProfile = async (event) => {
     event.preventDefault();
+    if (passwordUpdateEnabled && !currentPasswordVerified) {
+      setProfileError('Verify your current password before setting a new one.');
+      return;
+    }
     setProfileBusy(true);
+    setProfileError('');
     const body = new FormData();
-    Object.entries(profileForm).forEach(([key, value]) => { if (value) body.append(key, value); });
+    ['username', 'email', 'fullnamae', 'phone'].forEach((key) => body.append(key, profileForm[key]));
+    if (profileForm.coverimage) body.append('coverimage', profileForm.coverimage);
+    if (passwordUpdateEnabled) {
+      body.append('currentPassword', profileForm.currentPassword);
+      body.append('newPassword', profileForm.newPassword);
+    }
     try {
       const result = await apiRequest(`/users/profile/${user._id}`, { method: 'PUT', headers: authHeaders, body });
-      Object.assign(user, result.user);
+      onProfileUpdated(result.user);
+      setProfileForm({ username: result.user.username || '', email: result.user.email || '', fullnamae: result.user.fullnamae || '', phone: result.user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
+      setPasswordUpdateEnabled(false);
+      setCurrentPasswordVerified(false);
       setShowProfile(false);
       setFormMessage('Profile updated successfully.');
-    } catch (error) { setFormMessage(error.message); }
-    finally { setProfileBusy(false); }
+    } catch (error) {
+      setFormMessage(error.message);
+      setProfileError(error.message);
+    } finally {
+      setProfileBusy(false);
+    }
   };
   const friends = [
     ...new Map(
@@ -413,23 +465,32 @@ function Dashboard({ user, accessToken, onLogout }) {
             aria-expanded={showProfileMenu}
             aria-label="Open profile menu"
           >
-            <span className="avatar">{firstName.slice(0, 1)}</span>
+            {user.coverimage
+              ? <img className="avatar profile-avatar-image" src={user.coverimage} alt="" />
+              : <span className="avatar">{firstName.slice(0, 1)}</span>}
             <span>{firstName}</span>
             <small>⌄</small>
           </button>
           {showProfileMenu && (
             <div className="profile-menu">
               <div className="profile-summary">
+                {user.coverimage
+                  ? <img className="profile-menu-avatar" src={user.coverimage} alt="" />
+                  : <span className="profile-menu-avatar profile-menu-avatar-fallback">{firstName.slice(0, 1)}</span>}
                 <strong>{user.fullnamae || user.username}</strong>
                 <span>{user.email}</span>
               </div>
               <button
                 onClick={() => {
+                  setProfileForm({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
+                  setPasswordUpdateEnabled(false);
+                  setCurrentPasswordVerified(false);
+                  setProfileError('');
                   setShowProfile(true);
                   setShowProfileMenu(false);
                 }}
               >
-                Profile
+                Edit profile
               </button>
               <button className="logout-menu-button" onClick={onLogout}>
                 Log out
@@ -702,12 +763,42 @@ function Dashboard({ user, accessToken, onLogout }) {
           {showProfile && (
             <Modal title="Your profile" onClose={() => setShowProfile(false)}>
               <form onSubmit={updateProfile} className="profile-edit-form">
+                <div className="profile-editor-summary">
+                  {photoPreview || user.coverimage
+                    ? <img className="profile-editor-avatar" src={photoPreview || user.coverimage} alt="Profile" />
+                    : <span className="profile-editor-avatar profile-editor-avatar-fallback">{firstName.slice(0, 1)}</span>}
+                  <div>
+                    <strong>{user.fullnamae || user.username}</strong>
+                    <span>@{user.username}</span>
+                  </div>
+                </div>
+                <label className="profile-photo-picker">Profile photo<input name="coverimage" type="file" accept="image/*" onChange={updateProfileField} /></label>
                 <label>Username<input name="username" value={profileForm.username} onChange={updateProfileField} required /></label>
                 <label>Email<input name="email" type="email" value={profileForm.email} onChange={updateProfileField} required /></label>
                 <label>Full name<input name="fullnamae" value={profileForm.fullnamae} onChange={updateProfileField} required /></label>
                 <label>Phone<input name="phone" value={profileForm.phone} onChange={updateProfileField} placeholder="Optional" /></label>
-                <label>New password<input name="password" type="password" value={profileForm.password} onChange={updateProfileField} minLength="8" placeholder="Leave blank to keep current" /></label>
-                <label>Cover image<input name="coverimage" type="file" accept="image/*" onChange={updateProfileField} /></label>
+                <button className="password-update-toggle" type="button" aria-expanded={passwordUpdateEnabled} onClick={() => {
+                  setPasswordUpdateEnabled((enabled) => !enabled);
+                  setProfileForm((current) => ({ ...current, currentPassword: '', newPassword: '' }));
+                  setCurrentPasswordVerified(false);
+                  setProfileError('');
+                }}>
+                  {passwordUpdateEnabled ? 'Cancel password update' : 'Update password'}
+                </button>
+                {passwordUpdateEnabled && (
+                  <div className="password-update-fields">
+                    <label>Current password<input name="currentPassword" type="password" value={profileForm.currentPassword} onChange={updateProfileField} autoComplete="current-password" disabled={currentPasswordVerified} required /></label>
+                    {currentPasswordVerified
+                      ? <>
+                          <p className="password-verified-message">Current password verified.</p>
+                          <label>New password<input name="newPassword" type="password" value={profileForm.newPassword} onChange={updateProfileField} minLength="8" autoComplete="new-password" required /></label>
+                        </>
+                      : <button className="verify-password-button" type="button" onClick={verifyProfilePassword} disabled={profileBusy || !profileForm.currentPassword}>
+                          {profileBusy ? 'Verifying…' : 'Verify current password'}
+                        </button>}
+                  </div>
+                )}
+                {profileError && <p className="error-message">{profileError}</p>}
                 <button className="submit-button" disabled={profileBusy}>{profileBusy ? 'Saving…' : 'Save profile'}</button>
               </form>
               <button className="submit-button profile-logout" onClick={onLogout}>Log out</button>

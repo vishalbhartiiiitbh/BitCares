@@ -370,6 +370,22 @@ input::placeholder {
     border-bottom: 1px solid #dedbd0;
 }
 
+.profile-menu-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.profile-menu-avatar-fallback {
+    display: grid;
+    place-items: center;
+    background: #d8ee4c;
+    color: #19231d;
+    font-size: 16px;
+    font-weight: 800;
+}
+
 .profile-summary strong {
     overflow: hidden;
     color: #19231d;
@@ -828,6 +844,8 @@ input::placeholder {
 .modal {
     position: relative;
     width: min(430px, 100%);
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
     padding: 32px;
     background: #f1eee5;
     box-shadow: 0 20px 70px rgba(16, 23, 19, .25);
@@ -920,6 +938,97 @@ input::placeholder {
     height: 28px;
     background: #207d70;
     color: #fff;
+}
+
+.profile-trigger .profile-avatar-image {
+    object-fit: cover;
+}
+
+.profile-editor-summary {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 5px;
+}
+
+.profile-editor-avatar {
+    display: grid;
+    width: 64px;
+    height: 64px;
+    flex: 0 0 64px;
+    place-items: center;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.profile-editor-avatar-fallback {
+    background: #d8ee4c;
+    color: #19231d;
+    font-size: 24px;
+    font-weight: 800;
+}
+
+.profile-editor-summary div {
+    display: grid;
+    gap: 5px;
+}
+
+.profile-editor-summary strong {
+    color: #19231d;
+    font-size: 14px;
+}
+
+.profile-editor-summary span {
+    color: #8b9187;
+    font-size: 11px;
+}
+
+.profile-photo-picker input {
+    padding: 8px 0;
+    font-size: 12px;
+}
+
+.password-update-toggle {
+    width: fit-content;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: #52623e;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+}
+
+.password-update-toggle:hover {
+    color: #19231d;
+    text-decoration: underline;
+}
+
+.password-update-fields {
+    display: grid;
+    gap: 15px;
+}
+
+.verify-password-button {
+    width: fit-content;
+    padding: 8px 12px;
+    border: 1px solid #c9c8be;
+    background: transparent;
+    color: #19231d;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.verify-password-button:disabled {
+    cursor: wait;
+    opacity: .6;
+}
+
+.password-verified-message {
+    margin: 0;
+    color: #52623e;
+    font-size: 11px;
+    font-weight: 700;
 }
 
 .dashboard-shell {

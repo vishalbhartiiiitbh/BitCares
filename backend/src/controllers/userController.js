@@ -41,18 +41,44 @@ export const refreshToken = async (req, res) => { const incoming = req.cookies?.
 export const accessToken = async (req, res) => res.json({ data: { accessToken: makeAccessToken(req.user), tokenType: 'Bearer' } });
 export const currentUser = async (req, res) => res.json({ data: { user: req.user } });
 
+const assertCurrentPassword = async (userId, currentPassword) => {
+  if (typeof currentPassword !== 'string' || !currentPassword) {
+    throw Object.assign(new Error('Current password is required'), { statusCode: 400 });
+  }
+  const result = await query('SELECT password FROM users WHERE id = $1', [userId]);
+  if (!result.rows[0] || !(await bcrypt.compare(currentPassword, result.rows[0].password))) {
+    throw Object.assign(new Error('Current password is incorrect'), { statusCode: 401 });
+  }
+};
+
+export const verifyCurrentPassword = async (req, res) => {
+  await assertCurrentPassword(req.user._id, req.body?.currentPassword);
+  res.json({ data: { verified: true } });
+};
+
 export const updateProfile = async (req, res) => {
   if (req.params.userId !== req.user._id) throw Object.assign(new Error('You can only update your own profile'), { statusCode: 403 });
 
-  const { username, email, fullnamae, password, phone, coverimage } = req.body || {};
+  const { username, email, fullnamae, currentPassword, newPassword, phone, coverimage } = req.body || {};
   const values = {};
   if (username?.trim()) values.username = username.trim().toLowerCase();
   if (email?.trim()) values.email = email.trim().toLowerCase();
   if (fullnamae?.trim()) values.fullnamae = fullnamae.trim();
   if (phone !== undefined) values.phone = phone.trim();
   if (coverimage?.trim()) values.coverimage = coverimage.trim();
-  if (password) values.password = await bcrypt.hash(password, 12);
   if (req.file) values.coverimage = await uploadImageBuffer(req.file.buffer);
+
+  const passwordUpdateRequested = currentPassword !== undefined || newPassword !== undefined;
+  if (passwordUpdateRequested) {
+    if (typeof newPassword !== 'string' || !newPassword) {
+      throw Object.assign(new Error('Current password and new password are required'), { statusCode: 400 });
+    }
+    if (newPassword.length < 8) {
+      throw Object.assign(new Error('New password must be at least 8 characters'), { statusCode: 400 });
+    }
+    await assertCurrentPassword(req.user._id, currentPassword);
+    values.password = await bcrypt.hash(newPassword, 12);
+  }
 
   if (!Object.keys(values).length) throw Object.assign(new Error('At least one profile field is required'), { statusCode: 400 });
   const fields = Object.keys(values);
