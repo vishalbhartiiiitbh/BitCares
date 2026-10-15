@@ -2,8 +2,9 @@ import { SplitStrategyFactory } from './splitStrategies.js';
 import Decimal from 'decimal.js';
 import { query, withTransaction } from '../db/index.js';
 import { eventEmitter, EVENTS } from '../events/eventEmitter.js';
-import { uploadImageBuffer } from '../config/cloudinary.js';
+import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 import { ensurePersonalExpenseGroup } from './groupService.js';
+import { recordGroupActivity } from './groupActivityService.js';
 
 const expenseSubcategories = {
   Entertainment: ['Games', 'Music', 'Movies', 'Sports', 'Events'],
@@ -61,8 +62,40 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
      ORDER BY e.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
     [groupId || userId],
   );
-  if (!groupId) return result.rows;
+  if (!groupId) {
+    const activity = await query(
+      `SELECT a.id AS "_id", a.group_id AS "groupId", g.name AS "groupName",
+              a.activity_type AS "activityType", 'ACTIVITY' AS type,
+              a.description, a.details, a.amount::text AS "totalAmount",
+              a.currency, a.created_at AS "createdAt", a.actor_id AS "paidBy",
+              actor.username AS "paidByUsername", actor.fullnamae AS "paidByName",
+              ARRAY[]::text[] AS "participantIds", '[]'::json AS splits, '[]'::json AS items
+       FROM group_activity a
+       JOIN group_members gm ON gm.group_id = a.group_id AND gm.user_id = $1
+       JOIN groups g ON g.id = a.group_id
+       JOIN users actor ON actor.id = a.actor_id
+       WHERE NOT g.is_personal
+       ORDER BY a.created_at DESC
+       LIMIT 100`,
+      [userId],
+    );
+    return [...result.rows, ...activity.rows]
+      .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
+      .slice(0, unlimited ? undefined : 100);
+  }
 
+  const activityResult = await query(
+    `SELECT a.id AS "_id", a.group_id AS "groupId", a.activity_type AS "activityType",
+            'ACTIVITY' AS type, a.description, a.details, a.amount::text AS "totalAmount",
+            a.currency, a.created_at AS "createdAt", a.actor_id AS "paidBy",
+            actor.username AS "paidByUsername", actor.fullnamae AS "paidByName",
+            ARRAY[]::text[] AS "participantIds", '[]'::json AS splits, '[]'::json AS items
+     FROM group_activity a
+     JOIN groups g ON g.id = a.group_id AND NOT g.is_personal
+     JOIN users actor ON actor.id = a.actor_id
+     WHERE a.group_id = $1`,
+    [groupId],
+  );
   const settlements = await query(
     `SELECT s.id AS "_id", s.group_id AS "groupId",
             'Settlement to ' || recipient.fullnamae AS description,
@@ -81,7 +114,7 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
      WHERE s.group_id = $1`,
     [groupId],
   );
-  return [...result.rows, ...settlements.rows]
+  return [...result.rows, ...settlements.rows, ...activityResult.rows]
     .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
     .slice(0, unlimited ? undefined : 100);
 };
@@ -115,10 +148,32 @@ export const addExpenseComment = async ({ expenseId, userId, content }) => withT
     [expenseId, userId, content.trim()],
   );
   const author = await client.query('SELECT fullnamae AS "authorName" FROM users WHERE id = $1', [userId]);
+  if (!expense.rows[0].isPersonal) {
+    await recordGroupActivity(client, {
+      groupId: expense.rows[0].groupId,
+      expenseId,
+      actorId: userId,
+      activityType: 'COMMENT_ADDED',
+      description: `Comment added to an expense`,
+      details: `${author.rows[0].authorName || 'A group member'} commented: “${content.trim().slice(0, 180)}”`,
+    });
+  }
   return { ...result.rows[0], authorName: author.rows[0].authorName };
 });
 
 export const deleteExpenseComment = async ({ commentId, userId }) => withTransaction(async (client) => {
+  const comment = await client.query(
+    `SELECT ec.expense_id AS "expenseId", e.group_id AS "groupId", e.description,
+            author.fullnamae AS "authorName", g.is_personal AS "isPersonal"
+     FROM expense_comments ec
+     JOIN expenses e ON e.id = ec.expense_id
+     JOIN groups g ON g.id = e.group_id
+     JOIN users author ON author.id = ec.user_id
+     JOIN group_members gm ON gm.group_id = e.group_id AND gm.user_id = $2
+     WHERE ec.id = $1 AND ec.user_id = $2`,
+    [commentId, userId],
+  );
+  if (!comment.rowCount) throw Object.assign(new Error('Comment not found or you cannot delete it'), { statusCode: 404 });
   const result = await client.query(
     `DELETE FROM expense_comments ec
      USING expenses e, group_members gm
@@ -128,6 +183,16 @@ export const deleteExpenseComment = async ({ commentId, userId }) => withTransac
     [commentId, userId],
   );
   if (!result.rowCount) throw Object.assign(new Error('Comment not found or you cannot delete it'), { statusCode: 404 });
+  if (!comment.rows[0].isPersonal) {
+    await recordGroupActivity(client, {
+      groupId: comment.rows[0].groupId,
+      expenseId: comment.rows[0].expenseId,
+      actorId: userId,
+      activityType: 'COMMENT_DELETED',
+      description: `Comment removed from “${comment.rows[0].description}”`,
+      details: `${comment.rows[0].authorName || 'A group member'} deleted a comment from “${comment.rows[0].description}”.`,
+    });
+  }
   return { _id: result.rows[0]._id, deleted: true };
 });
 
@@ -218,6 +283,7 @@ const applyGroupBalances = async (client, { groupId, paidBy, currency, splits, m
 
 export const addExpense = async ({
   groupId = null,
+  actorId,
   paidBy,
   totalAmount,
   splitStrategy,
@@ -233,6 +299,7 @@ export const addExpense = async ({
   subcategory = null,
 }) => {
   groupId = groupId || null;
+  actorId = actorId || paidBy;
   const isPersonal = !groupId;
   if (isPersonal) {
     if (paidBy !== participants?.[0] || participants?.length !== 1) {
@@ -347,6 +414,17 @@ export const addExpense = async ({
         );
       }
     }
+    const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [actorId]);
+    await recordGroupActivity(client, {
+      groupId,
+      expenseId: row._id,
+      actorId,
+      activityType: 'EXPENSE_ADDED',
+      description: `Expense added: ${description.trim()}`,
+      details: `${actor.rows[0]?.fullnamae || 'A group member'} added ${currency} ${new Decimal(totalAmount).toFixed(2)} for “${description.trim()}”.`,
+      amount: totalAmount,
+      currency,
+    });
     return row;
   });
   eventEmitter.emit(EVENTS.EXPENSE_CREATED, expense);
@@ -377,6 +455,7 @@ export const updateExpense = async ({
   const updated = await withTransaction(async (client) => {
     const existingResult = await client.query(
       `SELECT e.id AS "_id", e.group_id AS "groupId", e.paid_by AS "paidBy",
+              e.description, e.total_amount::text AS "totalAmount",
               e.currency, e.type, e.payment_proof_url AS "paymentProofUrl",
               g.name AS "groupName", g.is_personal AS "isPersonal",
               COALESCE((SELECT json_agg(json_build_object(
@@ -455,12 +534,17 @@ export const updateExpense = async ({
     });
 
     const editor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [editorId]);
-    const message = `${editor.rows[0]?.fullnamae || 'A group member'} edited "${description.trim()}" in ${existing.groupName}.`;
-    await client.query(
-      `INSERT INTO notifications (user_id, group_id, expense_id, message, created_by)
-       SELECT user_id, $1, $2, $3, $4 FROM group_members WHERE group_id = $1`,
-      [existing.groupId, expenseId, message, editorId],
-    );
+    const previousTotal = new Decimal(existing.totalAmount);
+    await recordGroupActivity(client, {
+      groupId: existing.groupId,
+      expenseId,
+      actorId: editorId,
+      activityType: 'EXPENSE_UPDATED',
+      description: `Expense updated: ${description.trim()}`,
+      details: `${editor.rows[0]?.fullnamae || 'A group member'} updated “${existing.description}” to “${description.trim()}” (${existing.currency} ${previousTotal.toFixed(2)} → ${currency} ${new Decimal(totalAmount).toFixed(2)}).`,
+      amount: totalAmount,
+      currency,
+    });
     return {
       _id: expenseId,
       groupId: existing.groupId,
@@ -478,4 +562,77 @@ export const updateExpense = async ({
   });
   eventEmitter.emit(EVENTS.EXPENSE_UPDATED, updated);
   return updated;
+};
+
+export const deleteExpense = async ({ expenseId, userId }) => {
+  const deleted = await withTransaction(async (client) => {
+    const result = await client.query(
+      `SELECT e.id AS "_id", e.group_id AS "groupId", e.description,
+              e.total_amount::text AS "totalAmount", e.currency, e.type,
+              e.paid_by AS "paidBy", e.payment_proof_url AS "paymentProofUrl",
+              g.name AS "groupName", g.is_personal AS "isPersonal",
+              COALESCE((SELECT json_agg(json_build_object(
+                'userId', es.user_id::text,
+                'amountOwed', es.amount_owed::text
+              ) ORDER BY es.user_id) FROM expense_splits es WHERE es.expense_id = e.id), '[]'::json) AS splits
+       FROM expenses e JOIN groups g ON g.id = e.group_id
+       WHERE e.id = $1 AND e.type <> 'SETTLEMENT'
+       FOR UPDATE OF e`,
+      [expenseId],
+    );
+    const expense = result.rows[0];
+    if (!expense) throw Object.assign(new Error('Expense not found'), { statusCode: 404 });
+    const membership = await client.query(
+      'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+      [expense.groupId, userId],
+    );
+    if (!membership.rowCount) throw Object.assign(new Error('Only group members can delete this expense'), { statusCode: 403 });
+    if (expense.isPersonal && expense.paidBy !== userId) {
+      throw Object.assign(new Error('Only the account owner can delete a personal expense'), { statusCode: 403 });
+    }
+    if (!expense.isPersonal) {
+      const participantIds = [...new Set([expense.paidBy, ...expense.splits.map((split) => split.userId)])];
+      const currentMembers = await client.query(
+        'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2::uuid[])',
+        [expense.groupId, participantIds],
+      );
+      if (currentMembers.rowCount !== participantIds.length) {
+        throw Object.assign(new Error('This expense includes a member who has left the group and cannot be safely deleted.'), { statusCode: 409 });
+      }
+    }
+
+    await applyGroupBalances(client, {
+      groupId: expense.groupId,
+      paidBy: expense.paidBy,
+      currency: expense.currency,
+      splits: expense.splits.map((split) => ({
+        userId: split.userId,
+        amountOwed: new Decimal(split.amountOwed),
+      })),
+      multiplier: -1,
+    });
+    const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [userId]);
+    await recordGroupActivity(client, {
+      groupId: expense.groupId,
+      actorId: userId,
+      activityType: 'EXPENSE_DELETED',
+      description: `Expense deleted: ${expense.description}`,
+      details: `${actor.rows[0]?.fullnamae || 'A group member'} deleted “${expense.description}” (${expense.currency} ${new Decimal(expense.totalAmount).toFixed(2)}). Group balances were adjusted.`,
+      amount: expense.totalAmount,
+      currency: expense.currency,
+    });
+    await client.query('DELETE FROM expenses WHERE id = $1', [expenseId]);
+    return expense;
+  });
+
+  let warning;
+  if (deleted.paymentProofUrl) {
+    try {
+      await deleteImageByUrl(deleted.paymentProofUrl);
+    } catch (error) {
+      console.error('Expense deleted, but its payment proof could not be deleted:', error);
+      warning = 'Expense deleted, but its payment proof could not be deleted.';
+    }
+  }
+  return { _id: deleted._id, groupId: deleted.groupId, deleted: true, warning };
 };

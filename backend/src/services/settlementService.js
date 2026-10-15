@@ -111,6 +111,14 @@ export const recordSettlement = async ({
                  payment_proof_url AS "paymentProofUrl", created_at AS "createdAt"`,
       [groupId, payerId, payeeId, settlementAmount.toFixed(2), currency, note?.trim() || null, proofUrl],
     );
+    const payer = await client.query('SELECT fullnamae FROM users WHERE id = $1', [payerId]);
+    const payee = await client.query('SELECT fullnamae FROM users WHERE id = $1', [payeeId]);
+    const activityDetails = `${payer.rows[0]?.fullnamae || 'A group member'} paid ${payee.rows[0]?.fullnamae || 'a group member'} ${currency} ${settlementAmount.toFixed(2)}.`;
+    await client.query(
+      `INSERT INTO notifications (user_id, group_id, message, created_by)
+       SELECT user_id, $1, $2, $3 FROM group_members WHERE group_id = $1 AND user_id <> $3`,
+      [groupId, activityDetails, payerId],
+    );
     return result.rows[0];
   });
 };

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { query, withTransaction } from '../db/index.js';
 import { simplifyDebts } from './debtSimplifier.js';
+import { recordGroupActivity } from './groupActivityService.js';
 
 const groupCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 const hydrate = async (row, client = null) => {
@@ -70,6 +71,14 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 	);
 	const id = created.rows[0]._id;
 	for (const member of [...new Set([createdBy, ...allMemberIds])]) await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, member]);
+	const creator = await client.query('SELECT fullnamae FROM users WHERE id = $1', [createdBy]);
+	await recordGroupActivity(client, {
+		groupId: id,
+		actorId: createdBy,
+		activityType: 'GROUP_CREATED',
+		description: `Group created: ${name.trim()}`,
+		details: `${creator.rows[0]?.fullnamae || 'A member'} created this group.`,
+	});
 	return hydrate(created.rows[0], client);
 });
 export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.is_personal AS "isPersonal", g.cover_image_url AS "coverImageUrl", g.simplify_debts AS "simplifyDebts", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
@@ -90,7 +99,7 @@ export const addGroupMember = async ({ groupId, requesterId, identifier }) => wi
 
 	const normalizedIdentifier = identifier.trim().toLowerCase();
 	const targetResult = await client.query(
-		'SELECT id AS "_id" FROM users WHERE LOWER(username) = $1 OR LOWER(email) = $1',
+		'SELECT id AS "_id", fullnamae, username FROM users WHERE LOWER(username) = $1 OR LOWER(email) = $1',
 		[normalizedIdentifier],
 	);
 	if (!targetResult.rowCount) {
@@ -108,6 +117,15 @@ export const addGroupMember = async ({ groupId, requesterId, identifier }) => wi
 	if (!inserted.rowCount) {
 		throw Object.assign(new Error('That person is already in this group'), { statusCode: 409 });
 	}
+	const requesterName = await client.query('SELECT fullnamae FROM users WHERE id = $1', [requesterId]);
+	const targetName = targetResult.rows[0].fullnamae || targetResult.rows[0].username;
+	await recordGroupActivity(client, {
+		groupId,
+		actorId: requesterId,
+		activityType: 'MEMBER_ADDED',
+		description: `Member added: ${targetName}`,
+		details: `${requesterName.rows[0]?.fullnamae || 'A group member'} added ${targetName} to ${group.name}.`,
+	});
 	return hydrate(group, client);
 });
 export const getGroupBalances = async (groupId, userId) => {
@@ -149,6 +167,12 @@ export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts
 	const nextName = name === undefined ? group.name : name.trim();
 	const nextSimplifyDebts = simplifyDebts === undefined ? group.simplifyDebts : simplifyDebts;
 	const nextCoverImageUrl = coverImageUrl || (removeCoverImage ? null : group.coverImageUrl);
+	const changes = [];
+	if (nextName !== group.name) changes.push(`renamed the group to “${nextName}”`);
+	if (nextSimplifyDebts !== group.simplifyDebts) {
+		changes.push(`turned debt simplification ${nextSimplifyDebts ? 'on' : 'off'}`);
+	}
+	if (nextCoverImageUrl !== group.coverImageUrl) changes.push(nextCoverImageUrl ? 'changed the group picture' : 'removed the group picture');
 	const result = await client.query(
 		`UPDATE groups
 		 SET name = $1, simplify_debts = $2, cover_image_url = $3
@@ -159,6 +183,16 @@ export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts
 		           created_at AS "createdAt"`,
 		[nextName, nextSimplifyDebts, nextCoverImageUrl, groupId],
 	);
+	if (changes.length) {
+		const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [userId]);
+		await recordGroupActivity(client, {
+			groupId,
+			actorId: userId,
+			activityType: 'GROUP_SETTINGS_UPDATED',
+			description: 'Group settings updated',
+			details: `${actor.rows[0]?.fullnamae || 'A group member'} ${changes.join(' and ')}.`,
+		});
+	}
 	return hydrate(result.rows[0], client);
 });
 
@@ -181,11 +215,21 @@ export const removeGroupMember = async ({ groupId, requesterId, memberId }) => w
 		[groupId, memberId],
 	);
 	if (!target.rowCount) throw Object.assign(new Error('Group member not found'), { statusCode: 404 });
+	const removedMember = await client.query('SELECT fullnamae, username FROM users WHERE id = $1', [memberId]);
 	const unsettled = await client.query(
 		'SELECT 1 FROM balances WHERE group_id = $1 AND net_owed <> 0 AND (user1 = $2 OR user2 = $2) LIMIT 1',
 		[groupId, memberId],
 	);
 	if (unsettled.rowCount) throw Object.assign(new Error('Settle this member’s balances before removing them'), { statusCode: 400 });
+	const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [requesterId]);
+	const memberName = removedMember.rows[0].fullnamae || removedMember.rows[0].username;
+	await recordGroupActivity(client, {
+		groupId,
+		actorId: requesterId,
+		activityType: 'MEMBER_REMOVED',
+		description: `Member removed: ${memberName}`,
+		details: `${actor.rows[0]?.fullnamae || 'A group member'} removed ${memberName} from the group.`,
+	});
 	await client.query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, memberId]);
 	return hydrate({
 		_id: groupId,
@@ -198,7 +242,32 @@ export const removeGroupMember = async ({ groupId, requesterId, memberId }) => w
 		)).rows[0]),
 	}, client);
 });
-export const joinGroupByCode = async ({ groupCode: code, userId }) => { const result = await query('SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", created_at AS "createdAt" FROM groups WHERE group_code = $1', [code.trim().toUpperCase()]); if (!result.rowCount) throw Object.assign(new Error('Group code not found'), { statusCode: 404 }); if (result.rows[0].isPersonal) throw Object.assign(new Error('Personal Expenses is private to its owner'), { statusCode: 403 }); await query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [result.rows[0]._id, userId]); return hydrate(result.rows[0]); };
+export const joinGroupByCode = async ({ groupCode: code, userId }) => withTransaction(async (client) => {
+	const result = await client.query(
+		`SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy",
+		        is_personal AS "isPersonal", created_at AS "createdAt"
+		 FROM groups WHERE group_code = $1`,
+		[code.trim().toUpperCase()],
+	);
+	if (!result.rowCount) throw Object.assign(new Error('Group code not found'), { statusCode: 404 });
+	const group = result.rows[0];
+	if (group.isPersonal) throw Object.assign(new Error('Personal Expenses is private to its owner'), { statusCode: 403 });
+	const joined = await client.query(
+		'INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING user_id',
+		[group._id, userId],
+	);
+	if (joined.rowCount) {
+		const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [userId]);
+		await recordGroupActivity(client, {
+			groupId: group._id,
+			actorId: userId,
+			activityType: 'MEMBER_JOINED',
+			description: `Member joined: ${actor.rows[0]?.fullnamae || 'A group member'}`,
+			details: `${actor.rows[0]?.fullnamae || 'A group member'} joined ${group.name}.`,
+		});
+	}
+	return hydrate(group, client);
+});
 const ensureGroupIsSettled = async (client, groupId) => {
 	const unsettled = await client.query(
 		'SELECT 1 FROM balances WHERE group_id = $1 AND net_owed <> 0 LIMIT 1',
@@ -221,6 +290,14 @@ export const leaveGroup = async (groupId, userId) => withTransaction(async (clie
 	if (!membership.rowCount) throw Object.assign(new Error('Group membership not found'), { statusCode: 404 });
 
 	await ensureGroupIsSettled(client, groupId);
+	const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [userId]);
+	await recordGroupActivity(client, {
+		groupId,
+		actorId: userId,
+		activityType: 'MEMBER_LEFT',
+		description: `Member left: ${actor.rows[0]?.fullnamae || 'A group member'}`,
+		details: `${actor.rows[0]?.fullnamae || 'A group member'} left the group.`,
+	});
 	await client.query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
 	const remainingMembers = await client.query('SELECT 1 FROM group_members WHERE group_id = $1 LIMIT 1', [groupId]);
 	if (!remainingMembers.rowCount) {

@@ -796,6 +796,29 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setShowExpenseForm(true);
   };
 
+  const removeExpense = async (expense) => {
+    if (!window.confirm(`Delete “${expense.description}” (${expense.currency} ${Number(expense.totalAmount).toFixed(2)})? Group balances will be adjusted and the deletion will appear in group activity.`)) return null;
+    try {
+      const result = await apiRequest(`/expenses/${expense._id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      setSelectedExpense(null);
+      setExpenses(await apiRequest('/expenses', { headers: authHeaders }));
+      if (expense.groupId && selectedGroup?._id === expense.groupId) {
+        await openGroupDetails(selectedGroup);
+      }
+      if (!expense.groupId || personalGroup?._id === expense.groupId) {
+        setPersonalExpenses(await apiRequest('/expenses/personal', { headers: authHeaders }));
+      }
+      setFormMessage(result.warning || 'Expense deleted and group balances updated.');
+      return true;
+    } catch (error) {
+      setFormMessage(error.message);
+      return error.message;
+    }
+  };
+
   const updateExpenseDraft = (key, value) => setExpenseDraft((current) => ({ ...current, [key]: value }));
   const changeExpenseGroup = (groupId) => {
     const group = groups.find((item) => item._id === groupId);
@@ -943,6 +966,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
       setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
       setAddMemberIdentifier('');
+      await openGroupDetails(updatedGroup);
       return true;
     } catch (error) {
       setAddMemberError(error.message);
@@ -962,6 +986,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
       setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
       setFormMessage('Group member removed.');
+      await openGroupDetails(updatedGroup);
       return true;
     } catch (error) {
       setGroupSettingsError(error.message);
@@ -1516,17 +1541,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </Panel>
             <Panel title="Recent activity" eyebrow="THE PAPER TRAIL">
               {expenses.length ? (
-                expenses
-                  .slice(0, 4)
-                  .map((expense) => (
-                    <Activity
-                      key={expense._id}
-                      title={expense.description}
-                      detail={`${expense.currency} · ${new Date(expense.createdAt).toLocaleDateString()}`}
-                      amount={`${expense.currency} ${expense.totalAmount}`}
-                      onClick={() => setSelectedExpense(expense)}
-                    />
-                  ))
+                <GroupActivityList
+                  transactions={expenses.slice(0, 4)}
+                  userId={user._id}
+                  onOpenExpense={setSelectedExpense}
+                />
               ) : (
                 <p className="empty-state">
                   Expenses you add will appear here.
@@ -1943,6 +1962,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               accessToken={accessToken}
               onClose={() => setSelectedExpense(null)}
               onEdit={() => editExpense(selectedExpense)}
+              onDelete={() => removeExpense(selectedExpense)}
+              onCommentAdded={async () => {
+                setExpenses(await apiRequest('/expenses', { headers: authHeaders }));
+                if (selectedGroup?._id === selectedExpense.groupId) await openGroupDetails(selectedGroup);
+              }}
             />
           )}
         </section>
@@ -2049,7 +2073,7 @@ function GroupDetails({
   const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
   const isOwner = group.createdBy === user._id;
   const visibleTransactions = hideUninvolved
-    ? transactions.filter((transaction) => transaction.paidBy === user._id || transaction.participantIds?.includes(user._id))
+    ? transactions.filter((transaction) => transaction.type === 'ACTIVITY' || transaction.paidBy === user._id || transaction.participantIds?.includes(user._id))
     : transactions;
   const memberName = (id) => {
     const member = group.members?.find((item) => item._id === id);
@@ -2058,7 +2082,7 @@ function GroupDetails({
   const exportTransactions = () => {
     const rows = [
       ['Date', 'Description', 'Paid by', 'Amount', 'Currency'],
-      ...transactions.map((transaction) => [
+      ...transactions.filter((transaction) => transaction.type !== 'ACTIVITY').map((transaction) => [
         new Date(transaction.createdAt).toLocaleDateString(),
         transaction.description,
         transaction.paidByName || transaction.paidByUsername || 'Member',
@@ -2183,29 +2207,7 @@ function GroupDetails({
                   <span>{transactions.length} transactions</span>
                 </div>
                 {transactionsBusy ? <p className="empty-state">Loading group activity…</p> : visibleTransactions.length ? (
-                  <div className="transaction-list">
-                    {visibleTransactions.map((transaction) => (
-                      <article
-                        className={`transaction-row ${transaction.type === 'SETTLEMENT' ? '' : 'transaction-row-clickable'}`}
-                        key={transaction._id}
-                        role={transaction.type === 'SETTLEMENT' ? undefined : 'button'}
-                        tabIndex={transaction.type === 'SETTLEMENT' ? undefined : 0}
-                        onClick={() => {
-                          if (transaction.type !== 'SETTLEMENT') onOpenExpense(transaction);
-                        }}
-                        onKeyDown={(event) => {
-                          if (transaction.type !== 'SETTLEMENT' && (event.key === 'Enter' || event.key === ' ')) {
-                            event.preventDefault();
-                            onOpenExpense(transaction);
-                          }
-                        }}
-                      >
-                        <span className="transaction-icon">▤</span>
-                        <div><b>{transaction.description}</b><small>{transaction.category || 'Uncategorized'}{transaction.subcategory ? ` · ${transaction.subcategory}` : ''} · {transaction.paidByName || transaction.paidByUsername || 'Member'} {transaction.type === 'SETTLEMENT' ? `paid ${transaction.paidToName || 'a member'}` : 'paid'} · {new Date(transaction.createdAt).toLocaleDateString()}</small>                        {transaction.note && <small>{transaction.note}</small>}{transaction.items?.map((item, itemIndex) => <small key={`${transaction._id}-${itemIndex}`}>{item.description}: {transaction.currency} {item.amount}</small>)}{transaction.paymentProofUrl && <a className="expense-proof-link" href={transaction.paymentProofUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>View payment proof</a>}</div>
-                        <strong>{transaction.currency} {transaction.totalAmount}</strong>
-                      </article>
-                    ))}
-                  </div>
+                  <GroupActivityList transactions={visibleTransactions} userId={user._id} onOpenExpense={onOpenExpense} />
                 ) : <p className="empty-state">{hideUninvolved ? 'No group expenses involving you.' : 'No expenses in this group yet. Add the first one to get started.'}</p>}
               </section>
             )}
@@ -2427,11 +2429,12 @@ function GroupDetails({
     </div>
   );
 }
-function ExpenseDetails({ expense, group, members, userId, accessToken, onClose, onEdit }) {
+function ExpenseDetails({ expense, group, members, userId, accessToken, onClose, onEdit, onDelete, onCommentAdded }) {
   const [comments, setComments] = useState(expense.comments || []);
   const [commentDraft, setCommentDraft] = useState('');
   const [commentBusy, setCommentBusy] = useState(false);
   const [commentError, setCommentError] = useState('');
+  const [expenseActionError, setExpenseActionError] = useState('');
   const memberName = (id) => {
     const member = members.find((person) => person._id === id);
     return member?.fullnamae || member?.username || 'Group member';
@@ -2454,6 +2457,7 @@ function ExpenseDetails({ expense, group, members, userId, accessToken, onClose,
       });
       setComments((current) => [...current, comment]);
       setCommentDraft('');
+      await onCommentAdded?.();
     } catch (error) {
       setCommentError(error.message);
     } finally {
@@ -2469,6 +2473,7 @@ function ExpenseDetails({ expense, group, members, userId, accessToken, onClose,
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       setComments((current) => current.filter((comment) => comment._id !== commentId));
+      await onCommentAdded?.();
     } catch (error) {
       setCommentError(error.message);
     }
@@ -2489,7 +2494,15 @@ function ExpenseDetails({ expense, group, members, userId, accessToken, onClose,
             <span>Added by {expense.paidByName || expense.paidByUsername || 'a group member'} on {new Date(expense.createdAt).toLocaleDateString()}</span>
           </div>
         </div>
-        <button className="expense-edit-action" type="button" onClick={onEdit}>Edit expense</button>
+        <div className="expense-detail-actions">
+          <button className="expense-edit-action" type="button" onClick={onEdit}>Edit expense</button>
+          {onDelete && <button className="expense-delete-action" type="button" onClick={async () => {
+            setExpenseActionError('');
+            const deleted = await onDelete();
+            if (typeof deleted === 'string') setExpenseActionError(deleted);
+          }}>Delete expense</button>}
+        </div>
+        {expenseActionError && <p className="error-message" role="alert">{expenseActionError}</p>}
         <div className="expense-details-grid">
           <section>
             <h3>People and shares</h3>
@@ -2550,20 +2563,154 @@ function ExpenseDetails({ expense, group, members, userId, accessToken, onClose,
     </div>
   );
 }
-function Activity({ title, detail, amount, onClick }) {
+function GroupActivityList({ transactions, userId, onOpenExpense }) {
+  const months = new Map();
+  transactions.forEach((transaction) => {
+    const date = new Date(transaction.createdAt);
+    const key = `${date.getFullYear()}-${date.getMonth()}`;
+    if (!months.has(key)) {
+      months.set(key, {
+        label: date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        transactions: [],
+      });
+    }
+    months.get(key).transactions.push(transaction);
+  });
+
   return (
-    <div className="activity-row clickable-activity" role="button" tabIndex={0} onClick={onClick} onKeyDown={(event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        onClick();
-      }
-    }}>
-      <span className="activity-dot" />
-      <div>
-        <b>{title}</b>
-        <small>{detail}</small>
-      </div>
-      <b>{amount}</b>
+    <div className="group-activity-list">
+      {[...months.entries()].map(([monthKey, month]) => (
+        <section className="group-activity-month" key={monthKey}>
+          <h4>{month.label}</h4>
+          {month.transactions.map((transaction) => {
+            const date = new Date(transaction.createdAt);
+            if (transaction.type === 'ACTIVITY') {
+              const activityIcon = transaction.activityType === 'EXPENSE_DELETED'
+                ? '🗑'
+                : transaction.activityType === 'EXPENSE_ADDED'
+                  ? '＋'
+                  : transaction.activityType === 'EXPENSE_UPDATED'
+                    ? '✎'
+                : transaction.activityType === 'COMMENT_ADDED'
+                  ? '💬'
+                  : transaction.activityType.startsWith('MEMBER_')
+                    ? '👥'
+                    : '↻';
+              const activityLabel = ({
+                EXPENSE_ADDED: 'NEW EXPENSE',
+                EXPENSE_UPDATED: 'EXPENSE UPDATED',
+                EXPENSE_DELETED: 'EXPENSE DELETED',
+                COMMENT_ADDED: 'COMMENT ADDED',
+                COMMENT_DELETED: 'COMMENT DELETED',
+                MEMBER_ADDED: 'MEMBER ADDED',
+                MEMBER_JOINED: 'MEMBER JOINED',
+                MEMBER_REMOVED: 'MEMBER REMOVED',
+                MEMBER_LEFT: 'MEMBER LEFT',
+                GROUP_CREATED: 'GROUP CREATED',
+                GROUP_SETTINGS_UPDATED: 'SETTINGS UPDATED',
+              })[transaction.activityType] || 'GROUP ACTIVITY';
+              return (
+                <article className={`group-activity-row group-activity-audit ${transaction.groupName ? 'with-group-name' : ''}`} key={`ACTIVITY-${transaction._id}`}>
+                  <div className="group-activity-date">
+                    <span>{date.toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</span>
+                    <strong>{date.getDate()}</strong>
+                  </div>
+                  <span className="group-activity-icon">{activityIcon}</span>
+                  <div className="group-activity-description">
+                    <strong>{transaction.description}</strong>
+                    <small>{transaction.details}</small>
+                  </div>
+                  {transaction.groupName && <span className="group-activity-group-name">{transaction.groupName}</span>}
+                  <span className="group-activity-update-label">{activityLabel}</span>
+                </article>
+              );
+            }
+            const isSettlement = transaction.type === 'SETTLEMENT';
+            const total = Number(transaction.totalAmount) || 0;
+            const ownSplit = Number(transaction.splits?.find((split) => split.userId === userId)?.amountOwed || 0);
+            const isPayer = transaction.paidBy === userId;
+            const payerName = transaction.paidByName || transaction.paidByUsername || 'A member';
+            let shareLabel = 'not involved';
+            let shareAmount = null;
+            let shareClass = 'not-involved';
+
+            if (isSettlement && transaction.paidTo === userId) {
+              shareLabel = `${payerName} paid you`;
+              shareAmount = total;
+              shareClass = 'activity-share-positive';
+            } else if (!isSettlement && isPayer) {
+              shareLabel = 'you lent';
+              shareAmount = Math.max(0, total - ownSplit);
+              shareClass = 'activity-share-positive';
+            } else if (!isSettlement && ownSplit > 0) {
+              shareLabel = `${payerName} lent you`;
+              shareAmount = ownSplit;
+              shareClass = 'activity-share-negative';
+            } else if (isSettlement && isPayer) {
+              shareLabel = `you paid ${transaction.paidToName || 'a member'}`;
+              shareAmount = total;
+              shareClass = 'activity-share-negative';
+            }
+
+            const categoryIcon = isSettlement
+              ? '💸'
+              : expenseCategories.find((category) => category.name === transaction.category)?.icon || '🧾';
+            const canOpen = !isSettlement && typeof onOpenExpense === 'function';
+
+            return (
+              <article
+                className={`group-activity-row ${canOpen ? 'group-activity-clickable' : ''}`}
+                key={`${transaction.type}-${transaction._id}`}
+                role={canOpen ? 'button' : undefined}
+                tabIndex={canOpen ? 0 : undefined}
+                onClick={canOpen ? () => onOpenExpense(transaction) : undefined}
+                onKeyDown={canOpen ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onOpenExpense(transaction);
+                  }
+                } : undefined}
+              >
+                <div className="group-activity-date">
+                  <span>{date.toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</span>
+                  <strong>{date.getDate()}</strong>
+                </div>
+                <span className={`group-activity-icon ${transaction.category === 'Transportation' ? 'transport' : ''} ${transaction.category === 'Food and drink' ? 'food' : ''}`}>
+                  {categoryIcon}
+                </span>
+                <div className="group-activity-description">
+                  <strong>{transaction.description}</strong>
+                  {(transaction.note || transaction.comments?.length > 0) && <span className="group-activity-comment" aria-label="Has a note or comments">●</span>}
+                  <small>
+                    {transaction.category || 'Uncategorized'}
+                    {transaction.subcategory ? ` · ${transaction.subcategory}` : ''}
+                    {isSettlement ? ` · ${payerName} paid ${transaction.paidToName || 'a member'}` : ''}
+                  </small>
+                  {transaction.paymentProofUrl && (
+                    <a
+                      className="expense-proof-link"
+                      href={transaction.paymentProofUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                    >View receipt</a>
+                  )}
+                </div>
+                <div className="group-activity-amount">
+                  <span>{isPayer ? 'you paid' : `${payerName} paid`}</span>
+                  <strong>{transaction.currency} {total.toFixed(2)}</strong>
+                </div>
+                <div className={`group-activity-share ${shareClass}`}>
+                  <span>{shareLabel}</span>
+                  {shareAmount === null
+                    ? <small>not involved</small>
+                    : <strong>{transaction.currency} {shareAmount.toFixed(2)}</strong>}
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      ))}
     </div>
   );
 }

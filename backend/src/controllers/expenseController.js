@@ -1,4 +1,4 @@
-import { addExpense, addExpenseComment, deleteExpenseComment, listExpenses, listPersonalExpenses, updateExpense } from '../services/expenseService.js';
+import { addExpense, addExpenseComment, deleteExpense, deleteExpenseComment, listExpenses, listPersonalExpenses, updateExpense } from '../services/expenseService.js';
 
 const parseArray = (value, label) => {
   if (Array.isArray(value)) return value;
@@ -44,6 +44,7 @@ export const createExpense = async (req, res) => {
   }
   const expense = await addExpense({
     ...req.body,
+    actorId: req.user._id,
     participants: parseArray(req.body.participants, 'Participants'),
     values: req.body.values ? parseArray(req.body.values, 'Split values') : undefined,
     items: req.body.items ? parseArray(req.body.items, 'Itemized expenses') : undefined,
@@ -72,6 +73,15 @@ export const editExpense = async (req, res) => {
     subcategory: req.body.subcategory || null,
   });
   res.json({ data: expense });
+};
+
+export const removeExpense = async (req, res) => {
+  res.json({
+    data: await deleteExpense({
+      expenseId: req.params.expenseId,
+      userId: req.user._id,
+    }),
+  });
 };
 
 export const createComment = async (req, res) => {
