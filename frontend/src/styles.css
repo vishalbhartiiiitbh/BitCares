@@ -3164,6 +3164,105 @@ input::placeholder {
     gap: 8px;
 }
 
+.expense-comments {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid #e5e2d8;
+}
+
+.expense-comments h3 {
+    margin: 0 0 12px;
+    color: #758076;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.expense-comment-list {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.expense-comment {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #e5e2d8;
+    border-radius: 7px;
+    background: #fff;
+}
+
+.expense-comment > div {
+    min-width: 0;
+}
+
+.expense-comment strong {
+    margin-right: 8px;
+    color: #39433b;
+    font-size: 11px;
+}
+
+.expense-comment time {
+    color: #929890;
+    font-size: 10px;
+}
+
+.expense-comment p {
+    margin: 5px 0 0;
+    color: #4f574f;
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.expense-comment > button {
+    align-self: flex-start;
+    padding: 0 3px;
+    border: 0;
+    background: transparent;
+    color: #c53535;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.expense-comments-empty {
+    color: #929890;
+    font-size: 11px;
+}
+
+.expense-comment-form {
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+}
+
+.expense-comment-form textarea {
+    width: min(100%, 420px);
+    min-height: 64px;
+    padding: 9px;
+    border: 1px solid #cfcfc8;
+    border-radius: 5px;
+    color: #39433b;
+    font: inherit;
+    font-size: 12px;
+    resize: vertical;
+}
+
+.expense-comment-form .expense-edit-action {
+    margin: 0;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+}
+
 @media (max-width: 560px) {
     .personal-expenses-page .welcome-row,
     .personal-expenses-summary,

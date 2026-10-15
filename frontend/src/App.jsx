@@ -1884,6 +1884,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               expense={selectedExpense}
               group={groups.find((item) => item._id === selectedExpense.groupId) || personalGroup}
               members={groups.find((item) => item._id === selectedExpense.groupId)?.members || [user]}
+              userId={user._id}
+              accessToken={accessToken}
               onClose={() => setSelectedExpense(null)}
               onEdit={() => editExpense(selectedExpense)}
             />
@@ -2235,11 +2237,53 @@ function GroupDetails({
     </div>
   );
 }
-function ExpenseDetails({ expense, group, members, onClose, onEdit }) {
+function ExpenseDetails({ expense, group, members, userId, accessToken, onClose, onEdit }) {
+  const [comments, setComments] = useState(expense.comments || []);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [commentError, setCommentError] = useState('');
   const memberName = (id) => {
     const member = members.find((person) => person._id === id);
     return member?.fullnamae || member?.username || 'Group member';
   };
+  useEffect(() => {
+    setComments(expense.comments || []);
+  }, [expense._id, expense.comments]);
+
+  const postComment = async (event) => {
+    event.preventDefault();
+    const content = commentDraft.trim();
+    if (!content) return;
+    setCommentBusy(true);
+    setCommentError('');
+    try {
+      const comment = await apiRequest(`/expenses/${expense._id}/comments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ content }),
+      });
+      setComments((current) => [...current, comment]);
+      setCommentDraft('');
+    } catch (error) {
+      setCommentError(error.message);
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const deleteComment = async (commentId) => {
+    setCommentError('');
+    try {
+      await apiRequest(`/expenses/comments/${commentId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      setComments((current) => current.filter((comment) => comment._id !== commentId));
+    } catch (error) {
+      setCommentError(error.message);
+    }
+  };
+
   return (
     <div className="expense-details-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
@@ -2277,6 +2321,41 @@ function ExpenseDetails({ expense, group, members, onClose, onEdit }) {
             {expense.paymentProofUrl && <a className="expense-proof-link" href={expense.paymentProofUrl} target="_blank" rel="noreferrer">View payment proof</a>}
           </section>
         </div>
+        <section className="expense-comments">
+          <h3>Comments</h3>
+          {comments.length ? (
+            <div className="expense-comment-list">
+              {comments.map((comment) => (
+                <article className="expense-comment" key={comment._id}>
+                  <div>
+                    <strong>{comment.authorName || memberName(comment.userId)}</strong>
+                    <time dateTime={comment.createdAt}>{new Date(comment.createdAt).toLocaleString()}</time>
+                    <p>{comment.content}</p>
+                  </div>
+                  {comment.userId === userId && (
+                    <button type="button" aria-label="Delete your comment" onClick={() => deleteComment(comment._id)}>×</button>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : <p className="expense-comments-empty">No comments yet. Add one for your group.</p>}
+          <form className="expense-comment-form" onSubmit={postComment}>
+            <label className="visually-hidden" htmlFor={`expense-comment-${expense._id}`}>Add a comment</label>
+            <textarea
+              id={`expense-comment-${expense._id}`}
+              value={commentDraft}
+              onChange={(event) => setCommentDraft(event.target.value)}
+              maxLength="1000"
+              rows="3"
+              placeholder="Add a comment"
+              required
+            />
+            {commentError && <p className="error-message" role="alert">{commentError}</p>}
+            <button className="expense-edit-action" type="submit" disabled={commentBusy || !commentDraft.trim()}>
+              {commentBusy ? 'Posting…' : 'Post'}
+            </button>
+          </form>
+        </section>
       </section>
     </div>
   );

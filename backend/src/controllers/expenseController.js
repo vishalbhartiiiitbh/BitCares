@@ -1,4 +1,4 @@
-import { addExpense, listExpenses, listPersonalExpenses, updateExpense } from '../services/expenseService.js';
+import { addExpense, addExpenseComment, deleteExpenseComment, listExpenses, listPersonalExpenses, updateExpense } from '../services/expenseService.js';
 
 const parseArray = (value, label) => {
   if (Array.isArray(value)) return value;
@@ -72,4 +72,30 @@ export const editExpense = async (req, res) => {
     subcategory: req.body.subcategory || null,
   });
   res.json({ data: expense });
+};
+
+export const createComment = async (req, res) => {
+  const { content } = req.body || {};
+  if (typeof content !== 'string' || !content.trim()) {
+    throw Object.assign(new Error('Enter a comment before posting'), { statusCode: 400 });
+  }
+  if (content.trim().length > 1000) {
+    throw Object.assign(new Error('Comments must be 1,000 characters or fewer'), { statusCode: 400 });
+  }
+  res.status(201).json({
+    data: await addExpenseComment({
+      expenseId: req.params.expenseId,
+      userId: req.user._id,
+      content,
+    }),
+  });
+};
+
+export const removeComment = async (req, res) => {
+  res.json({
+    data: await deleteExpenseComment({
+      commentId: req.params.commentId,
+      userId: req.user._id,
+    }),
+  });
 };

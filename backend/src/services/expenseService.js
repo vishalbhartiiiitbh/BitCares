@@ -42,7 +42,16 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
               'description', ei.description,
               'amount', ei.amount::text,
               'participantIds', ARRAY(SELECT eis.user_id::text FROM expense_item_splits eis WHERE eis.item_id = ei.id)
-            ) ORDER BY ei.created_at) FROM expense_items ei WHERE ei.expense_id = e.id), '[]'::json) AS items
+            ) ORDER BY ei.created_at) FROM expense_items ei WHERE ei.expense_id = e.id), '[]'::json) AS items,
+            COALESCE((SELECT json_agg(json_build_object(
+              '_id', ec.id,
+              'userId', ec.user_id,
+              'authorName', comment_author.fullnamae,
+              'content', ec.content,
+              'createdAt', ec.created_at
+            ) ORDER BY ec.created_at) FROM expense_comments ec
+              JOIN users comment_author ON comment_author.id = ec.user_id
+              WHERE ec.expense_id = e.id), '[]'::json) AS comments
      FROM expenses e JOIN users u ON u.id = e.paid_by
      ${groupId
 			? 'WHERE e.group_id = $1'
@@ -85,6 +94,42 @@ export const listPersonalExpenses = async (userId) => {
   if (!personalGroup.rowCount) return [];
   return listExpenses(personalGroup.rows[0].id, userId, true);
 };
+
+export const addExpenseComment = async ({ expenseId, userId, content }) => withTransaction(async (client) => {
+  const expense = await client.query(
+    `SELECT e.group_id AS "groupId", g.is_personal AS "isPersonal"
+     FROM expenses e JOIN groups g ON g.id = e.group_id
+     WHERE e.id = $1 AND e.type <> 'SETTLEMENT'`,
+    [expenseId],
+  );
+  if (!expense.rowCount) throw Object.assign(new Error('Expense not found'), { statusCode: 404 });
+  const membership = await client.query(
+    'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+    [expense.rows[0].groupId, userId],
+  );
+  if (!membership.rowCount) throw Object.assign(new Error('Only group members can comment on this expense'), { statusCode: 403 });
+  const result = await client.query(
+    `INSERT INTO expense_comments (expense_id, user_id, content)
+     VALUES ($1,$2,$3)
+     RETURNING id AS "_id", user_id AS "userId", content, created_at AS "createdAt"`,
+    [expenseId, userId, content.trim()],
+  );
+  const author = await client.query('SELECT fullnamae AS "authorName" FROM users WHERE id = $1', [userId]);
+  return { ...result.rows[0], authorName: author.rows[0].authorName };
+});
+
+export const deleteExpenseComment = async ({ commentId, userId }) => withTransaction(async (client) => {
+  const result = await client.query(
+    `DELETE FROM expense_comments ec
+     USING expenses e, group_members gm
+     WHERE ec.id = $1 AND ec.user_id = $2
+       AND e.id = ec.expense_id AND gm.group_id = e.group_id AND gm.user_id = $2
+     RETURNING ec.id AS "_id"`,
+    [commentId, userId],
+  );
+  if (!result.rowCount) throw Object.assign(new Error('Comment not found or you cannot delete it'), { statusCode: 404 });
+  return { _id: result.rows[0]._id, deleted: true };
+});
 
 const calculateExpenseShares = ({
   paidBy, totalAmount, splitStrategy, participants, values, items = [],
