@@ -323,3 +323,55 @@ export const deleteGroup = async (groupId, userId) => withTransaction(async (cli
 	await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
 	return { groupId, deleted: true };
 });
+
+export const getGroupWhiteboard = async (groupId, userId) => {
+	const result = await query(
+		`SELECT wb.content, wb.updated_at AS "updatedAt",
+		        wb.updated_by AS "updatedBy", u.fullnamae AS "updatedByName"
+		 FROM group_members gm
+		 LEFT JOIN group_whiteboards wb ON wb.group_id = gm.group_id
+		 LEFT JOIN users u ON u.id = wb.updated_by
+		 WHERE gm.group_id = $1 AND gm.user_id = $2`,
+		[groupId, userId],
+	);
+	if (!result.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
+	return {
+		content: result.rows[0].content || '',
+		updatedAt: result.rows[0].updatedAt,
+		updatedBy: result.rows[0].updatedBy,
+		updatedByName: result.rows[0].updatedByName,
+	};
+};
+
+export const saveGroupWhiteboard = async ({ groupId, userId, content }) => withTransaction(async (client) => {
+	const membership = await client.query(
+		`SELECT g.name AS "groupName", u.fullnamae AS "updatedByName"
+		 FROM group_members gm
+		 JOIN groups g ON g.id = gm.group_id
+		 JOIN users u ON u.id = gm.user_id
+		 WHERE gm.group_id = $1 AND gm.user_id = $2`,
+		[groupId, userId],
+	);
+	if (!membership.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
+
+	const result = await client.query(
+		`INSERT INTO group_whiteboards (group_id, content, updated_by, updated_at)
+		 VALUES ($1, $2, $3, NOW())
+		 ON CONFLICT (group_id) DO UPDATE
+		 SET content = EXCLUDED.content,
+		     updated_by = EXCLUDED.updated_by,
+		     updated_at = EXCLUDED.updated_at
+		 RETURNING content, updated_at AS "updatedAt", updated_by AS "updatedBy"`,
+		[groupId, content.trim(), userId],
+	);
+	const updatedByName = membership.rows[0].updatedByName;
+	const action = content.trim() ? 'updated' : 'cleared';
+	await recordGroupActivity(client, {
+		groupId,
+		actorId: userId,
+		activityType: 'WHITEBOARD_UPDATED',
+		description: `Whiteboard ${action}`,
+		details: `${updatedByName || 'A group member'} ${action} the group whiteboard.`,
+	});
+	return { ...result.rows[0], updatedByName };
+});

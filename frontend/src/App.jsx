@@ -726,6 +726,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [selectedExpense, setSelectedExpense] = useState(null);
   const [groupTransactions, setGroupTransactions] = useState([]);
+  const [groupWhiteboard, setGroupWhiteboard] = useState(null);
   const [groupBalances, setGroupBalances] = useState([]);
   const [groupSettlements, setGroupSettlements] = useState([]);
   const [groupDetailsError, setGroupDetailsError] = useState('');
@@ -1263,6 +1264,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   };
   const openGroupDetails = async (group) => {
     setSelectedGroup(group);
+    setGroupWhiteboard(null);
     setGroupDetailsBusy(true);
     setGroupBalancesBusy(true);
     setSettlementsBusy(true);
@@ -1270,14 +1272,16 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setGroupDetailsError('');
     setGroupSettlementError('');
     try {
-      const [transactions, balances, settlements] = await Promise.all([
+      const [transactions, balances, settlements, whiteboard] = await Promise.all([
         apiRequest(`/expenses?groupId=${group._id}&history=true`, { headers: authHeaders }),
         apiRequest(`/groups/${group._id}/balances`, { headers: authHeaders }),
         apiRequest(`/groups/${group._id}/simplify-debts`, { headers: authHeaders }),
+        apiRequest(`/groups/${group._id}/whiteboard`, { headers: authHeaders }),
       ]);
       setGroupTransactions(transactions);
       setGroupBalances(balances);
       setGroupSettlements(settlements);
+      setGroupWhiteboard(whiteboard);
     } catch (error) {
       setGroupDetailsError(error.message);
       setGroupSettlementError(error.message);
@@ -1287,6 +1291,20 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setGroupBalancesBusy(false);
       setSettlementsBusy(false);
     }
+  };
+  const saveGroupWhiteboard = async (groupId, content) => {
+    const whiteboard = await apiRequest(`/groups/${groupId}/whiteboard`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ content }),
+    });
+    setGroupWhiteboard(whiteboard);
+    try {
+      setGroupTransactions(await apiRequest(`/expenses?groupId=${groupId}&history=true`, { headers: authHeaders }));
+    } catch (error) {
+      setFormMessage(`Whiteboard saved, but group activity could not be refreshed: ${error.message}`);
+    }
+    return whiteboard;
   };
   const loadGroupSettlements = async (groupId) => {
     setSettlementsBusy(true);
@@ -2304,6 +2322,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               group={selectedGroup}
               transactions={groupTransactions}
               transactionsBusy={groupDetailsBusy}
+              whiteboard={groupWhiteboard}
               balances={groupBalances}
               balancesBusy={groupBalancesBusy}
               settlements={groupSettlements}
@@ -2319,6 +2338,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
               onAddExpense={() => openExpenseForm(selectedGroup._id)}
               onOpenExpense={setSelectedExpense}
+              onSaveWhiteboard={(content) => saveGroupWhiteboard(selectedGroup._id, content)}
+              onLoadWhiteboard={async () => {
+                const whiteboard = await apiRequest(`/groups/${selectedGroup._id}/whiteboard`, { headers: authHeaders });
+                setGroupWhiteboard(whiteboard);
+                return whiteboard;
+              }}
               onSettle={() => loadGroupSettlements(selectedGroup._id)}
               onRecordSettlement={(settlement) => recordGroupSettlement(selectedGroup._id, settlement)}
               onSaveSettings={(settings) => saveGroupSettings(selectedGroup._id, settings)}
@@ -2413,6 +2438,7 @@ function GroupDetails({
   group,
   transactions,
   transactionsBusy,
+  whiteboard,
   balances,
   balancesBusy,
   settlements,
@@ -2428,6 +2454,8 @@ function GroupDetails({
   onJoin,
   onAddExpense,
   onOpenExpense,
+  onSaveWhiteboard,
+  onLoadWhiteboard,
   onSettle,
   onSaveSettings,
   onAddMember,
@@ -2438,6 +2466,11 @@ function GroupDetails({
 }) {
   const [activeTab, setActiveTab] = useState('activity');
   const [hideUninvolved, setHideUninvolved] = useState(false);
+  const [activitySearch, setActivitySearch] = useState('');
+  const [whiteboardDraft, setWhiteboardDraft] = useState('');
+  const [whiteboardBusy, setWhiteboardBusy] = useState(false);
+  const [whiteboardError, setWhiteboardError] = useState('');
+  const [whiteboardSaved, setWhiteboardSaved] = useState(false);
   const [nameDraft, setNameDraft] = useState(group.name);
   const [simplifyDebtsDraft, setSimplifyDebtsDraft] = useState(group.simplifyDebts !== false);
   const [coverImageDraft, setCoverImageDraft] = useState(null);
@@ -2451,12 +2484,176 @@ function GroupDetails({
   const [settlementSaveError, setSettlementSaveError] = useState('');
   const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
   const isOwner = group.createdBy === user._id;
-  const visibleTransactions = hideUninvolved
-    ? transactions.filter((transaction) => transaction.type === 'ACTIVITY' || transaction.paidBy === user._id || transaction.participantIds?.includes(user._id))
-    : transactions;
   const memberName = (id) => {
     const member = group.members?.find((item) => item._id === id);
     return member?.fullnamae || member?.username || 'Group member';
+  };
+  const visibleTransactions = transactions.filter((transaction) => {
+    if (hideUninvolved && transaction.type !== 'ACTIVITY'
+      && transaction.paidBy !== user._id
+      && !transaction.participantIds?.includes(user._id)) return false;
+    const terms = activitySearch.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return true;
+    const searchable = [
+      transaction.description,
+      transaction.details,
+      transaction.paidByName,
+      transaction.paidByUsername,
+      transaction.paidToName,
+      transaction.currency,
+      transaction.totalAmount,
+      ...(transaction.splits || []).map((split) => memberName(split.userId)),
+    ].filter(Boolean).join(' ').toLocaleLowerCase();
+    return terms.every((term) => searchable.includes(term));
+  });
+  const saveWhiteboard = async (event) => {
+    event.preventDefault();
+    setWhiteboardBusy(true);
+    setWhiteboardError('');
+    setWhiteboardSaved(false);
+    try {
+      await onSaveWhiteboard(whiteboardDraft);
+      setWhiteboardSaved(true);
+    } catch (error) {
+      setWhiteboardError(error.message);
+    } finally {
+      setWhiteboardBusy(false);
+    }
+  };
+  const refreshWhiteboard = async () => {
+    setWhiteboardBusy(true);
+    setWhiteboardError('');
+    setWhiteboardSaved(false);
+    try {
+      const latest = await onLoadWhiteboard();
+      setWhiteboardDraft(latest.content || '');
+    } catch (error) {
+      setWhiteboardError(error.message);
+    } finally {
+      setWhiteboardBusy(false);
+    }
+  };
+  const printExpenseSummary = () => {
+    const reportWindow = window.open('', '_blank');
+    if (!reportWindow) {
+      window.alert('Allow pop-ups for SplitCare to print or save the group summary as a PDF.');
+      return;
+    }
+    reportWindow.opener = null;
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[character]);
+    const formatReportAmount = (value) => Number(value || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const reportEntries = transactions
+      .filter((transaction) => ['EXPENSE', 'REIMBURSEMENT', 'SETTLEMENT'].includes(transaction.type))
+      .sort((first, second) => new Date(first.createdAt) - new Date(second.createdAt));
+    const reportExpenses = reportEntries.filter((entry) => entry.type !== 'SETTLEMENT');
+    const reportSettlements = reportEntries.filter((entry) => entry.type === 'SETTLEMENT');
+    const currencies = [...new Set(reportEntries.map((entry) => entry.currency || 'INR'))].sort();
+    const rowsByCurrency = currencies.map((currency) => {
+      const entriesForCurrency = reportEntries.filter((entry) => (entry.currency || 'INR') === currency);
+      const expensesForCurrency = entriesForCurrency.filter((entry) => entry.type !== 'SETTLEMENT');
+      const memberTotals = new Map((group.members || []).map((member) => [member._id, 0]));
+      const totalAmount = expensesForCurrency.reduce((sum, expense) => sum + (Number(expense.totalAmount) || 0), 0);
+      const rows = entriesForCurrency.map((expense) => {
+        const shares = new Map();
+        (expense.splits || []).forEach((split) => {
+          const amount = Number(split.amountOwed);
+          if (!Number.isFinite(amount)) return;
+          shares.set(split.userId, amount);
+        });
+        const date = new Date(expense.createdAt);
+        const payer = expense.paidByName || expense.paidByUsername || memberName(expense.paidBy);
+        const amount = Number(expense.totalAmount) || 0;
+        const description = expense.type === 'SETTLEMENT'
+          ? expense.note || `Payment to ${expense.paidToName || memberName(expense.paidTo)}`
+          : expense.description;
+        const memberChanges = (group.members || []).map((member) => {
+          const change = expense.type === 'SETTLEMENT'
+            ? (member._id === expense.paidTo ? amount : 0) - (member._id === expense.paidBy ? amount : 0)
+            : (member._id === expense.paidBy ? amount : 0) - (shares.get(member._id) || 0);
+          memberTotals.set(member._id, (memberTotals.get(member._id) || 0) + change);
+          const sign = change > 0 ? '+' : change < 0 ? '−' : '';
+          return `<td class="money">${sign}${escapeHtml(currency)} ${formatReportAmount(Math.abs(change))}</td>`;
+        }).join('');
+        return `<tr>
+          <td>${escapeHtml(date.toLocaleDateString())}</td>
+          <td>${escapeHtml(description)}</td>
+          <td>${escapeHtml(payer)}</td>
+          <td class="money">${escapeHtml(currency)} ${formatReportAmount(expense.totalAmount)}</td>
+          ${memberChanges}
+        </tr>`;
+      }).join('');
+      return `<section class="currency-section">
+        <h2>Group ledger in ${escapeHtml(currency)}</h2>
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Description</th><th>Paid by</th><th>Total</th>
+            ${(group.members || []).map((member) => `<th>${escapeHtml(member.fullnamae || member.username)}<small>balance change</small></th>`).join('')}
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="${4 + (group.members || []).length}" class="empty">No entries recorded.</td></tr>`}</tbody>
+          <tfoot><tr>
+            <th colspan="3">Expense total / net change</th><th class="money">${escapeHtml(currency)} ${formatReportAmount(totalAmount)}</th>
+            ${(group.members || []).map((member) => {
+              const change = memberTotals.get(member._id) || 0;
+              const sign = change > 0 ? '+' : change < 0 ? '−' : '';
+              return `<th class="money">${sign}${escapeHtml(currency)} ${formatReportAmount(Math.abs(change))}</th>`;
+            }).join('')}
+          </tr></tfoot>
+        </table>
+      </section>`;
+    }).join('');
+    const generatedAt = new Date().toLocaleString();
+    const title = `${group.name} - expense summary`;
+    reportWindow.document.open();
+    reportWindow.document.write(`<!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>${escapeHtml(title)}</title>
+          <style>
+            @page { size: A4 landscape; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body { margin: 0; color: #26332c; font: 12px/1.4 Arial, sans-serif; }
+            header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #386d5e; margin-bottom: 20px; padding-bottom: 12px; }
+            h1 { margin: 0 0 4px; font-size: 23px; }
+            header p { margin: 0; color: #68736a; }
+            .meta { color: #68736a; text-align: right; }
+            .currency-section { margin: 0 0 22px; }
+            h2 { margin: 0 0 8px; font-size: 15px; }
+            table { width: 100%; border-collapse: collapse; table-layout: auto; }
+            th, td { border: 1px solid #d9e0da; padding: 6px 7px; text-align: left; vertical-align: top; }
+            thead { display: table-header-group; }
+            th { background: #edf3ef; font-size: 10px; }
+            th small { display: block; color: #78847b; font-weight: normal; }
+            td { font-size: 10px; }
+            .money { text-align: right; white-space: nowrap; }
+            tfoot th { background: #f2f5f2; }
+            .empty { color: #778078; text-align: center; }
+            tr { break-inside: avoid; }
+            .print-button { position: fixed; top: 12px; right: 12px; border: 0; border-radius: 5px; background: #398f78; color: white; padding: 10px 14px; font-weight: bold; cursor: pointer; }
+            @media print { .print-button { display: none; } }
+          </style>
+        </head>
+        <body>
+          <button class="print-button" onclick="window.print()">Print / Save as PDF</button>
+          <header>
+            <div><h1>${escapeHtml(group.name)}</h1><p>Group expense summary · All expenses and recorded payments</p><p>Member balance change: positive means owed, negative means owes.</p></div>
+            <div class="meta">Generated ${escapeHtml(generatedAt)}<br>${reportExpenses.length} expenses · ${reportSettlements.length} payments · ${group.members?.length || 0} members</div>
+          </header>
+          ${rowsByCurrency || '<p>No group expenses have been recorded yet.</p>'}
+        </body>
+      </html>`);
+    reportWindow.document.close();
+    reportWindow.setTimeout(() => reportWindow.print(), 300);
   };
   const exportTransactions = () => {
     const rows = [
@@ -2516,6 +2713,13 @@ function GroupDetails({
   }, [group._id, group.name, group.simplifyDebts, group.coverImageUrl]);
 
   useEffect(() => {
+    const latestContent = whiteboard?.content || '';
+    setWhiteboardDraft(latestContent);
+    if (whiteboardDraft !== latestContent) setWhiteboardSaved(false);
+    setWhiteboardError('');
+  }, [group._id, whiteboard?.content, whiteboard?.updatedAt]);
+
+  useEffect(() => {
     if (!coverImageDraft) {
       setCoverPreview('');
       return undefined;
@@ -2569,6 +2773,47 @@ function GroupDetails({
           </div>
         </header>
 
+        <section className="group-whiteboard" aria-labelledby="group-whiteboard-title">
+          <div className="group-whiteboard-heading">
+            <div>
+              <p className="eyebrow">SHARED NOTES</p>
+              <h3 id="group-whiteboard-title">Whiteboard</h3>
+              <p>Keep reminders, plans, and useful group information here.</p>
+            </div>
+            <div className="group-whiteboard-actions">
+              <button type="button" className="group-inline-action" onClick={refreshWhiteboard} disabled={whiteboardBusy || !onLoadWhiteboard}>Refresh</button>
+              <button type="submit" form="group-whiteboard-form" className="group-setting-button" disabled={whiteboardBusy || !whiteboard || whiteboardDraft === (whiteboard.content || '')}>
+                {whiteboardBusy ? 'Saving…' : 'Save note'}
+              </button>
+            </div>
+          </div>
+          <form id="group-whiteboard-form" onSubmit={saveWhiteboard}>
+            <label className="sr-only" htmlFor="group-whiteboard-content">Shared group notes</label>
+            <textarea
+              id="group-whiteboard-content"
+              value={whiteboardDraft}
+              onChange={(event) => {
+                setWhiteboardDraft(event.target.value);
+                setWhiteboardSaved(false);
+              }}
+              maxLength="5000"
+              rows="3"
+              placeholder="Add reminders, addresses, plans, or other important group information…"
+              disabled={!whiteboard}
+            />
+            <div className="group-whiteboard-footer">
+              <span>
+                {whiteboard?.updatedAt
+                  ? `Last updated by ${whiteboard.updatedByName || 'a group member'} · ${new Date(whiteboard.updatedAt).toLocaleString()}`
+                  : whiteboard ? 'No shared notes yet.' : 'Loading shared notes…'}
+                {whiteboardSaved ? ' · Saved' : ''}
+              </span>
+              <small>{whiteboardDraft.length}/5000</small>
+            </div>
+            {whiteboardError && <p className="error-message" role="alert">{whiteboardError}</p>}
+          </form>
+        </section>
+
         <nav className="group-workspace-tabs" aria-label="Group sections">
           <button className={activeTab === 'activity' ? 'active' : ''} onClick={() => setActiveTab('activity')}>☷ Activity</button>
           <button className={activeTab === 'balances' ? 'active' : ''} onClick={() => setActiveTab('balances')}>◉ Balances</button>
@@ -2583,11 +2828,25 @@ function GroupDetails({
               <section>
                 <div className="group-section-heading">
                   <div><p className="eyebrow">THE PAPER TRAIL</p><h3>Group activity</h3></div>
-                  <span>{transactions.length} transactions</span>
+                  <div className="group-activity-tools">
+                    <label className="group-activity-search">
+                      <span className="sr-only">Search group activity</span>
+                      <input
+                        type="search"
+                        value={activitySearch}
+                        onChange={(event) => setActivitySearch(event.target.value)}
+                        placeholder="Search description, member, or amount"
+                      />
+                    </label>
+                    <button type="button" className="group-inline-action group-print-summary" onClick={printExpenseSummary}>Print / Save PDF</button>
+                    <span>{visibleTransactions.length} of {transactions.length}</span>
+                  </div>
                 </div>
                 {transactionsBusy ? <p className="empty-state">Loading group activity…</p> : visibleTransactions.length ? (
                   <GroupActivityList transactions={visibleTransactions} userId={user._id} onOpenExpense={onOpenExpense} />
-                ) : <p className="empty-state">{hideUninvolved ? 'No group expenses involving you.' : 'No expenses in this group yet. Add the first one to get started.'}</p>}
+                ) : <p className="empty-state">{activitySearch.trim()
+                  ? 'No activity matches your search. Try a description, member name, or amount.'
+                  : hideUninvolved ? 'No group expenses involving you.' : 'No expenses in this group yet. Add the first one to get started.'}</p>}
               </section>
             )}
             {activeTab === 'balances' && (
