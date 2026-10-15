@@ -1,4 +1,4 @@
-import { addGroupMember, createGroup, deleteGroup, getGroupBalances, joinGroupByCode, leaveGroup, listGroupsForUser, removeGroupMember, updateGroupSettings } from '../services/groupService.js';
+import { addGroupMember, createGroup, deleteGroup, getGroupBalances, getGroupWhiteboard, joinGroupByCode, leaveGroup, listGroupsForUser, removeGroupMember, saveGroupWhiteboard, updateGroupSettings } from '../services/groupService.js';
 import { simplifyDebts } from '../services/debtSimplifier.js';
 import { recordSettlement } from '../services/settlementService.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
@@ -83,6 +83,27 @@ export const remove = async (req, res) => {
 
 export const balances = async (req, res) => {
   res.json({ data: await getGroupBalances(req.params.groupId, req.user._id) });
+};
+
+export const getWhiteboard = async (req, res) => {
+  res.json({ data: await getGroupWhiteboard(req.params.groupId, req.user._id) });
+};
+
+export const saveWhiteboard = async (req, res) => {
+  const { content } = req.body || {};
+  if (typeof content !== 'string') {
+    throw Object.assign(new Error('Whiteboard content must be text'), { statusCode: 400 });
+  }
+  if (content.length > 5000) {
+    throw Object.assign(new Error('Whiteboard content must be 5,000 characters or fewer'), { statusCode: 400 });
+  }
+  res.json({
+    data: await saveGroupWhiteboard({
+      groupId: req.params.groupId,
+      userId: req.user._id,
+      content,
+    }),
+  });
 };
 
 export const update = async (req, res) => {
