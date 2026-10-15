@@ -35,10 +35,11 @@ const connectDB = async () => {
     CREATE TABLE IF NOT EXISTS friendships (user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, user_high UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (user_low, user_high), CHECK (user_low < user_high));
     CREATE TABLE IF NOT EXISTS friend_requests (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, status VARCHAR(12) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined')), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CHECK (sender_id <> receiver_id));
     CREATE UNIQUE INDEX IF NOT EXISTS friend_requests_one_pending_per_pair ON friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id)) WHERE status = 'pending';
-    CREATE TABLE IF NOT EXISTS groups (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name VARCHAR(120) NOT NULL, group_code VARCHAR(8) NOT NULL UNIQUE, created_by UUID NOT NULL REFERENCES users(id), simplify_debts BOOLEAN NOT NULL DEFAULT TRUE, is_personal BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS groups (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name VARCHAR(120) NOT NULL, group_code VARCHAR(8) NOT NULL UNIQUE, created_by UUID NOT NULL REFERENCES users(id), simplify_debts BOOLEAN NOT NULL DEFAULT FALSE, is_personal BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS cover_image_url TEXT;
-    ALTER TABLE groups ADD COLUMN IF NOT EXISTS simplify_debts BOOLEAN NOT NULL DEFAULT TRUE;
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS simplify_debts BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE groups ALTER COLUMN simplify_debts SET DEFAULT FALSE;
     CREATE UNIQUE INDEX IF NOT EXISTS groups_one_personal_per_user ON groups (created_by) WHERE is_personal = TRUE;
     CREATE TABLE IF NOT EXISTS group_members (group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY (group_id, user_id));
     ALTER TABLE group_members DROP CONSTRAINT IF EXISTS group_members_group_id_fkey;

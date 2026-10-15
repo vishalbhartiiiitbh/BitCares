@@ -77,7 +77,7 @@ The connected dashboard uses these authenticated endpoints:
 
 - `GET /api/users/me`
 - `GET /api/groups`
-- `POST /api/groups`
+- `POST /api/groups` accepts multipart fields `name`, optional JSON-array strings `memberIds` and `memberIdentifiers`, optional `simplifyDebts` (defaults to `false`), and optional `coverImage` image (up to 5 MB).
 - `POST /api/groups` can include `memberIds` (friend user IDs) and/or `memberIdentifiers` (usernames or registered email addresses); the creator is added automatically.
 - `POST /api/groups/join` with `{ "groupCode": "A1B2C3D4" }`
 - `POST /api/groups/:groupId/members` with `{ "identifier": "username or registered email" }` (any current group member can add an account directly).

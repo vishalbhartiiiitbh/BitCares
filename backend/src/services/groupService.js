@@ -32,7 +32,7 @@ export const ensurePersonalExpenseGroup = async (userId) => withTransaction(asyn
 	return hydrate(group, client);
 });
 
-export const createGroup = async ({ name, createdBy, memberIds = [], memberIdentifiers = [] }) => withTransaction(async (client) => {
+export const createGroup = async ({ name, createdBy, memberIds = [], memberIdentifiers = [], simplifyDebts = false, coverImageUrl = null }) => withTransaction(async (client) => {
 	const identifiers = [...new Set(memberIdentifiers.map((identifier) => identifier.trim().toLowerCase()).filter(Boolean))];
 	const resolvedMemberIds = [];
 	for (const identifier of identifiers) {
@@ -60,7 +60,14 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 		}
 	}
 
-	const created = await client.query('INSERT INTO groups (name, group_code, created_by) VALUES ($1,$2,$3) RETURNING id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt"', [name.trim(), groupCode(), createdBy]);
+	const created = await client.query(
+		`INSERT INTO groups (name, group_code, created_by, simplify_debts, cover_image_url)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy",
+		           simplify_debts AS "simplifyDebts", cover_image_url AS "coverImageUrl",
+		           created_at AS "createdAt"`,
+		[name.trim(), groupCode(), createdBy, simplifyDebts, coverImageUrl],
+	);
 	const id = created.rows[0]._id;
 	for (const member of [...new Set([createdBy, ...allMemberIds])]) await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, member]);
 	return hydrate(created.rows[0], client);
@@ -112,7 +119,7 @@ export const getGroupBalances = async (groupId, userId) => {
 		transfer.from === userId ? transfer.to : transfer.from
 	)))];
 	const members = await query(
-		'SELECT id AS "_id", username, fullnamae FROM users WHERE id = ANY($1::uuid[])',
+		'SELECT id AS "_id", username, fullnamae, coverimage FROM users WHERE id = ANY($1::uuid[])',
 		[counterpartIds],
 	);
 	const membersById = new Map(members.rows.map((member) => [member._id, member]));

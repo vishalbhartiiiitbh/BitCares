@@ -381,6 +381,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [editingExpenseId, setEditingExpenseId] = useState('');
   const [clearExpenseProof, setClearExpenseProof] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [groupCoverImage, setGroupCoverImage] = useState(null);
+  const [groupSimplifyDebts, setGroupSimplifyDebts] = useState(false);
   const [groupMemberIds, setGroupMemberIds] = useState([]);
   const [groupMemberIdentifier, setGroupMemberIdentifier] = useState('');
   const [groupError, setGroupError] = useState('');
@@ -558,6 +560,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const closeGroupForm = () => {
     setShowGroupForm(false);
     setGroupName('');
+    setGroupCoverImage(null);
+    setGroupSimplifyDebts(false);
     setGroupMemberIds([]);
     setGroupMemberIdentifier('');
     setGroupError('');
@@ -573,18 +577,22 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setGroupBusy(true);
     setGroupError('');
     try {
+      const body = new FormData();
+      body.set('name', name);
+      body.set('memberIds', JSON.stringify(groupMemberIds));
+      body.set('memberIdentifiers', JSON.stringify(groupMemberIdentifier.trim() ? [groupMemberIdentifier.trim()] : []));
+      body.set('simplifyDebts', String(groupSimplifyDebts));
+      if (groupCoverImage) body.set('coverImage', groupCoverImage);
       const group = await apiRequest("/groups", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({
-          name,
-          memberIds: groupMemberIds,
-          memberIdentifiers: groupMemberIdentifier.trim() ? [groupMemberIdentifier.trim()] : [],
-        }),
+        body,
       });
       setGroups((current) => [group, ...current]);
       setShowGroupForm(false);
       setGroupName('');
+      setGroupCoverImage(null);
+      setGroupSimplifyDebts(false);
       setGroupMemberIds([]);
       setGroupMemberIdentifier('');
       setGroupError('');
@@ -1538,6 +1546,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   Group name
                   <input name="name" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Lisbon weekend" required />
                 </label>
+                <label>
+                  Group profile picture (optional)
+                  <input type="file" accept="image/*" onChange={(event) => setGroupCoverImage(event.target.files?.[0] || null)} />
+                </label>
+                <label className="group-hide-toggle group-simplify-toggle">
+                  <input type="checkbox" checked={groupSimplifyDebts} onChange={(event) => setGroupSimplifyDebts(event.target.checked)} />
+                  Simplify group debts
+                </label>
+                <p className="modal-help">Debt simplification is off by default. Turn it on to suggest fewer repayments in this group.</p>
                 <fieldset className="group-member-picker">
                   <legend>Add friends</legend>
                   {friends.length ? friends.map((friend) => (
@@ -1551,6 +1568,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                             : current.filter((id) => id !== friend._id));
                         }}
                       />
+                      {friend.coverimage
+                        ? <img className="group-friend-avatar" src={friend.coverimage} alt="" />
+                        : <span className="member-avatar">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
                       <span>
                         <strong>{friend.fullnamae || friend.username}</strong>
                         <small>@{friend.username}</small>
@@ -2202,7 +2222,11 @@ function GroupDetails({
                       const name = balance.fullnamae || balance.username;
                       return (
                         <article className="group-balance-row" key={`${balance._id}-${balance.currency || 'INR'}`}>
-                          <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>{name.slice(0, 1).toUpperCase()}</span>
+                          <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>
+                            {balance.coverimage
+                              ? <img src={balance.coverimage} alt="" />
+                              : name.slice(0, 1).toUpperCase()}
+                          </span>
                           <div><strong>{name}</strong><small>@{balance.username}</small></div>
                           <p className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? `${name} owes you` : `You owe ${name}`} <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></p>
                         </article>
@@ -2330,7 +2354,11 @@ function GroupDetails({
               if (Math.abs(amount) < 0.005) return null;
               return (
                 <div className="group-sidebar-balance" key={`${balance._id}-${balance.currency || 'INR'}`}>
-                  <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
+                  <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>
+                    {balance.coverimage
+                      ? <img src={balance.coverimage} alt="" />
+                      : (balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}
+                  </span>
                   <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'owes you' : 'you owe'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
                 </div>
               );
@@ -2341,7 +2369,11 @@ function GroupDetails({
               <div className="group-members-heading"><h3>People in this group</h3><span>{group.members?.length || 0}</span></div>
               {(group.members || []).map((member) => (
                 <div className="group-sidebar-member" key={member._id}>
-                  <span className="member-avatar">{(member.fullnamae || member.username).slice(0, 1).toUpperCase()}</span>
+                  <span className="member-avatar">
+                    {member.coverimage
+                      ? <img src={member.coverimage} alt="" />
+                      : (member.fullnamae || member.username).slice(0, 1).toUpperCase()}
+                  </span>
                   <span>{member.fullnamae || member.username}</span>
                 </div>
               ))}

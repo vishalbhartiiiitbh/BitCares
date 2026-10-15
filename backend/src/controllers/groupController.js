@@ -8,7 +8,23 @@ export const list = async (req, res) => {
 };
 
 export const create = async (req, res) => {
-  const { name, memberIds = [], memberIdentifiers = [] } = req.body || {};
+  const { name, simplifyDebts = 'false' } = req.body || {};
+  const parseList = (field, label) => {
+    const value = req.body?.[field] ?? [];
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') {
+      throw Object.assign(new Error(`${label} must be a list`), { statusCode: 400 });
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      throw Object.assign(new Error(`${label} must be a valid list`), { statusCode: 400 });
+    }
+    throw Object.assign(new Error(`${label} must be a list`), { statusCode: 400 });
+  };
+  const memberIds = parseList('memberIds', 'Group members');
+  const memberIdentifiers = parseList('memberIdentifiers', 'Group member usernames or emails');
   if (typeof name !== 'string' || !name.trim()) {
     throw Object.assign(new Error('Group name is required'), { statusCode: 400 });
   }
@@ -21,7 +37,32 @@ export const create = async (req, res) => {
   if (!Array.isArray(memberIdentifiers) || memberIdentifiers.some((identifier) => typeof identifier !== 'string')) {
     throw Object.assign(new Error('Group member usernames or emails must be a list of strings'), { statusCode: 400 });
   }
-  const group = await createGroup({ name, createdBy: req.user._id, memberIds, memberIdentifiers });
+  if (simplifyDebts !== 'true' && simplifyDebts !== 'false' && typeof simplifyDebts !== 'boolean') {
+    throw Object.assign(new Error('Simplify debts must be true or false'), { statusCode: 400 });
+  }
+  const coverImageUrl = req.file
+    ? await uploadImageBuffer(req.file.buffer, 'splitcare/group-covers')
+    : null;
+  let group;
+  try {
+    group = await createGroup({
+      name,
+      createdBy: req.user._id,
+      memberIds,
+      memberIdentifiers,
+      simplifyDebts: simplifyDebts === true || simplifyDebts === 'true',
+      coverImageUrl,
+    });
+  } catch (error) {
+    if (coverImageUrl) {
+      try {
+        await deleteImageByUrl(coverImageUrl);
+      } catch (cleanupError) {
+        console.error('Group creation failed, and its uploaded cover image could not be deleted:', cleanupError);
+      }
+    }
+    throw error;
+  }
   res.status(201).json({ data: group });
 };
 

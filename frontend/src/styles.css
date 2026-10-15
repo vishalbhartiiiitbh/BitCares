@@ -1066,6 +1066,13 @@ input::placeholder {
     font-weight: 700;
 }
 
+.member-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: cover;
+}
+
 .member-row div,
 .transaction-row div {
     flex: 1;
@@ -1953,6 +1960,14 @@ input::placeholder {
     flex: 0 0 15px;
     margin: 0;
     accent-color: #4aaa96;
+}
+
+.group-friend-avatar {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    border-radius: 50%;
+    object-fit: cover;
 }
 
 .group-friend-option span {

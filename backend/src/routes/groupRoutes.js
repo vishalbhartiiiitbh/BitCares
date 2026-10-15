@@ -18,7 +18,7 @@ const uploadProof = multer({
 });
 router.use(requireAuth);
 router.get('/', asyncHandler(list));
-router.post('/', asyncHandler(create));
+router.post('/', uploadProof.single('coverImage'), asyncHandler(create));
 router.post('/join', asyncHandler(join));
 router.get('/:groupId/balances', asyncHandler(balances));
 router.post('/:groupId/members', asyncHandler(addMember));
