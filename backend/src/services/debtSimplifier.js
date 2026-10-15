@@ -3,7 +3,9 @@ import { query } from '../db/index.js';
 
 export const simplifyDebts = async (groupId, userId) => {
   const membership = await query(
-    'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+    `SELECT g.simplify_debts AS "simplifyDebts"
+     FROM group_members gm JOIN groups g ON g.id = gm.group_id
+     WHERE gm.group_id = $1 AND gm.user_id = $2`,
     [groupId, userId],
   );
   if (!membership.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
@@ -12,6 +14,20 @@ export const simplifyDebts = async (groupId, userId) => {
     'SELECT user1, user2, currency, net_owed::text AS amount FROM balances WHERE group_id = $1',
     [groupId],
   );
+  if (!membership.rows[0].simplifyDebts) {
+    return result.rows
+      .filter((row) => !new Decimal(row.amount).eq(0))
+      .map((row) => {
+        const amount = new Decimal(row.amount);
+        return {
+          from: amount.gt(0) ? row.user2 : row.user1,
+          to: amount.gt(0) ? row.user1 : row.user2,
+          amount: amount.abs().toFixed(2),
+          currency: row.currency,
+        };
+      });
+  }
+
   const netsByCurrency = new Map();
   for (const row of result.rows) {
     const net = netsByCurrency.get(row.currency) || new Map();

@@ -892,19 +892,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     await openGroupDetails(selectedGroup);
     await loadGroupSettlements(groupId);
   };
-  const renameGroup = async (groupId, name) => {
+  const saveGroupSettings = async (groupId, settings) => {
     setGroupSettingsBusy(true);
     setGroupSettingsError('');
     try {
-      const updatedGroup = await apiRequest(`/groups/${groupId}`, {
+      const body = new FormData();
+      body.set('name', settings.name);
+      body.set('simplifyDebts', String(settings.simplifyDebts));
+      if (settings.coverImage) body.set('coverImage', settings.coverImage);
+      if (settings.removeCoverImage) body.set('removeCoverImage', 'true');
+      const { warning, ...updatedGroup } = await apiRequest(`/groups/${groupId}`, {
         method: 'PATCH',
-        headers: authHeaders,
-        body: JSON.stringify({ name }),
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body,
       });
       setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
       setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
+      setFormMessage(warning || 'Group settings saved.');
+      return true;
     } catch (error) {
       setGroupSettingsError(error.message);
+      return false;
     } finally {
       setGroupSettingsBusy(false);
     }
@@ -927,6 +935,25 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       return false;
     } finally {
       setAddMemberBusy(false);
+    }
+  };
+  const removeMemberFromGroup = async (groupId, memberId) => {
+    setGroupSettingsBusy(true);
+    setGroupSettingsError('');
+    try {
+      const updatedGroup = await apiRequest(`/groups/${groupId}/members/${memberId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
+      setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
+      setFormMessage('Group member removed.');
+      return true;
+    } catch (error) {
+      setGroupSettingsError(error.message);
+      return false;
+    } finally {
+      setGroupSettingsBusy(false);
     }
   };
   const updateProfileField = (event) => setProfileForm((current) => ({ ...current, [event.target.name]: event.target.type === 'file' ? event.target.files[0] : event.target.value }));
@@ -1456,6 +1483,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   <Group
                     key={group._id}
                     initials={group.name.slice(0, 2).toUpperCase()}
+                    coverImageUrl={group.coverImageUrl}
                     name={group.name}
                     groupCode={group.groupCode}
                     amount={`${group.members?.length || 0} members`}
@@ -1869,8 +1897,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               onOpenExpense={setSelectedExpense}
               onSettle={() => loadGroupSettlements(selectedGroup._id)}
               onRecordSettlement={(settlement) => recordGroupSettlement(selectedGroup._id, settlement)}
-              onRename={(name) => renameGroup(selectedGroup._id, name)}
+              onSaveSettings={(settings) => saveGroupSettings(selectedGroup._id, settings)}
               onAddMember={(identifier) => addMemberToGroup(selectedGroup._id, identifier)}
+              onRemoveMember={(memberId) => removeMemberFromGroup(selectedGroup._id, memberId)}
               onDelete={async () => {
                 if (await removeGroup(selectedGroup._id)) setSelectedGroup(null);
               }}
@@ -1929,10 +1958,12 @@ function Panel({ eyebrow, title, children }) {
     </section>
   );
 }
-function Group({ initials, name, amount, note, tone, groupCode, onSimplify, onLeave, onOpen }) {
+function Group({ initials, coverImageUrl, name, amount, note, tone, groupCode, onSimplify, onLeave, onOpen }) {
   return (
     <div className="group-row group-row-clickable" onClick={onOpen} role="button" tabIndex="0" onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}>
-      <span className={`group-icon ${tone}`}>{initials}</span>
+      {coverImageUrl
+        ? <img className="group-icon group-cover-avatar" src={coverImageUrl} alt="" />
+        : <span className={`group-icon ${tone}`}>{initials}</span>}
       <div>
         <b>{name}</b>
           <small>code: {groupCode || "not assigned"}</small>
@@ -1969,8 +2000,9 @@ function GroupDetails({
   onAddExpense,
   onOpenExpense,
   onSettle,
-  onRename,
+  onSaveSettings,
   onAddMember,
+  onRemoveMember,
   onRecordSettlement,
   onDelete,
   onLeave,
@@ -1978,6 +2010,12 @@ function GroupDetails({
   const [activeTab, setActiveTab] = useState('activity');
   const [hideUninvolved, setHideUninvolved] = useState(false);
   const [nameDraft, setNameDraft] = useState(group.name);
+  const [simplifyDebtsDraft, setSimplifyDebtsDraft] = useState(group.simplifyDebts !== false);
+  const [coverImageDraft, setCoverImageDraft] = useState(null);
+  const [removeCoverImage, setRemoveCoverImage] = useState(false);
+  const [memberInput, setMemberInput] = useState('');
+  const [coverPreview, setCoverPreview] = useState('');
+  const [settingsPlanVisible, setSettingsPlanVisible] = useState(false);
   const [memberIdentifierDraft, setMemberIdentifierDraft] = useState('');
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: 'INR', amount: '', note: '', paymentProof: null });
@@ -2041,7 +2079,40 @@ function GroupDetails({
     }
   };
 
-  useEffect(() => setNameDraft(group.name), [group._id, group.name]);
+  useEffect(() => {
+    setNameDraft(group.name);
+    setSimplifyDebtsDraft(group.simplifyDebts !== false);
+    setCoverImageDraft(null);
+    setRemoveCoverImage(false);
+  }, [group._id, group.name, group.simplifyDebts, group.coverImageUrl]);
+
+  useEffect(() => {
+    if (!coverImageDraft) {
+      setCoverPreview('');
+      return undefined;
+    }
+    const preview = URL.createObjectURL(coverImageDraft);
+    setCoverPreview(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [coverImageDraft]);
+
+  const saveSettings = async (event) => {
+    event.preventDefault();
+    const saved = await onSaveSettings({
+      name: nameDraft.trim(),
+      simplifyDebts: simplifyDebtsDraft,
+      coverImage: coverImageDraft,
+      removeCoverImage,
+    });
+    if (saved) {
+      setCoverImageDraft(null);
+      setRemoveCoverImage(false);
+    }
+  };
+
+  const submitAddMember = async () => {
+    if (await onAddMember(memberInput.trim())) setMemberInput('');
+  };
 
   return (
     <div className="group-details-backdrop" onMouseDown={onClose}>
@@ -2049,7 +2120,9 @@ function GroupDetails({
         <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
         <header className="group-workspace-header">
           <div className="group-workspace-identity">
-            <span className="group-workspace-avatar">{group.name.slice(0, 1).toUpperCase()}</span>
+            {group.coverImageUrl
+              ? <img className="group-workspace-avatar group-workspace-cover" src={group.coverImageUrl} alt="" />
+              : <span className="group-workspace-avatar">{group.name.slice(0, 1).toUpperCase()}</span>}
             <div>
               <p className="eyebrow">GROUP</p>
               <h2>{group.name}</h2>
@@ -2146,13 +2219,92 @@ function GroupDetails({
             {activeTab === 'settings' && (
               <section className="group-settings-panel">
                 <div className="group-section-heading"><div><p className="eyebrow">GROUP SETTINGS</p><h3>Manage this group</h3></div></div>
-                {isOwner ? (
-                  <form onSubmit={(event) => { event.preventDefault(); onRename(nameDraft.trim()); }}>
-                    <label>Group name<input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength="120" required /></label>
-                    {settingsError && <p className="error-message">{settingsError}</p>}
-                    <button className="group-setting-button" disabled={settingsBusy || nameDraft.trim() === group.name}>{settingsBusy ? 'Saving…' : 'Save group name'}</button>
-                  </form>
-                ) : <p className="modal-help">Only {memberName(group.createdBy)} can change this group’s name.</p>}
+                <form className="group-settings-form" onSubmit={saveSettings}>
+                  <label className="group-cover-picker">
+                    <span className="group-cover-preview">
+                      {coverPreview || (!removeCoverImage && group.coverImageUrl)
+                        ? <img src={coverPreview || group.coverImageUrl} alt="Group cover" />
+                        : <span>{group.name.slice(0, 1).toUpperCase()}</span>}
+                    </span>
+                    <span>Change group cover image</span>
+                    <input type="file" accept="image/*" onChange={(event) => {
+                      setCoverImageDraft(event.target.files?.[0] || null);
+                      setRemoveCoverImage(false);
+                    }} />
+                  </label>
+                  {group.coverImageUrl && !coverPreview && (
+                    <label className="group-hide-toggle">
+                      <input type="checkbox" checked={removeCoverImage} onChange={(event) => setRemoveCoverImage(event.target.checked)} />
+                      Remove group cover image
+                    </label>
+                  )}
+                  <label>Group name<input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength="120" required /></label>
+                  <div className="group-settings-members">
+                    <h4>Group members</h4>
+                    {group.members?.map((member) => (
+                      <div className="group-settings-member" key={member._id}>
+                        {member.coverimage
+                          ? <img src={member.coverimage} alt="" />
+                          : <span className="member-avatar">{(member.fullnamae || member.username).slice(0, 1).toUpperCase()}</span>}
+                        <span><strong>{member.fullnamae || member.username}</strong><small>@{member.username}{member._id === group.createdBy ? ' · Creator' : ''}</small></span>
+                        {member._id !== group.createdBy && member._id !== user._id && (
+                          <button
+                            type="button"
+                            className="group-member-remove"
+                            disabled={settingsBusy}
+                            aria-label={`Remove ${member.fullnamae || member.username} from group`}
+                            title="Remove member (their balances must be settled)"
+                            onClick={() => {
+                              if (window.confirm(`Remove ${member.fullnamae || member.username} from this group? Their balances must be settled first.`)) {
+                                onRemoveMember(member._id);
+                              }
+                            }}
+                          >×</button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="group-settings-add-member">
+                      <label>Add a member by username or email
+                        <input value={memberInput} onChange={(event) => setMemberInput(event.target.value)} onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            void submitAddMember();
+                          }
+                        }} placeholder="Username or email" required />
+                      </label>
+                      <button type="button" className="group-setting-button" onClick={() => void submitAddMember()} disabled={addMemberBusy || !memberInput.trim()}>{addMemberBusy ? 'Adding…' : 'Add member'}</button>
+                      {addMemberError && <p className="error-message" role="alert">{addMemberError}</p>}
+                    </div>
+                  </div>
+                  <label className="group-hide-toggle group-simplify-toggle">
+                    <input type="checkbox" checked={simplifyDebtsDraft} onChange={(event) => setSimplifyDebtsDraft(event.target.checked)} />
+                    Simplify group debts
+                  </label>
+                  <p className="modal-help">Suggest fewer direct repayments by combining what group members owe each other.</p>
+                  {settingsError && <p className="error-message" role="alert">{settingsError}</p>}
+                  <button className="group-setting-button" disabled={settingsBusy}>{settingsBusy ? 'Saving…' : 'Save group settings'}</button>
+                </form>
+                <div className="group-simplify-preview">
+                  <button className="group-setting-button" type="button" onClick={() => {
+                    setSettingsPlanVisible(true);
+                    onSettle();
+                  }} disabled={settlementsBusy}>
+                    {settlementsBusy ? 'Calculating…' : 'Show simplified debt plan'}
+                  </button>
+                  {settingsPlanVisible && (
+                    <div className="group-simplify-plan">
+                      {settlementError
+                        ? <p className="error-message">{settlementError}</p>
+                        : settlements.length
+                          ? settlements.map((settlement, index) => (
+                            <p key={`${settlement.from}-${settlement.to}-${settlement.currency}-${index}`}>
+                              <strong>{memberName(settlement.from)}</strong> pays <strong>{memberName(settlement.to)}</strong> {settlement.currency} {Number(settlement.amount).toFixed(2)}
+                            </p>
+                          ))
+                          : !settlementsBusy && <p>This group is already settled.</p>}
+                    </div>
+                  )}
+                </div>
                 <label className="group-hide-toggle"><input type="checkbox" checked={hideUninvolved} onChange={(event) => setHideUninvolved(event.target.checked)} /> Hide expenses I’m not involved in</label>
                 <button className="group-setting-button" onClick={exportTransactions}>Export expenses as CSV</button>
                 {isOwner && <button className="group-setting-button group-delete-button" disabled={settingsBusy} onClick={() => {

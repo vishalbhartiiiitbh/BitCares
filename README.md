@@ -83,7 +83,8 @@ The connected dashboard uses these authenticated endpoints:
 - `POST /api/groups/:groupId/members` with `{ "identifier": "username or registered email" }` (any current group member can add an account directly).
 - `GET /api/groups/:groupId/balances`
 - `POST /api/groups/:groupId/settlements` accepts `multipart/form-data` with `payeeId`, `amount`, `currency`, optional `note`, and optional `paymentProof` image (up to 5 MB). The authenticated member is the payer. Payments are recorded in group activity and reduce their outstanding debt to the selected member; amounts above the outstanding debt are rejected.
-- `PATCH /api/groups/:groupId` (group creator only; accepts `{ "name": "New name" }`)
+- `PATCH /api/groups/:groupId` (any group member; accepts multipart fields `name`, `simplifyDebts` and optional `coverImage` image or `removeCoverImage=true`)
+- `DELETE /api/groups/:groupId/members/:memberId` removes another member when their group balances are settled; any current member can request it, but the creator and requester cannot be removed through this endpoint.
 - `DELETE /api/groups/:groupId` (group creator only; deletes the group and its expenses after all balances are settled)
 - `POST /api/groups/:groupId/leave` (leaving requires the entire group to be settled; leaving as the last member deletes the group and its related data)
 - `GET /api/expenses`

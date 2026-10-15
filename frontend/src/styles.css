@@ -1646,10 +1646,155 @@ input::placeholder {
     gap: 10px;
 }
 
+.group-settings-form {
+    display: grid;
+    gap: 14px;
+}
+
+.group-cover-picker {
+    display: grid;
+    width: fit-content;
+    justify-items: start;
+    gap: 8px;
+    color: #52623e;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.group-cover-picker input {
+    font-size: 11px;
+}
+
+.group-cover-preview {
+    display: grid;
+    width: 96px;
+    height: 96px;
+    overflow: hidden;
+    place-items: center;
+    border-radius: 12px;
+    background: #d9eee3;
+    color: #438f7c;
+    font-size: 38px;
+}
+
+.group-cover-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.group-workspace-avatar.group-workspace-cover {
+    display: block;
+    object-fit: cover;
+}
+
+.group-settings-members {
+    display: grid;
+    gap: 10px;
+    padding: 16px 0;
+    border-top: 1px solid #e8e8e1;
+    border-bottom: 1px solid #e8e8e1;
+}
+
+.group-settings-members h4 {
+    margin: 0;
+    color: #687369;
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.group-settings-member {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+.group-settings-member > img,
+.group-settings-member > .member-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.group-settings-member > span:nth-child(2) {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.group-settings-member strong {
+    overflow: hidden;
+    color: #303a32;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.group-settings-member small {
+    color: #858c84;
+    font-size: 10px;
+}
+
+.group-member-remove {
+    border: 0;
+    background: transparent;
+    color: #b44d3d;
+    font-size: 19px;
+    cursor: pointer;
+}
+
+.group-member-remove:disabled {
+    cursor: wait;
+    opacity: .5;
+}
+
+.group-settings-add-member {
+    display: grid;
+    gap: 8px;
+    padding-top: 6px;
+}
+
+.group-settings-add-member .group-setting-button {
+    min-width: auto;
+}
+
+.group-simplify-toggle {
+    font-weight: 700;
+}
+
+.group-settings-form .modal-help {
+    margin: -7px 0 0;
+}
+
+.group-simplify-preview {
+    display: grid;
+    gap: 8px;
+}
+
+.group-simplify-plan {
+    padding: 10px 12px;
+    border-radius: 7px;
+    background: #f5f7f2;
+}
+
+.group-simplify-plan p {
+    margin: 4px 0;
+    color: #536054;
+    font-size: 11px;
+}
+
 .group-setting-button {
     width: fit-content;
     min-width: 190px;
     text-align: left;
+}
+
+.group-cover-avatar {
+    display: block;
+    object-fit: cover;
 }
 
 .group-setting-button:disabled,
