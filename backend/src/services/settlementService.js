@@ -34,7 +34,10 @@ export const recordSettlement = async ({
   }
 
   return withTransaction(async (client) => {
-    const group = await client.query('SELECT id FROM groups WHERE id = $1 FOR UPDATE', [groupId]);
+    const group = await client.query(
+      'SELECT id, simplify_debts AS "simplifyDebts" FROM groups WHERE id = $1 FOR UPDATE',
+      [groupId],
+    );
     if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
 
     const members = await client.query(
@@ -51,21 +54,51 @@ export const recordSettlement = async ({
       [groupId, user1, user2, currency],
     );
     const currentBalance = new Decimal(balanceResult.rows[0]?.amount || 0);
-    const payerOwesPayee = payerId === user1 ? currentBalance.isNegative() : currentBalance.isPositive();
-    if (!payerOwesPayee || currentBalance.isZero()) {
-      throw Object.assign(new Error('The selected payer does not owe this member in the selected currency'), { statusCode: 400 });
-    }
-    if (settlementAmount.gt(currentBalance.abs())) {
-      throw Object.assign(new Error(`Settlement cannot exceed the outstanding amount of ${currency} ${currentBalance.abs().toFixed(2)}`), { statusCode: 400 });
-    }
+    if (group.rows[0].simplifyDebts) {
+      const allBalances = await client.query(
+        'SELECT user1, user2, net_owed::text AS amount FROM balances WHERE group_id = $1 AND currency = $2',
+        [groupId, currency],
+      );
+      const netByMember = new Map();
+      for (const balance of allBalances.rows) {
+        const amount = new Decimal(balance.amount);
+        netByMember.set(balance.user1, (netByMember.get(balance.user1) || new Decimal(0)).plus(amount));
+        netByMember.set(balance.user2, (netByMember.get(balance.user2) || new Decimal(0)).minus(amount));
+      }
+      const payerNet = netByMember.get(payerId) || new Decimal(0);
+      const payeeNet = netByMember.get(payeeId) || new Decimal(0);
+      if (!payerNet.isNegative() || !payeeNet.isPositive()) {
+        throw Object.assign(new Error('The simplified plan does not show this payment as an amount you owe'), { statusCode: 400 });
+      }
+      const maximumSettlement = Decimal.min(payerNet.abs(), payeeNet);
+      if (settlementAmount.gt(maximumSettlement)) {
+        throw Object.assign(new Error(`Settlement cannot exceed the suggested amount of ${currency} ${maximumSettlement.toFixed(2)}`), { statusCode: 400 });
+      }
+      const delta = payerId === user1 ? settlementAmount : settlementAmount.negated();
+      await client.query(
+        `INSERT INTO balances (group_id, user1, user2, currency, net_owed)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (group_id, user1, user2, currency)
+         DO UPDATE SET net_owed = balances.net_owed + EXCLUDED.net_owed, updated_at = NOW()`,
+        [groupId, user1, user2, currency, delta.toFixed(2)],
+      );
+    } else {
+      const payerOwesPayee = payerId === user1 ? currentBalance.isNegative() : currentBalance.isPositive();
+      if (!payerOwesPayee || currentBalance.isZero()) {
+        throw Object.assign(new Error('The selected payer does not owe this member in the selected currency'), { statusCode: 400 });
+      }
+      if (settlementAmount.gt(currentBalance.abs())) {
+        throw Object.assign(new Error(`Settlement cannot exceed the outstanding amount of ${currency} ${currentBalance.abs().toFixed(2)}`), { statusCode: 400 });
+      }
 
-    const updatedBalance = payerId === user1
-      ? currentBalance.plus(settlementAmount)
-      : currentBalance.minus(settlementAmount);
-    await client.query(
-      'UPDATE balances SET net_owed = $1, updated_at = NOW() WHERE group_id = $2 AND user1 = $3 AND user2 = $4 AND currency = $5',
-      [updatedBalance.toFixed(2), groupId, user1, user2, currency],
-    );
+      const updatedBalance = payerId === user1
+        ? currentBalance.plus(settlementAmount)
+        : currentBalance.minus(settlementAmount);
+      await client.query(
+        'UPDATE balances SET net_owed = $1, updated_at = NOW() WHERE group_id = $2 AND user1 = $3 AND user2 = $4 AND currency = $5',
+        [updatedBalance.toFixed(2), groupId, user1, user2, currency],
+      );
+    }
 
     const proofUrl = proofBuffer
       ? await uploadImageBuffer(proofBuffer, 'splitcare/settlement-proofs')

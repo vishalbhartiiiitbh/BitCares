@@ -855,21 +855,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setSelectedGroup(group);
     setGroupDetailsBusy(true);
     setGroupBalancesBusy(true);
+    setSettlementsBusy(true);
     setGroupSettlements([]);
     setGroupDetailsError('');
+    setGroupSettlementError('');
     try {
-      const [transactions, balances] = await Promise.all([
+      const [transactions, balances, settlements] = await Promise.all([
         apiRequest(`/expenses?groupId=${group._id}`, { headers: authHeaders }),
         apiRequest(`/groups/${group._id}/balances`, { headers: authHeaders }),
+        apiRequest(`/groups/${group._id}/simplify-debts`, { headers: authHeaders }),
       ]);
       setGroupTransactions(transactions);
       setGroupBalances(balances);
+      setGroupSettlements(settlements);
     } catch (error) {
       setGroupDetailsError(error.message);
+      setGroupSettlementError(error.message);
       setFormMessage(error.message);
     } finally {
       setGroupDetailsBusy(false);
       setGroupBalancesBusy(false);
+      setSettlementsBusy(false);
     }
   };
   const loadGroupSettlements = async (groupId) => {
@@ -890,7 +896,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       body: settlement,
     });
     await openGroupDetails(selectedGroup);
-    await loadGroupSettlements(groupId);
   };
   const saveGroupSettings = async (groupId, settings) => {
     setGroupSettingsBusy(true);
@@ -909,6 +914,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
       setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
       setFormMessage(warning || 'Group settings saved.');
+      await openGroupDetails(updatedGroup);
       return true;
     } catch (error) {
       setGroupSettingsError(error.message);
@@ -2186,24 +2192,24 @@ function GroupDetails({
             {activeTab === 'balances' && (
               <section>
                 <div className="group-section-heading">
-                  <div><p className="eyebrow">WHO OWES WHOM</p><h3>Group balances</h3></div>
+                  <div><p className="eyebrow">YOUR SHARE</p><h3>Your group balances</h3></div>
                   <button className="group-inline-action" onClick={onSettle} disabled={settlementsBusy}>{settlementsBusy ? 'Calculating…' : 'Refresh settle-up plan'}</button>
                 </div>
                 {balancesBusy ? <p className="empty-state">Loading group balances…</p> : balances.length ? (
                   <div className="group-balances-list">
                     {balances.map((balance) => {
                       const amount = Number(balance.netBalance);
-                      const label = Math.abs(amount) < 0.005 ? 'settled up' : amount > 0 ? 'gets back' : 'owes';
+                      const name = balance.fullnamae || balance.username;
                       return (
                         <article className="group-balance-row" key={`${balance._id}-${balance.currency || 'INR'}`}>
-                          <span className={`member-avatar ${amount > 0 ? 'mint' : amount < 0 ? 'coral-bg' : ''}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
-                          <div><strong>{balance.fullnamae || balance.username}</strong><small>@{balance.username}</small></div>
-                          <p className={amount > 0 ? 'balance-positive' : amount < 0 ? 'balance-negative' : ''}>{label}{Math.abs(amount) >= 0.005 && <> <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></>}</p>
+                          <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>{name.slice(0, 1).toUpperCase()}</span>
+                          <div><strong>{name}</strong><small>@{balance.username}</small></div>
+                          <p className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? `${name} owes you` : `You owe ${name}`} <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></p>
                         </article>
                       );
                     })}
                   </div>
-                ) : <p className="empty-state">No group balances to show.</p>}
+                ) : <p className="empty-state">You’re settled up in this group.</p>}
                 <div className="settlement-plan">
                   <h4>Suggested settlements</h4>
                   <button className="group-inline-action" onClick={() => openSettlementForm()}>Record a payment</button>
@@ -2270,7 +2276,7 @@ function GroupDetails({
                             event.preventDefault();
                             void submitAddMember();
                           }
-                        }} placeholder="Username or email" required />
+                        }} placeholder="Username or email" />
                       </label>
                       <button type="button" className="group-setting-button" onClick={() => void submitAddMember()} disabled={addMemberBusy || !memberInput.trim()}>{addMemberBusy ? 'Adding…' : 'Add member'}</button>
                       {addMemberError && <p className="error-message" role="alert">{addMemberError}</p>}
@@ -2280,7 +2286,7 @@ function GroupDetails({
                     <input type="checkbox" checked={simplifyDebtsDraft} onChange={(event) => setSimplifyDebtsDraft(event.target.checked)} />
                     Simplify group debts
                   </label>
-                  <p className="modal-help">Suggest fewer direct repayments by combining what group members owe each other.</p>
+                  <p className="modal-help">When enabled, your balances and the settlement plan are recalculated from every group expense and recorded payment. Suggestions never move money automatically; record a payment to update the ledger.</p>
                   {settingsError && <p className="error-message" role="alert">{settingsError}</p>}
                   <button className="group-setting-button" disabled={settingsBusy}>{settingsBusy ? 'Saving…' : 'Save group settings'}</button>
                 </form>
@@ -2318,18 +2324,18 @@ function GroupDetails({
           </main>
 
           <aside className="group-workspace-sidebar">
-            <div className="group-sidebar-heading"><span>◉</span><h3>Group balances</h3></div>
+            <div className="group-sidebar-heading"><span>◉</span><h3>Your balances</h3></div>
             {balancesBusy ? <p className="empty-state">Loading…</p> : balances.map((balance) => {
               const amount = Number(balance.netBalance);
               if (Math.abs(amount) < 0.005) return null;
               return (
                 <div className="group-sidebar-balance" key={`${balance._id}-${balance.currency || 'INR'}`}>
                   <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
-                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'gets back' : 'owes'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
+                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'owes you' : 'you owe'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
                 </div>
               );
             })}
-            {!balancesBusy && !balances.some((balance) => Math.abs(Number(balance.netBalance)) >= 0.005) && <p className="empty-state">Everyone is settled up.</p>}
+            {!balancesBusy && !balances.some((balance) => Math.abs(Number(balance.netBalance)) >= 0.005) && <p className="empty-state">You’re settled up in this group.</p>}
             <button className="group-view-balances" onClick={() => setActiveTab('balances')}>View details →</button>
             <div className="group-sidebar-members">
               <div className="group-members-heading"><h3>People in this group</h3><span>{group.members?.length || 0}</span></div>
@@ -2356,7 +2362,7 @@ function GroupDetails({
       {settlementOpen && (
         <Modal title="Record a payment" onClose={() => setSettlementOpen(false)} className="settlement-modal">
           <form className="group-settlement-form" onSubmit={submitSettlement}>
-            <p className="modal-help">Record a payment you made to someone you directly owe. It can’t exceed the outstanding amount between you in that currency.</p>
+            <p className="modal-help">Record a payment to someone shown in your balance or simplified settlement plan. The amount cannot exceed what you owe them.</p>
             <label>Paid to
               <select value={settlementDraft.payeeId} onChange={(event) => setSettlementDraft((current) => ({ ...current, payeeId: event.target.value }))} required>
                 <option value="">Choose a group member</option>

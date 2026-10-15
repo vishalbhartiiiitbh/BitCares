@@ -81,8 +81,8 @@ The connected dashboard uses these authenticated endpoints:
 - `POST /api/groups` can include `memberIds` (friend user IDs) and/or `memberIdentifiers` (usernames or registered email addresses); the creator is added automatically.
 - `POST /api/groups/join` with `{ "groupCode": "A1B2C3D4" }`
 - `POST /api/groups/:groupId/members` with `{ "identifier": "username or registered email" }` (any current group member can add an account directly).
-- `GET /api/groups/:groupId/balances`
-- `POST /api/groups/:groupId/settlements` accepts `multipart/form-data` with `payeeId`, `amount`, `currency`, optional `note`, and optional `paymentProof` image (up to 5 MB). The authenticated member is the payer. Payments are recorded in group activity and reduce their outstanding debt to the selected member; amounts above the outstanding debt are rejected.
+- `GET /api/groups/:groupId/balances` returns only the authenticated member's balances, with amounts owed to or by that member.
+- `POST /api/groups/:groupId/settlements` accepts `multipart/form-data` with `payeeId`, `amount`, `currency`, optional `note`, and optional `paymentProof` image (up to 5 MB). The authenticated member is the payer. Payments are recorded in group activity and reduce their outstanding debt; in groups with debt simplification enabled, payments can follow the latest simplified plan.
 - `PATCH /api/groups/:groupId` (any group member; accepts multipart fields `name`, `simplifyDebts` and optional `coverImage` image or `removeCoverImage=true`)
 - `DELETE /api/groups/:groupId/members/:memberId` removes another member when their group balances are settled; any current member can request it, but the creator and requester cannot be removed through this endpoint.
 - `DELETE /api/groups/:groupId` (group creator only; deletes the group and its expenses after all balances are settled)
@@ -94,4 +94,4 @@ The connected dashboard uses these authenticated endpoints:
 - `GET /api/expenses?groupId=<groupId>` includes comments on each expense. `POST /api/expenses/:expenseId/comments` accepts `{ "content": "Comment text" }` from any group member; `DELETE /api/expenses/comments/:commentId` lets the comment author remove their comment.
 - `GET /api/users/notifications` lists recent in-app notifications for the signed-in user; `PATCH /api/users/notifications/read` marks them as read.
 - `POST /api/groups/:groupId/leave`
-- `GET /api/groups/:groupId/simplify-debts`
+- `GET /api/groups/:groupId/simplify-debts` recalculates suggested transfers from all current expenses and recorded payments. The group preference controls whether it combines member balances; suggestions do not change balances until a payment is recorded.

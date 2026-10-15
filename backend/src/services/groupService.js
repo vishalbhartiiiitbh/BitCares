@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { query, withTransaction } from '../db/index.js';
+import { simplifyDebts } from './debtSimplifier.js';
 
 const groupCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 const hydrate = async (row, client = null) => {
@@ -103,30 +104,28 @@ export const addGroupMember = async ({ groupId, requesterId, identifier }) => wi
 	return hydrate(group, client);
 });
 export const getGroupBalances = async (groupId, userId) => {
-	const membership = await query(
-		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
-		[groupId, userId],
-	);
-	if (!membership.rowCount) {
-		throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
-	}
+	const transfers = await simplifyDebts(groupId, userId);
+	const personalTransfers = transfers.filter((transfer) => transfer.from === userId || transfer.to === userId);
+	if (!personalTransfers.length) return [];
 
-	const result = await query(
-		`SELECT u.id AS "_id", u.username, u.fullnamae, b.currency,
-		        COALESCE(SUM(CASE
-		          WHEN b.user1 = u.id THEN b.net_owed
-		          WHEN b.user2 = u.id THEN -b.net_owed
-		          ELSE 0
-		        END), 0)::text AS "netBalance"
-		 FROM group_members gm
-		 JOIN users u ON u.id = gm.user_id
-		 LEFT JOIN balances b ON b.group_id = gm.group_id
-		 WHERE gm.group_id = $1
-		 GROUP BY u.id, u.username, u.fullnamae, b.currency
-		 ORDER BY u.fullnamae`,
-		[groupId],
+	const counterpartIds = [...new Set(personalTransfers.map((transfer) => (
+		transfer.from === userId ? transfer.to : transfer.from
+	)))];
+	const members = await query(
+		'SELECT id AS "_id", username, fullnamae FROM users WHERE id = ANY($1::uuid[])',
+		[counterpartIds],
 	);
-	return result.rows;
+	const membersById = new Map(members.rows.map((member) => [member._id, member]));
+
+	return personalTransfers.map((transfer) => {
+		const isOwed = transfer.to === userId;
+		const memberId = isOwed ? transfer.from : transfer.to;
+		return {
+			...membersById.get(memberId),
+			currency: transfer.currency,
+			netBalance: `${isOwed ? '' : '-'}${transfer.amount}`,
+		};
+	});
 };
 export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts, coverImageUrl, removeCoverImage = false }) => withTransaction(async (client) => {
 	const membership = await client.query(
