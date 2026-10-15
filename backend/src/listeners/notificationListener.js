@@ -6,4 +6,5 @@ const notify = async (event, payload) => {
 };
 
 eventEmitter.on(EVENTS.EXPENSE_CREATED, (expense) => void notify(EVENTS.EXPENSE_CREATED, expense));
+eventEmitter.on(EVENTS.EXPENSE_UPDATED, (expense) => void notify(EVENTS.EXPENSE_UPDATED, expense));
 eventEmitter.on(EVENTS.PAYMENT_SETTLED, (payment) => void notify(EVENTS.PAYMENT_SETTLED, payment));

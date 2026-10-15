@@ -77,16 +77,22 @@ The connected dashboard uses these authenticated endpoints:
 
 - `GET /api/users/me`
 - `GET /api/groups`
-- `POST /api/groups`
+- `POST /api/groups` accepts multipart fields `name`, optional JSON-array strings `memberIds` and `memberIdentifiers`, optional `simplifyDebts` (defaults to `false`), and optional `coverImage` image (up to 5 MB).
 - `POST /api/groups` can include `memberIds` (friend user IDs) and/or `memberIdentifiers` (usernames or registered email addresses); the creator is added automatically.
 - `POST /api/groups/join` with `{ "groupCode": "A1B2C3D4" }`
 - `POST /api/groups/:groupId/members` with `{ "identifier": "username or registered email" }` (any current group member can add an account directly).
-- `GET /api/groups/:groupId/balances`
-- `POST /api/groups/:groupId/settlements` accepts `multipart/form-data` with `payeeId`, `amount`, `currency`, optional `note`, and optional `paymentProof` image (up to 5 MB). The authenticated member is the payer. Payments are recorded in group activity and reduce their outstanding debt to the selected member; amounts above the outstanding debt are rejected.
-- `PATCH /api/groups/:groupId` (group creator only; accepts `{ "name": "New name" }`)
+- `GET /api/groups/:groupId/balances` returns only the authenticated member's balances, with amounts owed to or by that member.
+- `POST /api/groups/:groupId/settlements` accepts `multipart/form-data` with `payeeId`, `amount`, `currency`, optional `note`, and optional `paymentProof` image (up to 5 MB). The authenticated member is the payer. Payments are recorded in group activity and reduce their outstanding debt; in groups with debt simplification enabled, payments can follow the latest simplified plan.
+- `PATCH /api/groups/:groupId` (any group member; accepts multipart fields `name`, `simplifyDebts` and optional `coverImage` image or `removeCoverImage=true`)
+- `DELETE /api/groups/:groupId/members/:memberId` removes another member when their group balances are settled; any current member can request it, but the creator and requester cannot be removed through this endpoint.
 - `DELETE /api/groups/:groupId` (group creator only; deletes the group and its expenses after all balances are settled)
 - `POST /api/groups/:groupId/leave` (leaving requires the entire group to be settled; leaving as the last member deletes the group and its related data)
 - `GET /api/expenses`
-- `POST /api/expenses` accepts `multipart/form-data` with `description`, `totalAmount`, `currency`, `category`, optional `subcategory`, `groupId`, `paidBy`, `participants` (JSON array), `splitStrategy` (`EQUAL`, `EXACT`, `PERCENTAGE`, `SHARES`, `ADJUSTMENT`, `REIMBURSEMENT`, or `ITEMIZED`), `values` (JSON array when required), optional `items` (JSON array for itemized expenses), optional `paymentProof` image (up to 5 MB), and optional `note`. Categories are Entertainment, Food and drink, Home, Life, Transportation, Uncategorized, and Utilities. Payment proof uploads use the configured Cloudinary account.
+- `GET /api/expenses/personal` returns all of the signed-in user's personal expenses, organized month by month in the dashboard.
+- `POST /api/expenses` accepts `multipart/form-data` with `description`, `totalAmount`, `currency`, `category`, optional `subcategory`, `groupId`, `paidBy`, `participants` (JSON array), `splitStrategy` (`EQUAL`, `EXACT`, `PERCENTAGE`, `SHARES`, `ADJUSTMENT`, `REIMBURSEMENT`, or `ITEMIZED`), `values` (JSON array when required), optional `items` (JSON array for itemized expenses), optional `paymentProof` image (up to 5 MB), and optional `note`. If `groupId` is omitted, the expense is stored in the account's private, single-member `Personal Expenses` group. Categories are Entertainment, Food and drink, Home, Life, Transportation, Uncategorized, and Utilities. Payment proof uploads use the configured Cloudinary account.
+- `PATCH /api/expenses/:expenseId` accepts the same expense fields to update an existing entry. Any member of the expense's group can edit it; group balances and split/item details are recalculated, and all group members receive an in-app notification.
+- `DELETE /api/expenses/:expenseId` lets a group member delete a group expense (only the account owner can delete a personal expense); balances are reversed and a permanent activity record remains in the group feed.
+- `GET /api/expenses?groupId=<groupId>` includes comments on each expense. `POST /api/expenses/:expenseId/comments` accepts `{ "content": "Comment text" }` from any group member; `DELETE /api/expenses/comments/:commentId` lets the comment author remove their comment.
+- `GET /api/users/notifications` lists recent in-app notifications for the signed-in user; `PATCH /api/users/notifications/read` marks them as read.
 - `POST /api/groups/:groupId/leave`
-- `GET /api/groups/:groupId/simplify-debts`
+- `GET /api/groups/:groupId/simplify-debts` recalculates suggested transfers from all current expenses and recorded payments. The group preference controls whether it combines member balances; suggestions do not change balances until a payment is recorded.

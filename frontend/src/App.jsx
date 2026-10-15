@@ -67,6 +67,402 @@ function getDefaultSplitValues(strategy, participants, totalAmount) {
   return defaults;
 }
 
+function groupExpensesByMonth(expenses) {
+  const months = new Map();
+  expenses.forEach((expense) => {
+    const date = new Date(expense.createdAt);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    if (!months.has(key)) {
+      months.set(key, {
+        key,
+        label: date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        expenses: [],
+      });
+    }
+    months.get(key).expenses.push(expense);
+  });
+  return [...months.values()].sort((first, second) => second.key.localeCompare(first.key));
+}
+
+function getExpenseMonthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function SpendingInsights({ transactions, members }) {
+  const [monthSelection, setMonthSelection] = useState('');
+  const [currencySelection, setCurrencySelection] = useState('');
+  const [hoveredMonth, setHoveredMonth] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [hoveredDay, setHoveredDay] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const expenses = transactions.filter((transaction) => (
+    transaction.type === 'EXPENSE' && Number(transaction.totalAmount) > 0
+  ));
+  const monthKeys = [...new Set(expenses.map((expense) => getExpenseMonthKey(new Date(expense.createdAt))))]
+    .sort((first, second) => first.localeCompare(second));
+  const activeMonth = monthKeys.includes(monthSelection) ? monthSelection : monthKeys.at(-1) || '';
+  const monthOptions = monthKeys.map((key) => {
+    const [year, month] = key.split('-').map(Number);
+    return {
+      key,
+      label: new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+    };
+  });
+  const monthExpenses = expenses.filter((expense) => getExpenseMonthKey(new Date(expense.createdAt)) === activeMonth);
+  const currencies = [...new Set(monthExpenses.map((expense) => expense.currency || 'INR'))].sort();
+  const activeCurrency = currencies.includes(currencySelection) ? currencySelection : currencies[0] || 'INR';
+  const selectedExpenses = monthExpenses.filter((expense) => (expense.currency || 'INR') === activeCurrency);
+  const memberById = new Map();
+  members.forEach((member) => memberById.set(member._id, member.fullnamae || member.username));
+  expenses.forEach((expense) => {
+    expense.splits?.forEach((split) => {
+      if (split.userId && !memberById.has(split.userId)) {
+        memberById.set(split.userId, `Former member ${split.userId.slice(0, 6)}`);
+      }
+    });
+  });
+  const payers = [...memberById.entries()].map(([id, name]) => ({ id, name }));
+  const colors = ['#568bd8', '#b66ada', '#4e56b5', '#e5ab3f', '#4eaa89', '#e36f67', '#5b9cae', '#8f9f43'];
+  const colorById = new Map(payers.map((payer, index) => [payer.id, colors[index % colors.length]]));
+  const addExpenseShares = (totals, expense) => {
+    expense.splits?.forEach((split) => {
+      const memberId = split.userId;
+      const amount = Number(split.amountOwed);
+      if (!memberId || !Number.isFinite(amount) || amount <= 0) return;
+      totals.set(memberId, (totals.get(memberId) || 0) + amount);
+    });
+  };
+  const paidTotals = new Map();
+  selectedExpenses.forEach((expense) => {
+    if (!expense.paidBy) return;
+    paidTotals.set(
+      expense.paidBy,
+      (paidTotals.get(expense.paidBy) || 0) + (Number(expense.totalAmount) || 0),
+    );
+  });
+  const paidData = payers
+    .map((payer) => ({ ...payer, amount: paidTotals.get(payer.id) || 0 }))
+    .filter((payer) => payer.amount > 0);
+  const paidTotal = paidData.reduce((total, payer) => total + payer.amount, 0);
+  const shareTotals = new Map();
+  const dailyTotals = new Map();
+  selectedExpenses.forEach((expense) => {
+    addExpenseShares(shareTotals, expense);
+    const day = new Date(expense.createdAt).getDate();
+    const dayTotals = dailyTotals.get(day) || new Map();
+    addExpenseShares(dayTotals, expense);
+    dailyTotals.set(day, dayTotals);
+  });
+  const pieData = payers
+    .map((payer) => ({ ...payer, amount: shareTotals.get(payer.id) || 0 }))
+    .filter((payer) => payer.amount > 0);
+  const activePayers = pieData;
+  const monthTotal = pieData.reduce((total, payer) => total + payer.amount, 0);
+  const pieRadius = 62;
+  const pieCircumference = 2 * Math.PI * pieRadius;
+  let pieOffset = 0;
+  const selectedMonthDate = activeMonth
+    ? new Date(Number(activeMonth.slice(0, 4)), Number(activeMonth.slice(5, 7)) - 1, 1)
+    : new Date();
+  const daysInMonth = new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 0).getDate();
+  const monthlyKeys = monthKeys.slice(-6);
+  const monthlyTotals = new Map();
+  expenses.filter((expense) => (expense.currency || 'INR') === activeCurrency).forEach((expense) => {
+    const monthKey = getExpenseMonthKey(new Date(expense.createdAt));
+    const month = monthlyTotals.get(monthKey) || new Map();
+    addExpenseShares(month, expense);
+    monthlyTotals.set(monthKey, month);
+  });
+  const monthlyPayers = payers.filter((payer) => monthlyKeys.some((key) => (monthlyTotals.get(key)?.get(payer.id) || 0) > 0));
+  const monthlyTotalFor = (key) => [...(monthlyTotals.get(key)?.values() || [])].reduce((sum, amount) => sum + amount, 0);
+  const averageMonthlyTotal = monthlyKeys.length
+    ? monthlyKeys.reduce((total, key) => total + monthlyTotalFor(key), 0) / monthlyKeys.length
+    : 0;
+  const chart = { left: 52, right: 700, top: 22, bottom: 208 };
+  const chartWidth = chart.right - chart.left;
+  const chartHeight = chart.bottom - chart.top;
+  const maximumMonthly = Math.max(averageMonthlyTotal, ...monthlyKeys.map(monthlyTotalFor), 1);
+  const monthlySlot = chartWidth / Math.max(monthlyKeys.length, 1);
+  const payerBarWidth = Math.max(2, Math.min(20, (monthlySlot - 12) / Math.max(monthlyPayers.length, 1)));
+  const visibleMonth = hoveredMonth || selectedMonth;
+  const visibleDay = hoveredDay ?? selectedDay;
+  const averageLine = monthlyKeys.map((key, index) => {
+    const x = chart.left + monthlySlot * index + monthlySlot / 2;
+    const y = chart.bottom - (averageMonthlyTotal / maximumMonthly) * chartHeight;
+    return `${index ? 'L' : 'M'} ${x} ${y}`;
+  }).join(' ');
+  const monthLabel = (key) => {
+    const [year, month] = key.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  };
+  const formatAmount = (amount) => Number(amount).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+  const maxDailyAmount = Math.max(...[...dailyTotals.values()].flatMap((totals) => [...totals.values()]), 1);
+
+  return (
+    <section className="spending-insights">
+      <div className="spending-insights-heading">
+        <div><p className="eyebrow">GROUP SPENDING</p><h3>Monthly spending insights</h3></div>
+        <div className="spending-insights-controls">
+          {monthOptions.length > 0 && (
+            <label>Month
+              <select value={activeMonth} onChange={(event) => setMonthSelection(event.target.value)}>
+                {monthOptions.map((month) => <option key={month.key} value={month.key}>{month.label}</option>)}
+              </select>
+            </label>
+          )}
+          {currencies.length > 1 && (
+            <label>Currency
+              <select value={activeCurrency} onChange={(event) => setCurrencySelection(event.target.value)}>
+                {currencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      </div>
+      {!monthKeys.length ? (
+        <p className="empty-state">Add group expenses to see monthly spending charts.</p>
+      ) : (
+        <>
+          <div className="spending-insights-summary">
+            <div className="spending-chart-card spending-pie-card">
+              <div className="spending-chart-title">
+                <div><h4>Who paid this month</h4><p>{monthOptions.find((month) => month.key === activeMonth)?.label}</p></div>
+                <strong>{activeCurrency} {formatAmount(paidTotal)}</strong>
+              </div>
+              {paidData.length ? (
+                <div className="spending-pie-layout">
+                  <svg className="spending-pie" viewBox="0 0 160 160" role="img" aria-label={`Amount paid by each member for ${activeMonth}`}>
+                    <circle cx="80" cy="80" r={pieRadius} fill="none" stroke="#edf0ec" strokeWidth="22" />
+                    {paidData.map((payer) => {
+                      const segment = (payer.amount / paidTotal) * pieCircumference;
+                      const circle = (
+                        <circle
+                          key={payer.id}
+                          cx="80"
+                          cy="80"
+                          r={pieRadius}
+                          fill="none"
+                          stroke={colorById.get(payer.id)}
+                          strokeWidth="22"
+                          strokeDasharray={`${segment} ${pieCircumference - segment}`}
+                          strokeDashoffset={-pieOffset}
+                          transform="rotate(-90 80 80)"
+                        >
+                          <title>{payer.name} paid: {activeCurrency} {formatAmount(payer.amount)}</title>
+                        </circle>
+                      );
+                      pieOffset += segment;
+                      return circle;
+                    })}
+                    <text x="80" y="76" textAnchor="middle" className="spending-pie-total">{activeCurrency}</text>
+                    <text x="80" y="96" textAnchor="middle" className="spending-pie-amount">{formatAmount(paidTotal)}</text>
+                  </svg>
+                  <ul className="spending-payer-legend">
+                    {paidData.map((payer) => (
+                      <li key={payer.id}>
+                        <span style={{ '--payer-color': colorById.get(payer.id) }} />
+                        <div><strong>{payer.name}</strong><small>{Math.round((payer.amount / paidTotal) * 100)}%</small></div>
+                        <b>{activeCurrency} {formatAmount(payer.amount)}</b>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : <p className="empty-state">No expenses for this month in {activeCurrency}.</p>}
+            </div>
+            <div className="spending-chart-card spending-daily-card">
+              <div className="spending-chart-title">
+                <div><h4>Daily spending</h4><p>Each day of {monthOptions.find((month) => month.key === activeMonth)?.label}</p></div>
+              </div>
+              <div className="spending-daily-scroll">
+                <svg
+                  className="spending-daily-chart"
+                  viewBox={`0 0 ${Math.max(680, daysInMonth * 28)} 210`}
+                  role="img"
+                  aria-label={`Daily group expense shares during ${activeMonth}`}
+                >
+                  {[0, 1, 2, 3].map((tick) => {
+                    const value = maxDailyAmount * (3 - tick) / 3;
+                    const y = 166 - (value / maxDailyAmount) * 132;
+                    return <g key={tick}><line x1="35" x2={Math.max(680, daysInMonth * 28) - 8} y1={y} y2={y} /><text x="30" y={y + 3} textAnchor="end">{formatAmount(value)}</text></g>;
+                  })}
+                  {Array.from({ length: daysInMonth }, (_, index) => {
+                    const day = index + 1;
+                    const chartWidth = Math.max(680, daysInMonth * 28);
+                    const daySlot = (chartWidth - 54) / daysInMonth;
+                    const x = 42 + index * daySlot;
+                    const dayTotals = dailyTotals.get(day) || new Map();
+                    const width = Math.max(3, Math.min(8, 17 / Math.max(activePayers.length, 1)));
+                    return (
+                      <g
+                        key={day}
+                        className="spending-chart-selection"
+                        onMouseEnter={() => setHoveredDay(day)}
+                        onMouseLeave={() => setHoveredDay(null)}
+                      >
+                        {(visibleDay === day) && <rect className="spending-selection-band" x={x - 2} y="26" width={daySlot} height="142" />}
+                        {activePayers.map((payer, payerIndex) => {
+                          const value = dayTotals.get(payer.id) || 0;
+                          const height = (value / maxDailyAmount) * 132;
+                          return value > 0 ? (
+                            <rect
+                              key={payer.id}
+                              x={x + payerIndex * (width + 1)}
+                              y={166 - height}
+                              width={width}
+                              height={height}
+                              rx="2"
+                              fill={colorById.get(payer.id)}
+                            >
+                              <title>Day {day} · {payer.name}'s share: {activeCurrency} {formatAmount(value)}</title>
+                            </rect>
+                          ) : null;
+                        })}
+                        <rect
+                          className="spending-chart-hit-area"
+                          x={x - 2}
+                          y="24"
+                          width={daySlot}
+                          height="154"
+                          fill="transparent"
+                          role="button"
+                          tabIndex="0"
+                          aria-label={`Day ${day}, total ${activeCurrency} ${formatAmount([...dayTotals.values()].reduce((sum, amount) => sum + amount, 0))}. Click to pin details.`}
+                          onFocus={() => setHoveredDay(day)}
+                          onBlur={() => setHoveredDay(null)}
+                          onClick={() => setSelectedDay((current) => current === day ? null : day)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSelectedDay((current) => current === day ? null : day);
+                            }
+                          }}
+                        />
+                        {day === 1 || day % 5 === 0 || day === daysInMonth
+                          ? <text x={x + 4} y="190" textAnchor="middle">{day}</text>
+                          : null}
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+              {visibleDay !== null && visibleDay !== undefined && (
+                <div className="spending-chart-tooltip spending-daily-tooltip" role="status">
+                  <div><strong>{monthOptions.find((month) => month.key === activeMonth)?.label} {visibleDay}</strong><b>{activeCurrency} {formatAmount([...((dailyTotals.get(visibleDay)) || new Map()).values()].reduce((sum, amount) => sum + amount, 0))}</b></div>
+                  {activePayers.map((payer) => (
+                    <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(dailyTotals.get(visibleDay)?.get(payer.id) || 0)}</strong></p>
+                  ))}
+                </div>
+              )}
+              <p className="spending-axis-caption">Day of month · each member’s actual expense share</p>
+              <SpendingLegend payers={activePayers} colorById={colorById} />
+            </div>
+          </div>
+          <div className="spending-chart-card spending-monthly-card">
+            <div className="spending-chart-title">
+              <div><h4>Monthly expenditure</h4><p>Amount paid by each member · last {monthlyKeys.length} months</p></div>
+              <strong>{activeCurrency}</strong>
+            </div>
+            {monthlyKeys.length ? (
+              <>
+                <div className="spending-monthly-scroll">
+                  <div className="spending-monthly-chart-wrap">
+                    <svg className="spending-monthly-chart" viewBox="0 0 740 260" role="img" aria-label="Monthly actual expense share by group member">
+                    {[0, 1, 2, 3].map((tick) => {
+                      const value = maximumMonthly * (3 - tick) / 3;
+                      const y = chart.bottom - (value / maximumMonthly) * chartHeight;
+                      return <g key={tick}><line x1={chart.left} x2={chart.right} y1={y} y2={y} /><text x={chart.left - 8} y={y + 4} textAnchor="end">{formatAmount(value)}</text></g>;
+                    })}
+                    {monthlyKeys.map((key, monthIndex) => {
+                      const xCenter = chart.left + monthlySlot * monthIndex + monthlySlot / 2;
+                      const totals = monthlyTotals.get(key) || new Map();
+                      const plottedPayers = monthlyPayers.filter((payer) => (totals.get(payer.id) || 0) > 0);
+                      const groupWidth = plottedPayers.length * payerBarWidth;
+                      const total = monthlyTotalFor(key);
+                      return (
+                        <g
+                          key={key}
+                          className="spending-chart-selection"
+                          onMouseEnter={() => setHoveredMonth(key)}
+                          onMouseLeave={() => setHoveredMonth('')}
+                        >
+                          {visibleMonth === key && <rect className="spending-selection-band" x={chart.left + monthlySlot * monthIndex} y={chart.top} width={monthlySlot} height={chart.bottom - chart.top} />}
+                          {plottedPayers.map((payer, payerIndex) => {
+                            const amount = totals.get(payer.id) || 0;
+                            const height = (amount / maximumMonthly) * chartHeight;
+                            return <rect key={payer.id} x={xCenter - groupWidth / 2 + payerIndex * payerBarWidth} y={chart.bottom - height} width={Math.max(2, payerBarWidth - 2)} height={height} rx="2" fill={colorById.get(payer.id)}><title>{monthLabel(key)} · {payer.name}'s actual share: {activeCurrency} {formatAmount(amount)}</title></rect>;
+                          })}
+                          <rect
+                            className="spending-chart-hit-area"
+                            x={chart.left + monthlySlot * monthIndex}
+                            y={chart.top}
+                            width={monthlySlot}
+                            height={chart.bottom - chart.top}
+                            fill="transparent"
+                            role="button"
+                            tabIndex="0"
+                            aria-label={`${monthLabel(key)} total actual expense share ${activeCurrency} ${formatAmount(total)}. Click to pin details.`}
+                            onFocus={() => setHoveredMonth(key)}
+                            onBlur={() => setHoveredMonth('')}
+                            onClick={() => setSelectedMonth((current) => current === key ? '' : key)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setSelectedMonth((current) => current === key ? '' : key);
+                              }
+                            }}
+                          />
+                          <text x={xCenter} y={chart.bottom + 19} textAnchor="middle">{monthLabel(key)}</text>
+                        </g>
+                      );
+                    })}
+                    {monthlyKeys.length > 0 && <path d={averageLine} className="spending-average-line"><title>Average monthly spend: {activeCurrency} {formatAmount(averageMonthlyTotal)}</title></path>}
+                    {monthlyKeys.map((key, index) => {
+                      const x = chart.left + monthlySlot * index + monthlySlot / 2;
+                      const y = chart.bottom - (averageMonthlyTotal / maximumMonthly) * chartHeight;
+                      return <circle key={key} cx={x} cy={y} r="3.5" className="spending-average-point" />;
+                    })}
+                    </svg>
+                    {visibleMonth && monthlyTotals.has(visibleMonth) && (
+                      <div className="spending-chart-tooltip spending-monthly-tooltip" role="status">
+                        <div><strong>{monthLabel(visibleMonth)}</strong><b>{activeCurrency} {formatAmount(monthlyTotalFor(visibleMonth))}</b></div>
+                        {monthlyPayers.map((payer) => (
+                          <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(monthlyTotals.get(visibleMonth)?.get(payer.id) || 0)}</strong></p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="spending-chart-legend">
+                  <SpendingLegend payers={monthlyPayers} colorById={colorById} />
+                  <span className="spending-average-label"><i />Average monthly spend</span>
+                </div>
+                <div className="spending-monthly-totals">
+                  {monthlyKeys.map((key) => (
+                    <span key={key}><small>{monthLabel(key)}</small><strong>{activeCurrency} {formatAmount(monthlyTotalFor(key))}</strong></span>
+                  ))}
+                </div>
+              </>
+            ) : <p className="empty-state">No monthly spending data yet.</p>}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function SpendingLegend({ payers, colorById }) {
+  return (
+    <div className="spending-payer-key">
+      {payers.map((payer) => (
+        <span key={payer.id}><i style={{ background: colorById.get(payer.id) }} />{payer.name}</span>
+      ))}
+    </div>
+  );
+}
+
 const expenseSplitModes = [
   { id: 'EQUAL', label: 'Split equally' },
   { id: 'EXACT', label: 'Split by exact amounts' },
@@ -309,7 +705,10 @@ function Brand() {
 function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
+  const [personalGroup, setPersonalGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
+  const [personalExpenses, setPersonalExpenses] = useState([]);
+  const [activityNotifications, setActivityNotifications] = useState([]);
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
@@ -325,6 +724,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [friendToRemove, setFriendToRemove] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
+  const [selectedExpense, setSelectedExpense] = useState(null);
   const [groupTransactions, setGroupTransactions] = useState([]);
   const [groupBalances, setGroupBalances] = useState([]);
   const [groupSettlements, setGroupSettlements] = useState([]);
@@ -353,10 +753,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     items: [],
     note: '',
     paymentProof: null,
+    existingProofUrl: null,
   });
   const [expenseError, setExpenseError] = useState('');
   const [expenseBusy, setExpenseBusy] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState('');
+  const [clearExpenseProof, setClearExpenseProof] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [groupCoverImage, setGroupCoverImage] = useState(null);
+  const [groupSimplifyDebts, setGroupSimplifyDebts] = useState(false);
   const [groupMemberIds, setGroupMemberIds] = useState([]);
   const [groupMemberIdentifier, setGroupMemberIdentifier] = useState('');
   const [groupError, setGroupError] = useState('');
@@ -412,12 +817,33 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     Promise.all([
       apiRequest("/groups", { headers: authHeaders }),
       apiRequest("/expenses", { headers: authHeaders }),
+      apiRequest("/expenses/personal", { headers: authHeaders }),
     ])
-      .then(([groupData, expenseData]) => {
-        setGroups(groupData || []);
+      .then(([groupData, expenseData, personalExpenseData]) => {
+        const loadedGroups = groupData || [];
+        setGroups(loadedGroups.filter((group) => !group.isPersonal));
+        setPersonalGroup(loadedGroups.find((group) => group.isPersonal) || null);
         setExpenses(expenseData || []);
+        setPersonalExpenses(personalExpenseData || []);
       })
       .catch((error) => setFormMessage(error.message));
+  }, [accessToken]);
+
+  useEffect(() => {
+    let active = true;
+    const loadNotifications = () => apiRequest('/users/notifications', { headers: authHeaders })
+      .then((data) => {
+        if (active) setActivityNotifications(data || []);
+      })
+      .catch((error) => {
+        if (active) setFormMessage(error.message);
+      });
+    void loadNotifications();
+    const interval = window.setInterval(() => void loadNotifications(), 20000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
   }, [accessToken]);
 
   const refreshFriendData = async () => {
@@ -513,6 +939,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const closeGroupForm = () => {
     setShowGroupForm(false);
     setGroupName('');
+    setGroupCoverImage(null);
+    setGroupSimplifyDebts(false);
     setGroupMemberIds([]);
     setGroupMemberIdentifier('');
     setGroupError('');
@@ -528,18 +956,22 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setGroupBusy(true);
     setGroupError('');
     try {
+      const body = new FormData();
+      body.set('name', name);
+      body.set('memberIds', JSON.stringify(groupMemberIds));
+      body.set('memberIdentifiers', JSON.stringify(groupMemberIdentifier.trim() ? [groupMemberIdentifier.trim()] : []));
+      body.set('simplifyDebts', String(groupSimplifyDebts));
+      if (groupCoverImage) body.set('coverImage', groupCoverImage);
       const group = await apiRequest("/groups", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({
-          name,
-          memberIds: groupMemberIds,
-          memberIdentifiers: groupMemberIdentifier.trim() ? [groupMemberIdentifier.trim()] : [],
-        }),
+        body,
       });
       setGroups((current) => [group, ...current]);
       setShowGroupForm(false);
       setGroupName('');
+      setGroupCoverImage(null);
+      setGroupSimplifyDebts(false);
       setGroupMemberIds([]);
       setGroupMemberIdentifier('');
       setGroupError('');
@@ -638,16 +1070,43 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     }
     if (expenseDraft.note.trim()) body.set('note', expenseDraft.note.trim());
     if (expenseDraft.paymentProof) body.set('paymentProof', expenseDraft.paymentProof);
+    if (clearExpenseProof) body.set('removePaymentProof', 'true');
     setExpenseBusy(true);
     setExpenseError('');
     try {
-      const expense = await apiRequest('/expenses', {
-        method: "POST",
+      const isEditing = Boolean(editingExpenseId);
+      const expense = await apiRequest(isEditing ? `/expenses/${editingExpenseId}` : '/expenses', {
+        method: isEditing ? "PATCH" : "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
         body,
       });
-      setExpenses((current) => [expense, ...current]);
+      setExpenses((current) => isEditing
+        ? current.map((item) => item._id === expense._id ? { ...item, ...expense } : item)
+        : [expense, ...current]);
+      if (!expenseDraft.groupId && !isEditing) {
+        setPersonalGroup((current) => current || {
+          _id: expense.groupId,
+          name: 'Personal Expenses',
+          isPersonal: true,
+        });
+        setPersonalExpenses((current) => [expense, ...current]);
+      }
       setShowExpenseForm(false);
+      setEditingExpenseId('');
+      setClearExpenseProof(false);
+      setSelectedExpense(null);
+      if (isEditing && !expenseDraft.groupId) {
+        setPersonalExpenses(await apiRequest('/expenses/personal', { headers: authHeaders }));
+      }
+      if (isEditing) {
+        setFormMessage('Expense updated. The group has been notified.');
+        apiRequest('/expenses', { headers: authHeaders })
+          .then((data) => setExpenses(data || []))
+          .catch((error) => setFormMessage(error.message));
+        apiRequest('/users/notifications', { headers: authHeaders })
+          .then((data) => setActivityNotifications(data || []))
+          .catch((error) => setFormMessage(error.message));
+      }
       if (selectedGroup?._id === expenseDraft.groupId) {
         await openGroupDetails({ ...selectedGroup, ...group });
       }
@@ -675,10 +1134,68 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       items: [],
       note: '',
       paymentProof: null,
+      existingProofUrl: null,
     });
     setExpenseError('');
+    setEditingExpenseId('');
+    setClearExpenseProof(false);
     setShowExpenseCategories(false);
     setShowExpenseForm(true);
+  };
+
+  const editExpense = (expense) => {
+    const group = groups.find((item) => item._id === expense.groupId);
+    const participants = expense.participantIds || [user._id];
+    setExpenseDraft({
+      description: expense.description || '',
+      totalAmount: expense.totalAmount || '',
+      currency: expense.currency || 'INR',
+      category: expense.category || 'Uncategorized',
+      subcategory: expense.subcategory || '',
+      groupId: group?._id || '',
+      paidBy: expense.paidBy || user._id,
+      participantIds: participants,
+      strategy: expense.splitStrategy || 'EQUAL',
+      splitValues: Object.fromEntries((expense.splits || []).map((split) => [split.userId, split.splitValue])),
+      items: (expense.items || []).map((item, index) => ({
+        id: `${expense._id}-${index}`,
+        description: item.description,
+        amount: item.amount,
+        participantIds: item.participantIds || [],
+      })),
+      note: expense.note || '',
+      paymentProof: null,
+      existingProofUrl: expense.paymentProofUrl || null,
+    });
+    setEditingExpenseId(expense._id);
+    setClearExpenseProof(false);
+    setExpenseError('');
+    setShowExpenseCategories(false);
+    setSelectedExpense(null);
+    setShowExpenseForm(true);
+  };
+
+  const removeExpense = async (expense) => {
+    if (!window.confirm(`Delete “${expense.description}” (${expense.currency} ${Number(expense.totalAmount).toFixed(2)})? Group balances will be adjusted and the deletion will appear in group activity.`)) return null;
+    try {
+      const result = await apiRequest(`/expenses/${expense._id}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      setSelectedExpense(null);
+      setExpenses(await apiRequest('/expenses', { headers: authHeaders }));
+      if (expense.groupId && selectedGroup?._id === expense.groupId) {
+        await openGroupDetails(selectedGroup);
+      }
+      if (!expense.groupId || personalGroup?._id === expense.groupId) {
+        setPersonalExpenses(await apiRequest('/expenses/personal', { headers: authHeaders }));
+      }
+      setFormMessage(result.warning || 'Expense deleted and group balances updated.');
+      return true;
+    } catch (error) {
+      setFormMessage(error.message);
+      return error.message;
+    }
   };
 
   const updateExpenseDraft = (key, value) => setExpenseDraft((current) => ({ ...current, [key]: value }));
@@ -748,21 +1265,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setSelectedGroup(group);
     setGroupDetailsBusy(true);
     setGroupBalancesBusy(true);
+    setSettlementsBusy(true);
     setGroupSettlements([]);
     setGroupDetailsError('');
+    setGroupSettlementError('');
     try {
-      const [transactions, balances] = await Promise.all([
-        apiRequest(`/expenses?groupId=${group._id}`, { headers: authHeaders }),
+      const [transactions, balances, settlements] = await Promise.all([
+        apiRequest(`/expenses?groupId=${group._id}&history=true`, { headers: authHeaders }),
         apiRequest(`/groups/${group._id}/balances`, { headers: authHeaders }),
+        apiRequest(`/groups/${group._id}/simplify-debts`, { headers: authHeaders }),
       ]);
       setGroupTransactions(transactions);
       setGroupBalances(balances);
+      setGroupSettlements(settlements);
     } catch (error) {
       setGroupDetailsError(error.message);
+      setGroupSettlementError(error.message);
       setFormMessage(error.message);
     } finally {
       setGroupDetailsBusy(false);
       setGroupBalancesBusy(false);
+      setSettlementsBusy(false);
     }
   };
   const loadGroupSettlements = async (groupId) => {
@@ -783,21 +1306,29 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       body: settlement,
     });
     await openGroupDetails(selectedGroup);
-    await loadGroupSettlements(groupId);
   };
-  const renameGroup = async (groupId, name) => {
+  const saveGroupSettings = async (groupId, settings) => {
     setGroupSettingsBusy(true);
     setGroupSettingsError('');
     try {
-      const updatedGroup = await apiRequest(`/groups/${groupId}`, {
+      const body = new FormData();
+      body.set('name', settings.name);
+      body.set('simplifyDebts', String(settings.simplifyDebts));
+      if (settings.coverImage) body.set('coverImage', settings.coverImage);
+      if (settings.removeCoverImage) body.set('removeCoverImage', 'true');
+      const { warning, ...updatedGroup } = await apiRequest(`/groups/${groupId}`, {
         method: 'PATCH',
-        headers: authHeaders,
-        body: JSON.stringify({ name }),
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body,
       });
       setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
       setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
+      setFormMessage(warning || 'Group settings saved.');
+      await openGroupDetails(updatedGroup);
+      return true;
     } catch (error) {
       setGroupSettingsError(error.message);
+      return false;
     } finally {
       setGroupSettingsBusy(false);
     }
@@ -814,12 +1345,33 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
       setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
       setAddMemberIdentifier('');
+      await openGroupDetails(updatedGroup);
       return true;
     } catch (error) {
       setAddMemberError(error.message);
       return false;
     } finally {
       setAddMemberBusy(false);
+    }
+  };
+  const removeMemberFromGroup = async (groupId, memberId) => {
+    setGroupSettingsBusy(true);
+    setGroupSettingsError('');
+    try {
+      const updatedGroup = await apiRequest(`/groups/${groupId}/members/${memberId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      setGroups((current) => current.map((group) => group._id === groupId ? { ...group, ...updatedGroup } : group));
+      setSelectedGroup((current) => current?._id === groupId ? { ...current, ...updatedGroup } : current);
+      setFormMessage('Group member removed.');
+      await openGroupDetails(updatedGroup);
+      return true;
+    } catch (error) {
+      setGroupSettingsError(error.message);
+      return false;
+    } finally {
+      setGroupSettingsBusy(false);
     }
   };
   const updateProfileField = (event) => setProfileForm((current) => ({ ...current, [event.target.name]: event.target.type === 'file' ? event.target.files[0] : event.target.value }));
@@ -894,6 +1446,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const splitModeTotal = selectedExpenseMembers.reduce((sum, member) => sum + (
     Number(expenseDraft.splitValues[member._id] ?? expenseSplitDefaults[member._id]) || 0
   ), 0);
+  const personalExpenseMonths = groupExpensesByMonth(personalExpenses);
 
   return (
     <main className="dashboard-page">
@@ -901,18 +1454,30 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
         <Brand />
         <div className="nav-links">
           <button className={activePage === 'overview' ? 'active' : ''} type="button" onClick={() => setActivePage('overview')}>Overview</button>
+          <button className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => setActivePage('personal')}>Personal expenses</button>
           <button className={activePage === 'friends' ? 'active' : ''} type="button" onClick={() => setActivePage('friends')}>Friends</button>
         </div>
         <div className="notification-control">
           <button
             className="notification-trigger"
             type="button"
-            aria-label={`Notifications, ${pendingFriendRequests.length} pending friend requests`}
+            aria-label={`Notifications, ${pendingFriendRequests.length} pending friend requests and ${activityNotifications.filter((item) => !item.readAt).length} expense updates`}
             aria-expanded={showNotifications}
-            onClick={() => setShowNotifications((shown) => !shown)}
+            onClick={async () => {
+              const opening = !showNotifications;
+              setShowNotifications(opening);
+              if (opening) {
+                try {
+                  await apiRequest('/users/notifications/read', { method: 'PATCH', headers: authHeaders });
+                  setActivityNotifications((current) => current.map((item) => ({ ...item, readAt: item.readAt || new Date().toISOString() })));
+                } catch (error) {
+                  setFormMessage(error.message);
+                }
+              }
+            }}
           >
             <span aria-hidden="true">♧</span>
-            {pendingFriendRequests.length > 0 && <span className="notification-count">{pendingFriendRequests.length}</span>}
+            {(pendingFriendRequests.length + activityNotifications.filter((item) => !item.readAt).length) > 0 && <span className="notification-count">{pendingFriendRequests.length + activityNotifications.filter((item) => !item.readAt).length}</span>}
           </button>
           {showNotifications && (
             <div className="notification-panel">
@@ -935,6 +1500,24 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   )}
                 </div>
               )) : <p className="notification-empty">No notifications yet.</p>}
+              {activityNotifications.map((notification) => (
+                <button
+                  className={`notification-item expense-notification-item ${notification.readAt ? '' : 'unread'}`}
+                  key={notification._id}
+                  type="button"
+                  onClick={() => {
+                    setShowNotifications(false);
+                    const group = groups.find((item) => item._id === notification.groupId);
+                    if (group) void openGroupDetails(group);
+                  }}
+                >
+                  <span className="notification-copy">
+                    <strong>Expense updated</strong>
+                    <span>{notification.message}</span>
+                    <small>{new Date(notification.createdAt).toLocaleString()}</small>
+                  </span>
+                </button>
+              ))}
               {friendError && <p className="error-message notification-error">{friendError}</p>}
             </div>
           )}
@@ -984,14 +1567,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       <div className={`dashboard-shell ${activePage === 'friends' ? 'friend-management-shell' : ''}`}>
         <aside className="dashboard-sidebar">
           <div className="side-links">
-            <button className="side-link active">
+            <button className={`side-link ${activePage === 'overview' ? 'active' : ''}`} onClick={() => setActivePage('overview')} type="button">
               ▣ <span>Dashboard</span>
             </button>
-            <button className="side-link">
+            <button className="side-link" onClick={() => setActivePage('overview')} type="button">
               ⚑ <span>Recent activity</span>
             </button>
-            <button className="side-link">
-              ☷ <span>All expenses</span>
+            <button className={`side-link ${activePage === 'personal' ? 'active' : ''}`} onClick={() => setActivePage('personal')} type="button">
+              ☷ <span>Personal expenses</span>
             </button>
           </div>
           <div className="side-section">
@@ -1011,6 +1594,74 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   {group.name}
                 </button>
               ))
+            ) : activePage === 'personal' ? (
+              <div className="personal-expenses-page">
+                <div className="welcome-row">
+                  <div>
+                    <p className="eyebrow">ONLY YOU CAN SEE THIS</p>
+                    <h1>Personal expenses</h1>
+                    <p className="lede">Your private spending, organized month by month.</p>
+                  </div>
+                  <button className="primary-action" type="button" onClick={() => openExpenseForm('')}>＋ Add personal expense</button>
+                </div>
+                {formMessage && <p className="error-message dashboard-message">{formMessage}</p>}
+                <div className="personal-expenses-summary">
+                  <strong>{personalExpenses.length} {personalExpenses.length === 1 ? 'expense' : 'expenses'}</strong>
+                  <span>{personalGroup ? 'Saved in your private Personal Expenses group' : 'Your private group will be created when you add your first expense'}</span>
+                </div>
+                {personalExpenseMonths.length ? (
+                  <div className="personal-expense-months">
+                    {personalExpenseMonths.map((month) => {
+                      const totals = new Map();
+                      month.expenses.forEach((expense) => {
+                        totals.set(expense.currency, (totals.get(expense.currency) || 0) + Number(expense.totalAmount));
+                      });
+                      return (
+                        <section className="personal-expense-month" key={month.key}>
+                          <header>
+                            <div><p className="eyebrow">MONTHLY RECORD</p><h2>{month.label}</h2></div>
+                            <span>{month.expenses.length} {month.expenses.length === 1 ? 'expense' : 'expenses'} · {[...totals].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ')}</span>
+                          </header>
+                          <div className="personal-expense-list">
+                            {month.expenses.map((expense) => (
+                              <article
+                                className="personal-expense-row"
+                                key={expense._id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedExpense(expense)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setSelectedExpense(expense);
+                                  }
+                                }}
+                              >
+                                <div className="personal-expense-icon">{expenseCategories.find((category) => category.name === expense.category)?.icon || '🧾'}</div>
+                                <div className="personal-expense-info">
+                                  <strong>{expense.description}</strong>
+                                  <span>{expense.category || 'Uncategorized'}{expense.subcategory ? ` · ${expense.subcategory}` : ''} · {new Date(expense.createdAt).toLocaleDateString()}</span>
+                                  {expense.note && <small>{expense.note}</small>}
+                                  {expense.items?.map((item, index) => <small key={`${expense._id}-${index}`}>{item.description}: {expense.currency} {item.amount}</small>)}
+                                  {expense.paymentProofUrl && <a className="expense-proof-link" href={expense.paymentProofUrl} target="_blank" rel="noreferrer">View receipt</a>}
+                                </div>
+                                <strong>{expense.currency} {expense.totalAmount}</strong>
+                              </article>
+                            ))}
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="friends-empty-state">
+                    <span>▤</span>
+                    <h2>No personal expenses yet</h2>
+                    <p>Add an expense just for yourself. It will be saved in your private Personal Expenses group and shown under its month.</p>
+                    <button className="primary-action" type="button" onClick={() => openExpenseForm('')}>Add your first personal expense</button>
+                  </div>
+                )}
+              </div>
             ) : (
               <p className="side-empty">No groups yet</p>
             )}
@@ -1250,6 +1901,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   <Group
                     key={group._id}
                     initials={group.name.slice(0, 2).toUpperCase()}
+                    coverImageUrl={group.coverImageUrl}
                     name={group.name}
                     groupCode={group.groupCode}
                     amount={`${group.members?.length || 0} members`}
@@ -1268,16 +1920,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </Panel>
             <Panel title="Recent activity" eyebrow="THE PAPER TRAIL">
               {expenses.length ? (
-                expenses
-                  .slice(0, 4)
-                  .map((expense) => (
-                    <Activity
-                      key={expense._id}
-                      title={expense.description}
-                      detail={`${expense.currency} · ${new Date(expense.createdAt).toLocaleDateString()}`}
-                      amount={`${expense.currency} ${expense.totalAmount}`}
-                    />
-                  ))
+                <GroupActivityList
+                  transactions={expenses.slice(0, 4)}
+                  userId={user._id}
+                  onOpenExpense={setSelectedExpense}
+                />
               ) : (
                 <p className="empty-state">
                   Expenses you add will appear here.
@@ -1297,6 +1944,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   Group name
                   <input name="name" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Lisbon weekend" required />
                 </label>
+                <label>
+                  Group profile picture (optional)
+                  <input type="file" accept="image/*" onChange={(event) => setGroupCoverImage(event.target.files?.[0] || null)} />
+                </label>
+                <label className="group-hide-toggle group-simplify-toggle">
+                  <input type="checkbox" checked={groupSimplifyDebts} onChange={(event) => setGroupSimplifyDebts(event.target.checked)} />
+                  Simplify group debts
+                </label>
+                <p className="modal-help">Debt simplification is off by default. Turn it on to suggest fewer repayments in this group.</p>
                 <fieldset className="group-member-picker">
                   <legend>Add friends</legend>
                   {friends.length ? friends.map((friend) => (
@@ -1310,6 +1966,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                             : current.filter((id) => id !== friend._id));
                         }}
                       />
+                      {friend.coverimage
+                        ? <img className="group-friend-avatar" src={friend.coverimage} alt="" />
+                        : <span className="member-avatar">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
                       <span>
                         <strong>{friend.fullnamae || friend.username}</strong>
                         <small>@{friend.username}</small>
@@ -1395,7 +2054,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           )}
           {showExpenseForm && (
             <Modal
-              title="Add an expense"
+              title={editingExpenseId ? 'Edit expense' : 'Add an expense'}
               className={selectedGroup ? 'group-expense-modal' : ''}
               onClose={() => setShowExpenseForm(false)}
             >
@@ -1452,7 +2111,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                 </div>
 
                 <label>Group
-                  <select value={expenseDraft.groupId} onChange={(event) => changeExpenseGroup(event.target.value)}>
+                  <select value={expenseDraft.groupId} onChange={(event) => changeExpenseGroup(event.target.value)} disabled={Boolean(editingExpenseId)}>
                     <option value="">Personal expense</option>
                     {groups.map((group) => <option key={group._id} value={group._id}>{group.name}</option>)}
                   </select>
@@ -1564,12 +2223,21 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                 <div className="expense-proof-fields">
                   <label>Payment proof (optional)<input type="file" accept="image/*" onChange={(event) => updateExpenseDraft('paymentProof', event.target.files?.[0] || null)} /></label>
                   {expenseDraft.paymentProof && <small>{expenseDraft.paymentProof.name}</small>}
+                  {editingExpenseId && expenseDraft.existingProofUrl && !clearExpenseProof && (
+                    <a className="expense-proof-link" href={expenseDraft.existingProofUrl} target="_blank" rel="noreferrer">View current payment proof</a>
+                  )}
+                  {editingExpenseId && (
+                    <label className="expense-proof-remove">
+                      <input type="checkbox" checked={clearExpenseProof} onChange={(event) => setClearExpenseProof(event.target.checked)} />
+                      Remove existing payment proof
+                    </label>
+                  )}
                   <label>Note (optional)<textarea value={expenseDraft.note} onChange={(event) => updateExpenseDraft('note', event.target.value)} rows="3" placeholder="Add a note about this expense" /></label>
                 </div>
                 {expenseError && <p className="error-message" role="alert">{expenseError}</p>}
                 <div className="expense-form-actions">
                   <button type="button" className="quiet-button" onClick={() => setShowExpenseForm(false)}>Cancel</button>
-                  <button className="submit-button" disabled={expenseBusy || !selectedExpenseMembers.length || (expenseDraft.strategy === 'ITEMIZED' && !expenseDraft.items.length)}>{expenseBusy ? 'Saving…' : 'Save expense'}</button>
+                  <button className="submit-button" disabled={expenseBusy || !selectedExpenseMembers.length || (expenseDraft.strategy === 'ITEMIZED' && !expenseDraft.items.length)}>{expenseBusy ? 'Saving…' : editingExpenseId ? 'Save changes' : 'Save expense'}</button>
                 </div>
               </form>
             </Modal>
@@ -1650,15 +2318,33 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               onClose={() => setSelectedGroup(null)}
               onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
               onAddExpense={() => openExpenseForm(selectedGroup._id)}
+              onOpenExpense={setSelectedExpense}
               onSettle={() => loadGroupSettlements(selectedGroup._id)}
               onRecordSettlement={(settlement) => recordGroupSettlement(selectedGroup._id, settlement)}
-              onRename={(name) => renameGroup(selectedGroup._id, name)}
+              onSaveSettings={(settings) => saveGroupSettings(selectedGroup._id, settings)}
               onAddMember={(identifier) => addMemberToGroup(selectedGroup._id, identifier)}
+              onRemoveMember={(memberId) => removeMemberFromGroup(selectedGroup._id, memberId)}
               onDelete={async () => {
                 if (await removeGroup(selectedGroup._id)) setSelectedGroup(null);
               }}
               onLeave={async () => {
                 if (await leaveGroup(selectedGroup._id)) setSelectedGroup(null);
+              }}
+            />
+          )}
+          {selectedExpense && (
+            <ExpenseDetails
+              expense={selectedExpense}
+              group={groups.find((item) => item._id === selectedExpense.groupId) || personalGroup}
+              members={groups.find((item) => item._id === selectedExpense.groupId)?.members || [user]}
+              userId={user._id}
+              accessToken={accessToken}
+              onClose={() => setSelectedExpense(null)}
+              onEdit={() => editExpense(selectedExpense)}
+              onDelete={() => removeExpense(selectedExpense)}
+              onCommentAdded={async () => {
+                setExpenses(await apiRequest('/expenses', { headers: authHeaders }));
+                if (selectedGroup?._id === selectedExpense.groupId) await openGroupDetails(selectedGroup);
               }}
             />
           )}
@@ -1701,10 +2387,12 @@ function Panel({ eyebrow, title, children }) {
     </section>
   );
 }
-function Group({ initials, name, amount, note, tone, groupCode, onSimplify, onLeave, onOpen }) {
+function Group({ initials, coverImageUrl, name, amount, note, tone, groupCode, onSimplify, onLeave, onOpen }) {
   return (
     <div className="group-row group-row-clickable" onClick={onOpen} role="button" tabIndex="0" onKeyDown={(event) => { if (event.key === "Enter") onOpen(); }}>
-      <span className={`group-icon ${tone}`}>{initials}</span>
+      {coverImageUrl
+        ? <img className="group-icon group-cover-avatar" src={coverImageUrl} alt="" />
+        : <span className={`group-icon ${tone}`}>{initials}</span>}
       <div>
         <b>{name}</b>
           <small>code: {groupCode || "not assigned"}</small>
@@ -1739,9 +2427,11 @@ function GroupDetails({
   onClose,
   onJoin,
   onAddExpense,
+  onOpenExpense,
   onSettle,
-  onRename,
+  onSaveSettings,
   onAddMember,
+  onRemoveMember,
   onRecordSettlement,
   onDelete,
   onLeave,
@@ -1749,6 +2439,12 @@ function GroupDetails({
   const [activeTab, setActiveTab] = useState('activity');
   const [hideUninvolved, setHideUninvolved] = useState(false);
   const [nameDraft, setNameDraft] = useState(group.name);
+  const [simplifyDebtsDraft, setSimplifyDebtsDraft] = useState(group.simplifyDebts !== false);
+  const [coverImageDraft, setCoverImageDraft] = useState(null);
+  const [removeCoverImage, setRemoveCoverImage] = useState(false);
+  const [memberInput, setMemberInput] = useState('');
+  const [coverPreview, setCoverPreview] = useState('');
+  const [settingsPlanVisible, setSettingsPlanVisible] = useState(false);
   const [memberIdentifierDraft, setMemberIdentifierDraft] = useState('');
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: 'INR', amount: '', note: '', paymentProof: null });
@@ -1756,7 +2452,7 @@ function GroupDetails({
   const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
   const isOwner = group.createdBy === user._id;
   const visibleTransactions = hideUninvolved
-    ? transactions.filter((transaction) => transaction.paidBy === user._id || transaction.participantIds?.includes(user._id))
+    ? transactions.filter((transaction) => transaction.type === 'ACTIVITY' || transaction.paidBy === user._id || transaction.participantIds?.includes(user._id))
     : transactions;
   const memberName = (id) => {
     const member = group.members?.find((item) => item._id === id);
@@ -1765,7 +2461,7 @@ function GroupDetails({
   const exportTransactions = () => {
     const rows = [
       ['Date', 'Description', 'Paid by', 'Amount', 'Currency'],
-      ...transactions.map((transaction) => [
+      ...transactions.filter((transaction) => transaction.type !== 'ACTIVITY').map((transaction) => [
         new Date(transaction.createdAt).toLocaleDateString(),
         transaction.description,
         transaction.paidByName || transaction.paidByUsername || 'Member',
@@ -1812,7 +2508,40 @@ function GroupDetails({
     }
   };
 
-  useEffect(() => setNameDraft(group.name), [group._id, group.name]);
+  useEffect(() => {
+    setNameDraft(group.name);
+    setSimplifyDebtsDraft(group.simplifyDebts !== false);
+    setCoverImageDraft(null);
+    setRemoveCoverImage(false);
+  }, [group._id, group.name, group.simplifyDebts, group.coverImageUrl]);
+
+  useEffect(() => {
+    if (!coverImageDraft) {
+      setCoverPreview('');
+      return undefined;
+    }
+    const preview = URL.createObjectURL(coverImageDraft);
+    setCoverPreview(preview);
+    return () => URL.revokeObjectURL(preview);
+  }, [coverImageDraft]);
+
+  const saveSettings = async (event) => {
+    event.preventDefault();
+    const saved = await onSaveSettings({
+      name: nameDraft.trim(),
+      simplifyDebts: simplifyDebtsDraft,
+      coverImage: coverImageDraft,
+      removeCoverImage,
+    });
+    if (saved) {
+      setCoverImageDraft(null);
+      setRemoveCoverImage(false);
+    }
+  };
+
+  const submitAddMember = async () => {
+    if (await onAddMember(memberInput.trim())) setMemberInput('');
+  };
 
   return (
     <div className="group-details-backdrop" onMouseDown={onClose}>
@@ -1820,7 +2549,9 @@ function GroupDetails({
         <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
         <header className="group-workspace-header">
           <div className="group-workspace-identity">
-            <span className="group-workspace-avatar">{group.name.slice(0, 1).toUpperCase()}</span>
+            {group.coverImageUrl
+              ? <img className="group-workspace-avatar group-workspace-cover" src={group.coverImageUrl} alt="" />
+              : <span className="group-workspace-avatar">{group.name.slice(0, 1).toUpperCase()}</span>}
             <div>
               <p className="eyebrow">GROUP</p>
               <h2>{group.name}</h2>
@@ -1855,39 +2586,36 @@ function GroupDetails({
                   <span>{transactions.length} transactions</span>
                 </div>
                 {transactionsBusy ? <p className="empty-state">Loading group activity…</p> : visibleTransactions.length ? (
-                  <div className="transaction-list">
-                    {visibleTransactions.map((transaction) => (
-                      <article className="transaction-row" key={transaction._id}>
-                        <span className="transaction-icon">▤</span>
-                        <div><b>{transaction.description}</b><small>{transaction.category || 'Uncategorized'}{transaction.subcategory ? ` · ${transaction.subcategory}` : ''} · {transaction.paidByName || transaction.paidByUsername || 'Member'} {transaction.type === 'SETTLEMENT' ? `paid ${transaction.paidToName || 'a member'}` : 'paid'} · {new Date(transaction.createdAt).toLocaleDateString()}</small>{transaction.note && <small>{transaction.note}</small>}{transaction.items?.map((item, itemIndex) => <small key={`${transaction._id}-${itemIndex}`}>{item.description}: {transaction.currency} {item.amount}</small>)}{transaction.paymentProofUrl && <a className="expense-proof-link" href={transaction.paymentProofUrl} target="_blank" rel="noreferrer">View payment proof</a>}</div>
-                        <strong>{transaction.currency} {transaction.totalAmount}</strong>
-                      </article>
-                    ))}
-                  </div>
+                  <GroupActivityList transactions={visibleTransactions} userId={user._id} onOpenExpense={onOpenExpense} />
                 ) : <p className="empty-state">{hideUninvolved ? 'No group expenses involving you.' : 'No expenses in this group yet. Add the first one to get started.'}</p>}
               </section>
             )}
             {activeTab === 'balances' && (
               <section>
                 <div className="group-section-heading">
-                  <div><p className="eyebrow">WHO OWES WHOM</p><h3>Group balances</h3></div>
+                  <div><p className="eyebrow">YOUR SHARE</p><h3>Your group balances</h3></div>
                   <button className="group-inline-action" onClick={onSettle} disabled={settlementsBusy}>{settlementsBusy ? 'Calculating…' : 'Refresh settle-up plan'}</button>
                 </div>
                 {balancesBusy ? <p className="empty-state">Loading group balances…</p> : balances.length ? (
                   <div className="group-balances-list">
                     {balances.map((balance) => {
                       const amount = Number(balance.netBalance);
-                      const label = Math.abs(amount) < 0.005 ? 'settled up' : amount > 0 ? 'gets back' : 'owes';
+                      const name = balance.fullnamae || balance.username;
                       return (
                         <article className="group-balance-row" key={`${balance._id}-${balance.currency || 'INR'}`}>
-                          <span className={`member-avatar ${amount > 0 ? 'mint' : amount < 0 ? 'coral-bg' : ''}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
-                          <div><strong>{balance.fullnamae || balance.username}</strong><small>@{balance.username}</small></div>
-                          <p className={amount > 0 ? 'balance-positive' : amount < 0 ? 'balance-negative' : ''}>{label}{Math.abs(amount) >= 0.005 && <> <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></>}</p>
+                          <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>
+                            {balance.coverimage
+                              ? <img src={balance.coverimage} alt="" />
+                              : name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <div><strong>{name}</strong><small>@{balance.username}</small></div>
+                          <p className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? `${name} owes you` : `You owe ${name}`} <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></p>
                         </article>
                       );
                     })}
                   </div>
-                ) : <p className="empty-state">No group balances to show.</p>}
+                ) : <p className="empty-state">You’re settled up in this group.</p>}
+                <SpendingInsights transactions={transactions} members={group.members || []} />
                 <div className="settlement-plan">
                   <h4>Suggested settlements</h4>
                   <button className="group-inline-action" onClick={() => openSettlementForm()}>Record a payment</button>
@@ -1903,13 +2631,92 @@ function GroupDetails({
             {activeTab === 'settings' && (
               <section className="group-settings-panel">
                 <div className="group-section-heading"><div><p className="eyebrow">GROUP SETTINGS</p><h3>Manage this group</h3></div></div>
-                {isOwner ? (
-                  <form onSubmit={(event) => { event.preventDefault(); onRename(nameDraft.trim()); }}>
-                    <label>Group name<input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength="120" required /></label>
-                    {settingsError && <p className="error-message">{settingsError}</p>}
-                    <button className="group-setting-button" disabled={settingsBusy || nameDraft.trim() === group.name}>{settingsBusy ? 'Saving…' : 'Save group name'}</button>
-                  </form>
-                ) : <p className="modal-help">Only {memberName(group.createdBy)} can change this group’s name.</p>}
+                <form className="group-settings-form" onSubmit={saveSettings}>
+                  <label className="group-cover-picker">
+                    <span className="group-cover-preview">
+                      {coverPreview || (!removeCoverImage && group.coverImageUrl)
+                        ? <img src={coverPreview || group.coverImageUrl} alt="Group cover" />
+                        : <span>{group.name.slice(0, 1).toUpperCase()}</span>}
+                    </span>
+                    <span>Change group cover image</span>
+                    <input type="file" accept="image/*" onChange={(event) => {
+                      setCoverImageDraft(event.target.files?.[0] || null);
+                      setRemoveCoverImage(false);
+                    }} />
+                  </label>
+                  {group.coverImageUrl && !coverPreview && (
+                    <label className="group-hide-toggle">
+                      <input type="checkbox" checked={removeCoverImage} onChange={(event) => setRemoveCoverImage(event.target.checked)} />
+                      Remove group cover image
+                    </label>
+                  )}
+                  <label>Group name<input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength="120" required /></label>
+                  <div className="group-settings-members">
+                    <h4>Group members</h4>
+                    {group.members?.map((member) => (
+                      <div className="group-settings-member" key={member._id}>
+                        {member.coverimage
+                          ? <img src={member.coverimage} alt="" />
+                          : <span className="member-avatar">{(member.fullnamae || member.username).slice(0, 1).toUpperCase()}</span>}
+                        <span><strong>{member.fullnamae || member.username}</strong><small>@{member.username}{member._id === group.createdBy ? ' · Creator' : ''}</small></span>
+                        {member._id !== group.createdBy && member._id !== user._id && (
+                          <button
+                            type="button"
+                            className="group-member-remove"
+                            disabled={settingsBusy}
+                            aria-label={`Remove ${member.fullnamae || member.username} from group`}
+                            title="Remove member (their balances must be settled)"
+                            onClick={() => {
+                              if (window.confirm(`Remove ${member.fullnamae || member.username} from this group? Their balances must be settled first.`)) {
+                                onRemoveMember(member._id);
+                              }
+                            }}
+                          >×</button>
+                        )}
+                      </div>
+                    ))}
+                    <div className="group-settings-add-member">
+                      <label>Add a member by username or email
+                        <input value={memberInput} onChange={(event) => setMemberInput(event.target.value)} onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            void submitAddMember();
+                          }
+                        }} placeholder="Username or email" />
+                      </label>
+                      <button type="button" className="group-setting-button" onClick={() => void submitAddMember()} disabled={addMemberBusy || !memberInput.trim()}>{addMemberBusy ? 'Adding…' : 'Add member'}</button>
+                      {addMemberError && <p className="error-message" role="alert">{addMemberError}</p>}
+                    </div>
+                  </div>
+                  <label className="group-hide-toggle group-simplify-toggle">
+                    <input type="checkbox" checked={simplifyDebtsDraft} onChange={(event) => setSimplifyDebtsDraft(event.target.checked)} />
+                    Simplify group debts
+                  </label>
+                  <p className="modal-help">When enabled, your balances and the settlement plan are recalculated from every group expense and recorded payment. Suggestions never move money automatically; record a payment to update the ledger.</p>
+                  {settingsError && <p className="error-message" role="alert">{settingsError}</p>}
+                  <button className="group-setting-button" disabled={settingsBusy}>{settingsBusy ? 'Saving…' : 'Save group settings'}</button>
+                </form>
+                <div className="group-simplify-preview">
+                  <button className="group-setting-button" type="button" onClick={() => {
+                    setSettingsPlanVisible(true);
+                    onSettle();
+                  }} disabled={settlementsBusy}>
+                    {settlementsBusy ? 'Calculating…' : 'Show simplified debt plan'}
+                  </button>
+                  {settingsPlanVisible && (
+                    <div className="group-simplify-plan">
+                      {settlementError
+                        ? <p className="error-message">{settlementError}</p>
+                        : settlements.length
+                          ? settlements.map((settlement, index) => (
+                            <p key={`${settlement.from}-${settlement.to}-${settlement.currency}-${index}`}>
+                              <strong>{memberName(settlement.from)}</strong> pays <strong>{memberName(settlement.to)}</strong> {settlement.currency} {Number(settlement.amount).toFixed(2)}
+                            </p>
+                          ))
+                          : !settlementsBusy && <p>This group is already settled.</p>}
+                    </div>
+                  )}
+                </div>
                 <label className="group-hide-toggle"><input type="checkbox" checked={hideUninvolved} onChange={(event) => setHideUninvolved(event.target.checked)} /> Hide expenses I’m not involved in</label>
                 <button className="group-setting-button" onClick={exportTransactions}>Export expenses as CSV</button>
                 {isOwner && <button className="group-setting-button group-delete-button" disabled={settingsBusy} onClick={() => {
@@ -1923,24 +2730,32 @@ function GroupDetails({
           </main>
 
           <aside className="group-workspace-sidebar">
-            <div className="group-sidebar-heading"><span>◉</span><h3>Group balances</h3></div>
+            <div className="group-sidebar-heading"><span>◉</span><h3>Your balances</h3></div>
             {balancesBusy ? <p className="empty-state">Loading…</p> : balances.map((balance) => {
               const amount = Number(balance.netBalance);
               if (Math.abs(amount) < 0.005) return null;
               return (
                 <div className="group-sidebar-balance" key={`${balance._id}-${balance.currency || 'INR'}`}>
-                  <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>{(balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}</span>
-                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'gets back' : 'owes'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
+                  <span className={`member-avatar ${amount > 0 ? 'mint' : 'coral-bg'}`}>
+                    {balance.coverimage
+                      ? <img src={balance.coverimage} alt="" />
+                      : (balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}
+                  </span>
+                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'owes you' : 'you owe'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
                 </div>
               );
             })}
-            {!balancesBusy && !balances.some((balance) => Math.abs(Number(balance.netBalance)) >= 0.005) && <p className="empty-state">Everyone is settled up.</p>}
+            {!balancesBusy && !balances.some((balance) => Math.abs(Number(balance.netBalance)) >= 0.005) && <p className="empty-state">You’re settled up in this group.</p>}
             <button className="group-view-balances" onClick={() => setActiveTab('balances')}>View details →</button>
             <div className="group-sidebar-members">
               <div className="group-members-heading"><h3>People in this group</h3><span>{group.members?.length || 0}</span></div>
               {(group.members || []).map((member) => (
                 <div className="group-sidebar-member" key={member._id}>
-                  <span className="member-avatar">{(member.fullnamae || member.username).slice(0, 1).toUpperCase()}</span>
+                  <span className="member-avatar">
+                    {member.coverimage
+                      ? <img src={member.coverimage} alt="" />
+                      : (member.fullnamae || member.username).slice(0, 1).toUpperCase()}
+                  </span>
                   <span>{member.fullnamae || member.username}</span>
                 </div>
               ))}
@@ -1961,7 +2776,7 @@ function GroupDetails({
       {settlementOpen && (
         <Modal title="Record a payment" onClose={() => setSettlementOpen(false)} className="settlement-modal">
           <form className="group-settlement-form" onSubmit={submitSettlement}>
-            <p className="modal-help">Record a payment you made to someone you directly owe. It can’t exceed the outstanding amount between you in that currency.</p>
+            <p className="modal-help">Record a payment to someone shown in your balance or simplified settlement plan. The amount cannot exceed what you owe them.</p>
             <label>Paid to
               <select value={settlementDraft.payeeId} onChange={(event) => setSettlementDraft((current) => ({ ...current, payeeId: event.target.value }))} required>
                 <option value="">Choose a group member</option>
@@ -1994,15 +2809,288 @@ function GroupDetails({
     </div>
   );
 }
-function Activity({ title, detail, amount }) {
+function ExpenseDetails({ expense, group, members, userId, accessToken, onClose, onEdit, onDelete, onCommentAdded }) {
+  const [comments, setComments] = useState(expense.comments || []);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [commentError, setCommentError] = useState('');
+  const [expenseActionError, setExpenseActionError] = useState('');
+  const memberName = (id) => {
+    const member = members.find((person) => person._id === id);
+    return member?.fullnamae || member?.username || 'Group member';
+  };
+  useEffect(() => {
+    setComments(expense.comments || []);
+  }, [expense._id, expense.comments]);
+
+  const postComment = async (event) => {
+    event.preventDefault();
+    const content = commentDraft.trim();
+    if (!content) return;
+    setCommentBusy(true);
+    setCommentError('');
+    try {
+      const comment = await apiRequest(`/expenses/${expense._id}/comments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ content }),
+      });
+      setComments((current) => [...current, comment]);
+      setCommentDraft('');
+      await onCommentAdded?.();
+    } catch (error) {
+      setCommentError(error.message);
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const deleteComment = async (commentId) => {
+    setCommentError('');
+    try {
+      await apiRequest(`/expenses/comments/${commentId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      setComments((current) => current.filter((comment) => comment._id !== commentId));
+      await onCommentAdded?.();
+    } catch (error) {
+      setCommentError(error.message);
+    }
+  };
+
   return (
-    <div className="activity-row">
-      <span className="activity-dot" />
-      <div>
-        <b>{title}</b>
-        <small>{detail}</small>
-      </div>
-      <b>{amount}</b>
+    <div className="expense-details-backdrop" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className="expense-details-dialog" role="dialog" aria-modal="true" aria-labelledby="expense-details-title">
+        <button className="modal-close" type="button" onClick={onClose} aria-label="Close expense details">×</button>
+        <div className="expense-details-heading">
+          <span className="expense-details-icon">{expenseCategories.find((category) => category.name === expense.category)?.icon || '🧾'}</span>
+          <div>
+            <p className="eyebrow">{group?.name || 'EXPENSE'}</p>
+            <h2 id="expense-details-title">{expense.description}</h2>
+            <strong>{expense.currency} {Number(expense.totalAmount).toFixed(2)}</strong>
+            <span>Added by {expense.paidByName || expense.paidByUsername || 'a group member'} on {new Date(expense.createdAt).toLocaleDateString()}</span>
+          </div>
+        </div>
+        <div className="expense-detail-actions">
+          <button className="expense-edit-action" type="button" onClick={onEdit}>Edit expense</button>
+          {onDelete && <button className="expense-delete-action" type="button" onClick={async () => {
+            setExpenseActionError('');
+            const deleted = await onDelete();
+            if (typeof deleted === 'string') setExpenseActionError(deleted);
+          }}>Delete expense</button>}
+        </div>
+        {expenseActionError && <p className="error-message" role="alert">{expenseActionError}</p>}
+        <div className="expense-details-grid">
+          <section>
+            <h3>People and shares</h3>
+            {(expense.splits || []).map((split) => (
+              <div className="expense-details-split" key={split.userId}>
+                <span>{split.userId === expense.paidBy ? 'Paid by' : 'Owes'} {memberName(split.userId)}</span>
+                <strong>{expense.currency} {Number(split.amountOwed).toFixed(2)}</strong>
+              </div>
+            ))}
+          </section>
+          <section>
+            <h3>Expense details</h3>
+            <p>{expense.category || 'Uncategorized'}{expense.subcategory ? ` · ${expense.subcategory}` : ''}</p>
+            <p>Split method: {(expense.splitStrategy || 'EQUAL').toLowerCase().replaceAll('_', ' ')}</p>
+            {expense.note && <p>{expense.note}</p>}
+            {expense.items?.map((item, index) => (
+              <p key={`${expense._id}-detail-${index}`}>{item.description} · {expense.currency} {Number(item.amount).toFixed(2)}</p>
+            ))}
+            {expense.paymentProofUrl && <a className="expense-proof-link" href={expense.paymentProofUrl} target="_blank" rel="noreferrer">View payment proof</a>}
+          </section>
+        </div>
+        <section className="expense-comments">
+          <h3>Comments</h3>
+          {comments.length ? (
+            <div className="expense-comment-list">
+              {comments.map((comment) => (
+                <article className="expense-comment" key={comment._id}>
+                  <div>
+                    <strong>{comment.authorName || memberName(comment.userId)}</strong>
+                    <time dateTime={comment.createdAt}>{new Date(comment.createdAt).toLocaleString()}</time>
+                    <p>{comment.content}</p>
+                  </div>
+                  {comment.userId === userId && (
+                    <button type="button" aria-label="Delete your comment" onClick={() => deleteComment(comment._id)}>×</button>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : <p className="expense-comments-empty">No comments yet. Add one for your group.</p>}
+          <form className="expense-comment-form" onSubmit={postComment}>
+            <label className="visually-hidden" htmlFor={`expense-comment-${expense._id}`}>Add a comment</label>
+            <textarea
+              id={`expense-comment-${expense._id}`}
+              value={commentDraft}
+              onChange={(event) => setCommentDraft(event.target.value)}
+              maxLength="1000"
+              rows="3"
+              placeholder="Add a comment"
+              required
+            />
+            {commentError && <p className="error-message" role="alert">{commentError}</p>}
+            <button className="expense-edit-action" type="submit" disabled={commentBusy || !commentDraft.trim()}>
+              {commentBusy ? 'Posting…' : 'Post'}
+            </button>
+          </form>
+        </section>
+      </section>
+    </div>
+  );
+}
+function GroupActivityList({ transactions, userId, onOpenExpense }) {
+  const months = new Map();
+  transactions.forEach((transaction) => {
+    const date = new Date(transaction.createdAt);
+    const key = `${date.getFullYear()}-${date.getMonth()}`;
+    if (!months.has(key)) {
+      months.set(key, {
+        label: date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+        transactions: [],
+      });
+    }
+    months.get(key).transactions.push(transaction);
+  });
+
+  return (
+    <div className="group-activity-list">
+      {[...months.entries()].map(([monthKey, month]) => (
+        <section className="group-activity-month" key={monthKey}>
+          <h4>{month.label}</h4>
+          {month.transactions.map((transaction) => {
+            const date = new Date(transaction.createdAt);
+            if (transaction.type === 'ACTIVITY') {
+              const activityIcon = transaction.activityType === 'EXPENSE_DELETED'
+                ? '🗑'
+                : transaction.activityType === 'EXPENSE_ADDED'
+                  ? '＋'
+                  : transaction.activityType === 'EXPENSE_UPDATED'
+                    ? '✎'
+                : transaction.activityType === 'COMMENT_ADDED'
+                  ? '💬'
+                  : transaction.activityType.startsWith('MEMBER_')
+                    ? '👥'
+                    : '↻';
+              const activityLabel = ({
+                EXPENSE_ADDED: 'NEW EXPENSE',
+                EXPENSE_UPDATED: 'EXPENSE UPDATED',
+                EXPENSE_DELETED: 'EXPENSE DELETED',
+                COMMENT_ADDED: 'COMMENT ADDED',
+                COMMENT_DELETED: 'COMMENT DELETED',
+                MEMBER_ADDED: 'MEMBER ADDED',
+                MEMBER_JOINED: 'MEMBER JOINED',
+                MEMBER_REMOVED: 'MEMBER REMOVED',
+                MEMBER_LEFT: 'MEMBER LEFT',
+                GROUP_CREATED: 'GROUP CREATED',
+                GROUP_SETTINGS_UPDATED: 'SETTINGS UPDATED',
+              })[transaction.activityType] || 'GROUP ACTIVITY';
+              return (
+                <article className={`group-activity-row group-activity-audit ${transaction.groupName ? 'with-group-name' : ''}`} key={`ACTIVITY-${transaction._id}`}>
+                  <div className="group-activity-date">
+                    <span>{date.toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</span>
+                    <strong>{date.getDate()}</strong>
+                  </div>
+                  <span className="group-activity-icon">{activityIcon}</span>
+                  <div className="group-activity-description">
+                    <strong>{transaction.description}</strong>
+                    <small>{transaction.details}</small>
+                  </div>
+                  {transaction.groupName && <span className="group-activity-group-name">{transaction.groupName}</span>}
+                  <span className="group-activity-update-label">{activityLabel}</span>
+                </article>
+              );
+            }
+            const isSettlement = transaction.type === 'SETTLEMENT';
+            const total = Number(transaction.totalAmount) || 0;
+            const ownSplit = Number(transaction.splits?.find((split) => split.userId === userId)?.amountOwed || 0);
+            const isPayer = transaction.paidBy === userId;
+            const payerName = transaction.paidByName || transaction.paidByUsername || 'A member';
+            let shareLabel = 'not involved';
+            let shareAmount = null;
+            let shareClass = 'not-involved';
+
+            if (isSettlement && transaction.paidTo === userId) {
+              shareLabel = `${payerName} paid you`;
+              shareAmount = total;
+              shareClass = 'activity-share-positive';
+            } else if (!isSettlement && isPayer) {
+              shareLabel = 'you lent';
+              shareAmount = Math.max(0, total - ownSplit);
+              shareClass = 'activity-share-positive';
+            } else if (!isSettlement && ownSplit > 0) {
+              shareLabel = `${payerName} lent you`;
+              shareAmount = ownSplit;
+              shareClass = 'activity-share-negative';
+            } else if (isSettlement && isPayer) {
+              shareLabel = `you paid ${transaction.paidToName || 'a member'}`;
+              shareAmount = total;
+              shareClass = 'activity-share-negative';
+            }
+
+            const categoryIcon = isSettlement
+              ? '💸'
+              : expenseCategories.find((category) => category.name === transaction.category)?.icon || '🧾';
+            const canOpen = !isSettlement && typeof onOpenExpense === 'function';
+
+            return (
+              <article
+                className={`group-activity-row ${canOpen ? 'group-activity-clickable' : ''}`}
+                key={`${transaction.type}-${transaction._id}`}
+                role={canOpen ? 'button' : undefined}
+                tabIndex={canOpen ? 0 : undefined}
+                onClick={canOpen ? () => onOpenExpense(transaction) : undefined}
+                onKeyDown={canOpen ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onOpenExpense(transaction);
+                  }
+                } : undefined}
+              >
+                <div className="group-activity-date">
+                  <span>{date.toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</span>
+                  <strong>{date.getDate()}</strong>
+                </div>
+                <span className={`group-activity-icon ${transaction.category === 'Transportation' ? 'transport' : ''} ${transaction.category === 'Food and drink' ? 'food' : ''}`}>
+                  {categoryIcon}
+                </span>
+                <div className="group-activity-description">
+                  <strong>{transaction.description}</strong>
+                  {(transaction.note || transaction.comments?.length > 0) && <span className="group-activity-comment" aria-label="Has a note or comments">●</span>}
+                  <small>
+                    {transaction.category || 'Uncategorized'}
+                    {transaction.subcategory ? ` · ${transaction.subcategory}` : ''}
+                    {isSettlement ? ` · ${payerName} paid ${transaction.paidToName || 'a member'}` : ''}
+                  </small>
+                  {transaction.paymentProofUrl && (
+                    <a
+                      className="expense-proof-link"
+                      href={transaction.paymentProofUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                    >View receipt</a>
+                  )}
+                </div>
+                <div className="group-activity-amount">
+                  <span>{isPayer ? 'you paid' : `${payerName} paid`}</span>
+                  <strong>{transaction.currency} {total.toFixed(2)}</strong>
+                </div>
+                <div className={`group-activity-share ${shareClass}`}>
+                  <span>{shareLabel}</span>
+                  {shareAmount === null
+                    ? <small>not involved</small>
+                    : <strong>{transaction.currency} {shareAmount.toFixed(2)}</strong>}
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      ))}
     </div>
   );
 }

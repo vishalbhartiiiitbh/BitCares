@@ -1066,6 +1066,13 @@ input::placeholder {
     font-weight: 700;
 }
 
+.member-avatar img {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: cover;
+}
+
 .member-row div,
 .transaction-row div {
     flex: 1;
@@ -1376,6 +1383,206 @@ input::placeholder {
     min-height: 66px;
 }
 
+.group-activity-list {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.group-activity-month {
+    min-width: 570px;
+}
+
+.group-activity-month > h4 {
+    margin: 0;
+    padding: 7px 10px;
+    background: #f1f1ef;
+    color: #70766f;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.group-activity-row {
+    display: grid;
+    min-height: 57px;
+    grid-template-columns: 34px 36px minmax(110px, 1fr) minmax(90px, 115px) minmax(90px, 120px);
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-bottom: 1px solid #e9e9e6;
+    background: #fff;
+}
+
+.group-activity-audit .group-activity-description {
+    grid-column: 3 / 5;
+}
+
+.group-activity-audit.with-group-name .group-activity-description {
+    grid-column: 3;
+}
+
+.group-activity-group-name,
+.group-activity-update-label {
+    color: #89918a;
+    font-size: 9px;
+    text-align: right;
+}
+
+.group-activity-update-label {
+    color: #448c78;
+    font-weight: 700;
+}
+
+.group-activity-audit .group-activity-description > small {
+    overflow: visible;
+    white-space: normal;
+}
+
+.group-activity-clickable {
+    cursor: pointer;
+}
+
+.group-activity-clickable:hover {
+    background: #f8f8f5;
+}
+
+.group-activity-clickable:focus-visible {
+    outline: 2px solid #43a990;
+    outline-offset: -2px;
+}
+
+.group-activity-date {
+    display: grid;
+    justify-items: center;
+    color: #9a9d98;
+    line-height: 1.1;
+}
+
+.group-activity-date span {
+    font-size: 9px;
+    text-transform: uppercase;
+}
+
+.group-activity-date strong {
+    margin-top: 2px;
+    font-size: 17px;
+    font-weight: 500;
+}
+
+.group-activity-icon {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    background: #e8f2ed;
+    color: #56645d;
+    font-size: 17px;
+}
+
+.group-activity-icon.food {
+    background: #d9efe1;
+}
+
+.group-activity-icon.transport {
+    background: #f4dfe7;
+}
+
+.group-activity-description {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 5px;
+}
+
+.group-activity-description > strong {
+    overflow: hidden;
+    max-width: 100%;
+    color: #3c403d;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.group-activity-description > small {
+    width: 100%;
+    overflow: hidden;
+    color: #969b95;
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.group-activity-comment {
+    display: inline-block;
+    width: 11px;
+    height: 8px;
+    border-radius: 5px;
+    background: #b3b7b2;
+    color: transparent;
+    font-size: 0;
+}
+
+.group-activity-amount,
+.group-activity-share {
+    display: grid;
+    justify-items: end;
+    gap: 2px;
+    text-align: right;
+}
+
+.expense-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.expense-delete-action {
+    padding: 9px 12px;
+    border: 1px solid #e7c9c2;
+    border-radius: 5px;
+    background: #fff;
+    color: #b44d3d;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.expense-delete-action:hover {
+    background: #fff4f1;
+}
+
+.group-activity-amount span,
+.group-activity-share > span,
+.group-activity-share > small {
+    color: #a0a39f;
+    font-size: 9px;
+    line-height: 1.2;
+}
+
+.group-activity-amount strong,
+.group-activity-share strong {
+    color: #171b18;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.group-activity-share.activity-share-positive strong {
+    color: #38b99b;
+}
+
+.group-activity-share.activity-share-negative strong {
+    color: #f04c2e;
+}
+
+.group-activity-share.not-involved {
+    min-height: 44px;
+    align-content: center;
+    background: repeating-linear-gradient(45deg, #fff 0, #fff 7px, #f5f5f3 7px, #f5f5f3 11px);
+}
+
 .transaction-icon {
     display: grid;
     width: 34px;
@@ -1563,6 +1770,348 @@ input::placeholder {
     font-size: 11px;
 }
 
+.spending-insights {
+    display: grid;
+    gap: 13px;
+    margin: 24px 0;
+}
+
+.spending-insights-heading,
+.spending-chart-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.spending-insights-heading h3 {
+    margin: 4px 0 0;
+    color: #354139;
+    font-size: 17px;
+}
+
+.spending-insights-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.spending-insights-controls label {
+    display: grid;
+    gap: 4px;
+    color: #758078;
+    font-size: 10px;
+}
+
+.spending-insights-controls select {
+    max-width: 175px;
+    padding: 7px 9px;
+    border: 1px solid #dfe6e0;
+    border-radius: 5px;
+    background: #fff;
+    color: #445249;
+    font: inherit;
+    font-size: 11px;
+}
+
+.spending-insights-summary {
+    display: grid;
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+    gap: 12px;
+}
+
+.spending-chart-card {
+    position: relative;
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid #e7ece7;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.spending-chart-title {
+    align-items: flex-start;
+    margin-bottom: 10px;
+}
+
+.spending-chart-title h4 {
+    margin: 0;
+    color: #354139;
+    font-size: 12px;
+}
+
+.spending-chart-title p {
+    margin: 4px 0 0;
+    color: #8a938b;
+    font-size: 10px;
+}
+
+.spending-chart-title > strong {
+    color: #29866e;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.spending-pie-layout {
+    display: grid;
+    grid-template-columns: 138px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+}
+
+.spending-pie {
+    width: 138px;
+    overflow: visible;
+}
+
+.spending-pie-total {
+    fill: #869087;
+    font-size: 9px;
+}
+
+.spending-pie-amount {
+    fill: #334139;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.spending-payer-legend {
+    display: grid;
+    gap: 9px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.spending-payer-legend li {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+    color: #647067;
+    font-size: 10px;
+}
+
+.spending-payer-legend li > span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--payer-color);
+}
+
+.spending-payer-legend li div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.spending-payer-legend li strong {
+    overflow: hidden;
+    color: #47544b;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spending-payer-legend li small {
+    color: #909a91;
+}
+
+.spending-payer-legend li > b {
+    color: #39473e;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.spending-daily-scroll,
+.spending-monthly-scroll {
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+}
+
+.spending-daily-chart {
+    display: block;
+    min-width: 680px;
+    width: 100%;
+}
+
+.spending-daily-chart line,
+.spending-monthly-chart line {
+    stroke: #e9eee9;
+    stroke-width: 1;
+}
+
+.spending-daily-chart text,
+.spending-monthly-chart text {
+    fill: #8a938b;
+    font-size: 9px;
+}
+
+.spending-axis-caption {
+    margin: -2px 0 9px;
+    color: #8a938b;
+    font-size: 9px;
+    text-align: center;
+}
+
+.spending-payer-key,
+.spending-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 13px;
+}
+
+.spending-payer-key > span,
+.spending-average-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #68736a;
+    font-size: 9px;
+}
+
+.spending-payer-key i {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+}
+
+.spending-monthly-card {
+    padding-bottom: 12px;
+}
+
+.spending-monthly-chart {
+    display: block;
+    min-width: 520px;
+    width: 100%;
+    overflow: visible;
+}
+
+.spending-monthly-chart-wrap {
+    position: relative;
+}
+
+.spending-chart-selection {
+    cursor: pointer;
+}
+
+.spending-selection-band {
+    fill: #7b817d;
+    fill-opacity: .15;
+    pointer-events: none;
+}
+
+.spending-chart-hit-area {
+    cursor: pointer;
+    outline: none;
+}
+
+.spending-chart-hit-area:focus-visible {
+    stroke: #47574c;
+    stroke-dasharray: 3 3;
+    stroke-width: 1.5;
+}
+
+.spending-chart-tooltip {
+    position: absolute;
+    z-index: 1;
+    width: min(255px, calc(100% - 30px));
+    padding: 11px 13px;
+    border: 1px solid #e1e5e9;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, .97);
+    box-shadow: 0 5px 18px rgba(32, 43, 35, .13);
+    pointer-events: none;
+}
+
+.spending-chart-tooltip > div,
+.spending-chart-tooltip > p {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.spending-chart-tooltip > div {
+    align-items: center;
+    margin-bottom: 7px;
+    color: #3b4740;
+    font-size: 11px;
+}
+
+.spending-chart-tooltip > div > b {
+    color: #283f78;
+    white-space: nowrap;
+}
+
+.spending-chart-tooltip > p {
+    margin: 5px 0 0;
+    font-size: 10px;
+}
+
+.spending-chart-tooltip > p > strong {
+    color: #47534a;
+    white-space: nowrap;
+}
+
+.spending-monthly-tooltip {
+    top: 28px;
+    left: 43%;
+}
+
+.spending-daily-tooltip {
+    top: 48px;
+    right: 15px;
+}
+
+.spending-average-line {
+    fill: none;
+    stroke: #b5bb42;
+    stroke-width: 2;
+}
+
+.spending-average-point {
+    fill: #b5bb42;
+    stroke: #fff;
+    stroke-width: 1.5;
+}
+
+.spending-chart-legend {
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 3px;
+}
+
+.spending-average-label i {
+    width: 14px;
+    height: 2px;
+    background: #b5bb42;
+}
+
+.spending-monthly-totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 12px;
+}
+
+.spending-monthly-totals span {
+    display: grid;
+    gap: 3px;
+    padding: 7px 9px;
+    border-radius: 5px;
+    background: #f5f8f5;
+}
+
+.spending-monthly-totals small {
+    color: #879087;
+    font-size: 9px;
+}
+
+.spending-monthly-totals strong {
+    color: #455148;
+    font-size: 10px;
+}
+
 .settlement-plan {
     padding: 15px;
     border-radius: 5px;
@@ -1646,10 +2195,155 @@ input::placeholder {
     gap: 10px;
 }
 
+.group-settings-form {
+    display: grid;
+    gap: 14px;
+}
+
+.group-cover-picker {
+    display: grid;
+    width: fit-content;
+    justify-items: start;
+    gap: 8px;
+    color: #52623e;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.group-cover-picker input {
+    font-size: 11px;
+}
+
+.group-cover-preview {
+    display: grid;
+    width: 96px;
+    height: 96px;
+    overflow: hidden;
+    place-items: center;
+    border-radius: 12px;
+    background: #d9eee3;
+    color: #438f7c;
+    font-size: 38px;
+}
+
+.group-cover-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.group-workspace-avatar.group-workspace-cover {
+    display: block;
+    object-fit: cover;
+}
+
+.group-settings-members {
+    display: grid;
+    gap: 10px;
+    padding: 16px 0;
+    border-top: 1px solid #e8e8e1;
+    border-bottom: 1px solid #e8e8e1;
+}
+
+.group-settings-members h4 {
+    margin: 0;
+    color: #687369;
+    font-size: 11px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.group-settings-member {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+}
+
+.group-settings-member > img,
+.group-settings-member > .member-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.group-settings-member > span:nth-child(2) {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.group-settings-member strong {
+    overflow: hidden;
+    color: #303a32;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.group-settings-member small {
+    color: #858c84;
+    font-size: 10px;
+}
+
+.group-member-remove {
+    border: 0;
+    background: transparent;
+    color: #b44d3d;
+    font-size: 19px;
+    cursor: pointer;
+}
+
+.group-member-remove:disabled {
+    cursor: wait;
+    opacity: .5;
+}
+
+.group-settings-add-member {
+    display: grid;
+    gap: 8px;
+    padding-top: 6px;
+}
+
+.group-settings-add-member .group-setting-button {
+    min-width: auto;
+}
+
+.group-simplify-toggle {
+    font-weight: 700;
+}
+
+.group-settings-form .modal-help {
+    margin: -7px 0 0;
+}
+
+.group-simplify-preview {
+    display: grid;
+    gap: 8px;
+}
+
+.group-simplify-plan {
+    padding: 10px 12px;
+    border-radius: 7px;
+    background: #f5f7f2;
+}
+
+.group-simplify-plan p {
+    margin: 4px 0;
+    color: #536054;
+    font-size: 11px;
+}
+
 .group-setting-button {
     width: fit-content;
     min-width: 190px;
     text-align: left;
+}
+
+.group-cover-avatar {
+    display: block;
+    object-fit: cover;
 }
 
 .group-setting-button:disabled,
@@ -1733,6 +2427,26 @@ input::placeholder {
         align-items: start;
         flex-direction: column;
     }
+
+    .spending-insights-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .spending-insights-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 420px) {
+    .spending-pie-layout {
+        grid-template-columns: 112px minmax(0, 1fr);
+        gap: 6px;
+    }
+
+    .spending-pie {
+        width: 112px;
+    }
 }
 
 .modal-backdrop {
@@ -1808,6 +2522,14 @@ input::placeholder {
     flex: 0 0 15px;
     margin: 0;
     accent-color: #4aaa96;
+}
+
+.group-friend-avatar {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    border-radius: 50%;
+    object-fit: cover;
 }
 
 .group-friend-option span {
@@ -2903,5 +3625,413 @@ input::placeholder {
 
     .group-details-header h2 {
         font-size: 28px;
+    }
+}
+
+.personal-expenses-page {
+    color: #19231d;
+}
+
+.personal-expenses-page .welcome-row {
+    margin-bottom: 24px;
+}
+
+.personal-expenses-summary,
+.personal-expense-month {
+    border: 1px solid #e5e2d8;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.personal-expenses-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 16px 20px;
+    color: #52623e;
+    font-size: 12px;
+}
+
+.personal-expenses-summary strong {
+    color: #19231d;
+}
+
+.personal-expense-months {
+    display: grid;
+    gap: 18px;
+    margin-top: 20px;
+}
+
+.personal-expense-month {
+    overflow: hidden;
+}
+
+.personal-expense-month > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    border-bottom: 1px solid #eeece5;
+}
+
+.personal-expense-month > header h2 {
+    margin: 4px 0 0;
+    font-size: 20px;
+    letter-spacing: -.04em;
+}
+
+.personal-expense-month > header > span {
+    color: #758076;
+    font-size: 12px;
+    text-align: right;
+}
+
+.personal-expense-list {
+    display: grid;
+}
+
+.personal-expense-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 13px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #f0eee8;
+}
+
+.personal-expense-row:last-child {
+    border-bottom: 0;
+}
+
+.personal-expense-icon {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 10px;
+    background: #f4f2e9;
+}
+
+.personal-expense-info {
+    display: grid;
+    gap: 4px;
+}
+
+.personal-expense-info > strong {
+    color: #19231d;
+    font-size: 13px;
+}
+
+.personal-expense-info > span,
+.personal-expense-info > small {
+    color: #81877d;
+    font-size: 11px;
+}
+
+.personal-expense-row > strong {
+    color: #19231d;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.personal-expense-row,
+.transaction-row-clickable,
+.clickable-activity {
+    cursor: pointer;
+}
+
+.personal-expense-row:hover,
+.transaction-row-clickable:hover,
+.clickable-activity:hover {
+    background: #f8f8f3;
+}
+
+.transaction-row-clickable:focus-visible,
+.personal-expense-row:focus-visible,
+.clickable-activity:focus-visible {
+    outline: 2px solid #43a990;
+    outline-offset: -2px;
+}
+
+.expense-details-backdrop {
+    position: fixed;
+    z-index: 7;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(20, 29, 24, .45);
+}
+
+.expense-details-dialog {
+    position: relative;
+    width: min(680px, 100%);
+    max-height: min(86vh, 760px);
+    overflow-y: auto;
+    padding: 28px;
+    border: 1px solid #e6e3db;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 24px 75px rgba(20, 29, 24, .24);
+}
+
+.expense-details-heading {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: 18px;
+    padding-right: 28px;
+}
+
+.expense-details-icon {
+    display: grid;
+    width: 84px;
+    height: 84px;
+    place-items: center;
+    border-radius: 10px;
+    background: #d9eee3;
+    font-size: 34px;
+}
+
+.expense-details-heading h2 {
+    margin: 4px 0;
+    color: #19231d;
+    font-size: 22px;
+    letter-spacing: -.045em;
+}
+
+.expense-details-heading strong,
+.expense-details-heading > div > span {
+    display: block;
+}
+
+.expense-details-heading strong {
+    font-size: 19px;
+}
+
+.expense-details-heading > div > span {
+    margin-top: 5px;
+    color: #858b82;
+    font-size: 11px;
+}
+
+.expense-edit-action {
+    margin: 18px 0;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 5px;
+    background: #ef6840;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.expense-details-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e2d8;
+}
+
+.expense-details-grid h3 {
+    margin: 0 0 12px;
+    color: #758076;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.expense-details-grid p {
+    color: #555e55;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.expense-details-split {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0eee8;
+    color: #404940;
+    font-size: 11px;
+}
+
+.expense-details-split strong {
+    white-space: nowrap;
+}
+
+.expense-notification-item {
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    border-bottom: 1px solid #eee;
+    background: #fff;
+    color: inherit;
+    text-align: left;
+}
+
+.expense-notification-item.unread {
+    background: #f2faf6;
+}
+
+.expense-notification-item:hover {
+    background: #eaf5ef;
+}
+
+.expense-proof-remove {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.expense-comments {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid #e5e2d8;
+}
+
+.expense-comments h3 {
+    margin: 0 0 12px;
+    color: #758076;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.expense-comment-list {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.expense-comment {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid #e5e2d8;
+    border-radius: 7px;
+    background: #fff;
+}
+
+.expense-comment > div {
+    min-width: 0;
+}
+
+.expense-comment strong {
+    margin-right: 8px;
+    color: #39433b;
+    font-size: 11px;
+}
+
+.expense-comment time {
+    color: #929890;
+    font-size: 10px;
+}
+
+.expense-comment p {
+    margin: 5px 0 0;
+    color: #4f574f;
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.expense-comment > button {
+    align-self: flex-start;
+    padding: 0 3px;
+    border: 0;
+    background: transparent;
+    color: #c53535;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.expense-comments-empty {
+    color: #929890;
+    font-size: 11px;
+}
+
+.expense-comment-form {
+    display: grid;
+    justify-items: start;
+    gap: 8px;
+}
+
+.expense-comment-form textarea {
+    width: min(100%, 420px);
+    min-height: 64px;
+    padding: 9px;
+    border: 1px solid #cfcfc8;
+    border-radius: 5px;
+    color: #39433b;
+    font: inherit;
+    font-size: 12px;
+    resize: vertical;
+}
+
+.expense-comment-form .expense-edit-action {
+    margin: 0;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+}
+
+@media (max-width: 560px) {
+    .personal-expenses-page .welcome-row,
+    .personal-expenses-summary,
+    .personal-expense-month > header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .personal-expense-month > header > span {
+        text-align: left;
+    }
+
+    .personal-expense-row {
+        grid-template-columns: 32px minmax(0, 1fr);
+        padding: 14px;
+    }
+
+    .personal-expense-icon {
+        width: 30px;
+        height: 30px;
+    }
+
+    .personal-expense-row > strong {
+        grid-column: 2;
+    }
+
+    .expense-details-dialog {
+        padding: 20px;
+    }
+
+    .expense-details-heading {
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .expense-details-icon {
+        width: 56px;
+        height: 56px;
+        font-size: 25px;
+    }
+
+    .expense-details-heading h2 {
+        font-size: 18px;
+    }
+
+    .expense-details-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
     }
 }
