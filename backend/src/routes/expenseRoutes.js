@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createExpense, list } from '../controllers/expenseController.js';
+import { createExpense, editExpense, list, listPersonal } from '../controllers/expenseController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import multer from 'multer';
@@ -17,6 +17,8 @@ const upload = multer({
   },
 });
 router.use(requireAuth);
+router.get('/personal', asyncHandler(listPersonal));
 router.get('/', asyncHandler(list));
 router.post('/', upload.single('paymentProof'), asyncHandler(createExpense));
+router.patch('/:expenseId', upload.single('paymentProof'), asyncHandler(editExpense));
 export default router;

@@ -2905,3 +2905,312 @@ input::placeholder {
         font-size: 28px;
     }
 }
+
+.personal-expenses-page {
+    color: #19231d;
+}
+
+.personal-expenses-page .welcome-row {
+    margin-bottom: 24px;
+}
+
+.personal-expenses-summary,
+.personal-expense-month {
+    border: 1px solid #e5e2d8;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.personal-expenses-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 16px 20px;
+    color: #52623e;
+    font-size: 12px;
+}
+
+.personal-expenses-summary strong {
+    color: #19231d;
+}
+
+.personal-expense-months {
+    display: grid;
+    gap: 18px;
+    margin-top: 20px;
+}
+
+.personal-expense-month {
+    overflow: hidden;
+}
+
+.personal-expense-month > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    border-bottom: 1px solid #eeece5;
+}
+
+.personal-expense-month > header h2 {
+    margin: 4px 0 0;
+    font-size: 20px;
+    letter-spacing: -.04em;
+}
+
+.personal-expense-month > header > span {
+    color: #758076;
+    font-size: 12px;
+    text-align: right;
+}
+
+.personal-expense-list {
+    display: grid;
+}
+
+.personal-expense-row {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 13px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #f0eee8;
+}
+
+.personal-expense-row:last-child {
+    border-bottom: 0;
+}
+
+.personal-expense-icon {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 10px;
+    background: #f4f2e9;
+}
+
+.personal-expense-info {
+    display: grid;
+    gap: 4px;
+}
+
+.personal-expense-info > strong {
+    color: #19231d;
+    font-size: 13px;
+}
+
+.personal-expense-info > span,
+.personal-expense-info > small {
+    color: #81877d;
+    font-size: 11px;
+}
+
+.personal-expense-row > strong {
+    color: #19231d;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.personal-expense-row,
+.transaction-row-clickable,
+.clickable-activity {
+    cursor: pointer;
+}
+
+.personal-expense-row:hover,
+.transaction-row-clickable:hover,
+.clickable-activity:hover {
+    background: #f8f8f3;
+}
+
+.transaction-row-clickable:focus-visible,
+.personal-expense-row:focus-visible,
+.clickable-activity:focus-visible {
+    outline: 2px solid #43a990;
+    outline-offset: -2px;
+}
+
+.expense-details-backdrop {
+    position: fixed;
+    z-index: 7;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(20, 29, 24, .45);
+}
+
+.expense-details-dialog {
+    position: relative;
+    width: min(680px, 100%);
+    max-height: min(86vh, 760px);
+    overflow-y: auto;
+    padding: 28px;
+    border: 1px solid #e6e3db;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 24px 75px rgba(20, 29, 24, .24);
+}
+
+.expense-details-heading {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: 18px;
+    padding-right: 28px;
+}
+
+.expense-details-icon {
+    display: grid;
+    width: 84px;
+    height: 84px;
+    place-items: center;
+    border-radius: 10px;
+    background: #d9eee3;
+    font-size: 34px;
+}
+
+.expense-details-heading h2 {
+    margin: 4px 0;
+    color: #19231d;
+    font-size: 22px;
+    letter-spacing: -.045em;
+}
+
+.expense-details-heading strong,
+.expense-details-heading > div > span {
+    display: block;
+}
+
+.expense-details-heading strong {
+    font-size: 19px;
+}
+
+.expense-details-heading > div > span {
+    margin-top: 5px;
+    color: #858b82;
+    font-size: 11px;
+}
+
+.expense-edit-action {
+    margin: 18px 0;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 5px;
+    background: #ef6840;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.expense-details-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e2d8;
+}
+
+.expense-details-grid h3 {
+    margin: 0 0 12px;
+    color: #758076;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.expense-details-grid p {
+    color: #555e55;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.expense-details-split {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0eee8;
+    color: #404940;
+    font-size: 11px;
+}
+
+.expense-details-split strong {
+    white-space: nowrap;
+}
+
+.expense-notification-item {
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    border-bottom: 1px solid #eee;
+    background: #fff;
+    color: inherit;
+    text-align: left;
+}
+
+.expense-notification-item.unread {
+    background: #f2faf6;
+}
+
+.expense-notification-item:hover {
+    background: #eaf5ef;
+}
+
+.expense-proof-remove {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+@media (max-width: 560px) {
+    .personal-expenses-page .welcome-row,
+    .personal-expenses-summary,
+    .personal-expense-month > header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .personal-expense-month > header > span {
+        text-align: left;
+    }
+
+    .personal-expense-row {
+        grid-template-columns: 32px minmax(0, 1fr);
+        padding: 14px;
+    }
+
+    .personal-expense-icon {
+        width: 30px;
+        height: 30px;
+    }
+
+    .personal-expense-row > strong {
+        grid-column: 2;
+    }
+
+    .expense-details-dialog {
+        padding: 20px;
+    }
+
+    .expense-details-heading {
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    .expense-details-icon {
+        width: 56px;
+        height: 56px;
+        font-size: 25px;
+    }
+
+    .expense-details-heading h2 {
+        font-size: 18px;
+    }
+
+    .expense-details-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+}

@@ -41,6 +41,25 @@ export const refreshToken = async (req, res) => { const incoming = req.cookies?.
 export const accessToken = async (req, res) => res.json({ data: { accessToken: makeAccessToken(req.user), tokenType: 'Bearer' } });
 export const currentUser = async (req, res) => res.json({ data: { user: req.user } });
 
+export const listNotifications = async (req, res) => {
+  const result = await query(
+    `SELECT id AS "_id", group_id AS "groupId", expense_id AS "expenseId",
+            message, created_at AS "createdAt", read_at AS "readAt"
+     FROM notifications WHERE user_id = $1
+     ORDER BY created_at DESC LIMIT 50`,
+    [req.user._id],
+  );
+  res.json({ data: result.rows });
+};
+
+export const markNotificationsRead = async (req, res) => {
+  const result = await query(
+    'UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL',
+    [req.user._id],
+  );
+  res.json({ data: { markedRead: result.rowCount } });
+};
+
 const assertCurrentPassword = async (userId, currentPassword) => {
   if (typeof currentPassword !== 'string' || !currentPassword) {
     throw Object.assign(new Error('Current password is required'), { statusCode: 400 });

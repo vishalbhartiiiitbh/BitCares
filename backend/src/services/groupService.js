@@ -8,6 +8,29 @@ const hydrate = async (row, client = null) => {
 	return { ...row, members: members.rows };
 };
 
+export const ensurePersonalExpenseGroup = async (userId) => withTransaction(async (client) => {
+	const result = await client.query(
+		`INSERT INTO groups (name, group_code, created_by, is_personal)
+		 VALUES ('Personal Expenses', $1, $2, TRUE)
+		 ON CONFLICT (created_by) WHERE is_personal = TRUE
+		 DO UPDATE SET name = 'Personal Expenses'
+		 RETURNING id AS "_id", name, group_code AS "groupCode",
+		           created_by AS "createdBy", is_personal AS "isPersonal",
+		           created_at AS "createdAt"`,
+		[groupCode(), userId],
+	);
+	const group = result.rows[0];
+	await client.query(
+		'DELETE FROM group_members WHERE group_id = $1 AND user_id <> $2',
+		[group._id, userId],
+	);
+	await client.query(
+		'INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+		[group._id, userId],
+	);
+	return hydrate(group, client);
+});
+
 export const createGroup = async ({ name, createdBy, memberIds = [], memberIdentifiers = [] }) => withTransaction(async (client) => {
 	const identifiers = [...new Set(memberIdentifiers.map((identifier) => identifier.trim().toLowerCase()).filter(Boolean))];
 	const resolvedMemberIds = [];
@@ -41,14 +64,15 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 	for (const member of [...new Set([createdBy, ...allMemberIds])]) await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, member]);
 	return hydrate(created.rows[0], client);
 });
-export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
+export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.is_personal AS "isPersonal", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
 export const addGroupMember = async ({ groupId, requesterId, identifier }) => withTransaction(async (client) => {
 	const groupResult = await client.query(
-		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt" FROM groups WHERE id = $1',
+		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", created_at AS "createdAt" FROM groups WHERE id = $1',
 		[groupId],
 	);
 	const group = groupResult.rows[0];
 	if (!group) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+	if (group.isPersonal) throw Object.assign(new Error('Personal Expenses can only contain your account'), { statusCode: 400 });
 
 	const requester = await client.query(
 		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
@@ -107,9 +131,10 @@ export const getGroupBalances = async (groupId, userId) => {
 export const updateGroupName = async (groupId, userId, name) => {
 	const result = await query(
 		`UPDATE groups SET name = $1
-		 WHERE id = $2 AND created_by = $3
+		 WHERE id = $2 AND created_by = $3 AND is_personal = FALSE
 		 RETURNING id AS "_id", name, group_code AS "groupCode",
-		           created_by AS "createdBy", created_at AS "createdAt"`,
+		           created_by AS "createdBy", is_personal AS "isPersonal",
+		           created_at AS "createdAt"`,
 		[name.trim(), groupId, userId],
 	);
 	if (result.rowCount) return result.rows[0];
@@ -118,7 +143,7 @@ export const updateGroupName = async (groupId, userId, name) => {
 	if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
 	throw Object.assign(new Error('Only the group creator can change group settings'), { statusCode: 403 });
 };
-export const joinGroupByCode = async ({ groupCode: code, userId }) => { const result = await query('SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", created_at AS "createdAt" FROM groups WHERE group_code = $1', [code.trim().toUpperCase()]); if (!result.rowCount) throw Object.assign(new Error('Group code not found'), { statusCode: 404 }); await query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [result.rows[0]._id, userId]); return hydrate(result.rows[0]); };
+export const joinGroupByCode = async ({ groupCode: code, userId }) => { const result = await query('SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", created_at AS "createdAt" FROM groups WHERE group_code = $1', [code.trim().toUpperCase()]); if (!result.rowCount) throw Object.assign(new Error('Group code not found'), { statusCode: 404 }); if (result.rows[0].isPersonal) throw Object.assign(new Error('Personal Expenses is private to its owner'), { statusCode: 403 }); await query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [result.rows[0]._id, userId]); return hydrate(result.rows[0]); };
 const ensureGroupIsSettled = async (client, groupId) => {
 	const unsettled = await client.query(
 		'SELECT 1 FROM balances WHERE group_id = $1 AND net_owed <> 0 LIMIT 1',
@@ -130,8 +155,9 @@ const ensureGroupIsSettled = async (client, groupId) => {
 };
 
 export const leaveGroup = async (groupId, userId) => withTransaction(async (client) => {
-	const group = await client.query('SELECT id FROM groups WHERE id = $1 FOR UPDATE', [groupId]);
+	const group = await client.query('SELECT id, is_personal FROM groups WHERE id = $1 FOR UPDATE', [groupId]);
 	if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+	if (group.rows[0].is_personal) throw Object.assign(new Error('Personal Expenses cannot be left'), { statusCode: 400 });
 
 	const membership = await client.query(
 		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
@@ -151,7 +177,7 @@ export const leaveGroup = async (groupId, userId) => withTransaction(async (clie
 
 export const deleteGroup = async (groupId, userId) => withTransaction(async (client) => {
 	const group = await client.query(
-		'SELECT id FROM groups WHERE id = $1 AND created_by = $2 FOR UPDATE',
+		'SELECT id, is_personal FROM groups WHERE id = $1 AND created_by = $2 FOR UPDATE',
 		[groupId, userId],
 	);
 	if (!group.rowCount) {
@@ -159,6 +185,7 @@ export const deleteGroup = async (groupId, userId) => withTransaction(async (cli
 		if (!exists.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
 		throw Object.assign(new Error('Only the group creator can delete this group'), { statusCode: 403 });
 	}
+	if (group.rows[0].is_personal) throw Object.assign(new Error('Personal Expenses cannot be deleted'), { statusCode: 400 });
 
 	await ensureGroupIsSettled(client, groupId);
 	await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
