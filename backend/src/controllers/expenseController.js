@@ -24,7 +24,8 @@ const validateExpenseOptions = (body) => {
 };
 
 export const list = async (req, res) => {
-  res.json({ data: await listExpenses(req.query.groupId, req.user._id) });
+  const includeHistory = Boolean(req.query.groupId) && req.query.history === 'true';
+  res.json({ data: await listExpenses(req.query.groupId, req.user._id, includeHistory) });
 };
 
 export const listPersonal = async (req, res) => {

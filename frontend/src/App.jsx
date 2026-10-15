@@ -84,6 +84,385 @@ function groupExpensesByMonth(expenses) {
   return [...months.values()].sort((first, second) => second.key.localeCompare(first.key));
 }
 
+function getExpenseMonthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function SpendingInsights({ transactions, members }) {
+  const [monthSelection, setMonthSelection] = useState('');
+  const [currencySelection, setCurrencySelection] = useState('');
+  const [hoveredMonth, setHoveredMonth] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [hoveredDay, setHoveredDay] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const expenses = transactions.filter((transaction) => (
+    transaction.type === 'EXPENSE' && Number(transaction.totalAmount) > 0
+  ));
+  const monthKeys = [...new Set(expenses.map((expense) => getExpenseMonthKey(new Date(expense.createdAt))))]
+    .sort((first, second) => first.localeCompare(second));
+  const activeMonth = monthKeys.includes(monthSelection) ? monthSelection : monthKeys.at(-1) || '';
+  const monthOptions = monthKeys.map((key) => {
+    const [year, month] = key.split('-').map(Number);
+    return {
+      key,
+      label: new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+    };
+  });
+  const monthExpenses = expenses.filter((expense) => getExpenseMonthKey(new Date(expense.createdAt)) === activeMonth);
+  const currencies = [...new Set(monthExpenses.map((expense) => expense.currency || 'INR'))].sort();
+  const activeCurrency = currencies.includes(currencySelection) ? currencySelection : currencies[0] || 'INR';
+  const selectedExpenses = monthExpenses.filter((expense) => (expense.currency || 'INR') === activeCurrency);
+  const memberById = new Map();
+  members.forEach((member) => memberById.set(member._id, member.fullnamae || member.username));
+  expenses.forEach((expense) => {
+    expense.splits?.forEach((split) => {
+      if (split.userId && !memberById.has(split.userId)) {
+        memberById.set(split.userId, `Former member ${split.userId.slice(0, 6)}`);
+      }
+    });
+  });
+  const payers = [...memberById.entries()].map(([id, name]) => ({ id, name }));
+  const colors = ['#568bd8', '#b66ada', '#4e56b5', '#e5ab3f', '#4eaa89', '#e36f67', '#5b9cae', '#8f9f43'];
+  const colorById = new Map(payers.map((payer, index) => [payer.id, colors[index % colors.length]]));
+  const addExpenseShares = (totals, expense) => {
+    expense.splits?.forEach((split) => {
+      const memberId = split.userId;
+      const amount = Number(split.amountOwed);
+      if (!memberId || !Number.isFinite(amount) || amount <= 0) return;
+      totals.set(memberId, (totals.get(memberId) || 0) + amount);
+    });
+  };
+  const paidTotals = new Map();
+  selectedExpenses.forEach((expense) => {
+    if (!expense.paidBy) return;
+    paidTotals.set(
+      expense.paidBy,
+      (paidTotals.get(expense.paidBy) || 0) + (Number(expense.totalAmount) || 0),
+    );
+  });
+  const paidData = payers
+    .map((payer) => ({ ...payer, amount: paidTotals.get(payer.id) || 0 }))
+    .filter((payer) => payer.amount > 0);
+  const paidTotal = paidData.reduce((total, payer) => total + payer.amount, 0);
+  const shareTotals = new Map();
+  const dailyTotals = new Map();
+  selectedExpenses.forEach((expense) => {
+    addExpenseShares(shareTotals, expense);
+    const day = new Date(expense.createdAt).getDate();
+    const dayTotals = dailyTotals.get(day) || new Map();
+    addExpenseShares(dayTotals, expense);
+    dailyTotals.set(day, dayTotals);
+  });
+  const pieData = payers
+    .map((payer) => ({ ...payer, amount: shareTotals.get(payer.id) || 0 }))
+    .filter((payer) => payer.amount > 0);
+  const activePayers = pieData;
+  const monthTotal = pieData.reduce((total, payer) => total + payer.amount, 0);
+  const pieRadius = 62;
+  const pieCircumference = 2 * Math.PI * pieRadius;
+  let pieOffset = 0;
+  const selectedMonthDate = activeMonth
+    ? new Date(Number(activeMonth.slice(0, 4)), Number(activeMonth.slice(5, 7)) - 1, 1)
+    : new Date();
+  const daysInMonth = new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 0).getDate();
+  const monthlyKeys = monthKeys.slice(-6);
+  const monthlyTotals = new Map();
+  expenses.filter((expense) => (expense.currency || 'INR') === activeCurrency).forEach((expense) => {
+    const monthKey = getExpenseMonthKey(new Date(expense.createdAt));
+    const month = monthlyTotals.get(monthKey) || new Map();
+    addExpenseShares(month, expense);
+    monthlyTotals.set(monthKey, month);
+  });
+  const monthlyPayers = payers.filter((payer) => monthlyKeys.some((key) => (monthlyTotals.get(key)?.get(payer.id) || 0) > 0));
+  const monthlyTotalFor = (key) => [...(monthlyTotals.get(key)?.values() || [])].reduce((sum, amount) => sum + amount, 0);
+  const averageMonthlyTotal = monthlyKeys.length
+    ? monthlyKeys.reduce((total, key) => total + monthlyTotalFor(key), 0) / monthlyKeys.length
+    : 0;
+  const chart = { left: 52, right: 700, top: 22, bottom: 208 };
+  const chartWidth = chart.right - chart.left;
+  const chartHeight = chart.bottom - chart.top;
+  const maximumMonthly = Math.max(averageMonthlyTotal, ...monthlyKeys.map(monthlyTotalFor), 1);
+  const monthlySlot = chartWidth / Math.max(monthlyKeys.length, 1);
+  const payerBarWidth = Math.max(2, Math.min(20, (monthlySlot - 12) / Math.max(monthlyPayers.length, 1)));
+  const visibleMonth = hoveredMonth || selectedMonth;
+  const visibleDay = hoveredDay ?? selectedDay;
+  const averageLine = monthlyKeys.map((key, index) => {
+    const x = chart.left + monthlySlot * index + monthlySlot / 2;
+    const y = chart.bottom - (averageMonthlyTotal / maximumMonthly) * chartHeight;
+    return `${index ? 'L' : 'M'} ${x} ${y}`;
+  }).join(' ');
+  const monthLabel = (key) => {
+    const [year, month] = key.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+  };
+  const formatAmount = (amount) => Number(amount).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+  const maxDailyAmount = Math.max(...[...dailyTotals.values()].flatMap((totals) => [...totals.values()]), 1);
+
+  return (
+    <section className="spending-insights">
+      <div className="spending-insights-heading">
+        <div><p className="eyebrow">GROUP SPENDING</p><h3>Monthly spending insights</h3></div>
+        <div className="spending-insights-controls">
+          {monthOptions.length > 0 && (
+            <label>Month
+              <select value={activeMonth} onChange={(event) => setMonthSelection(event.target.value)}>
+                {monthOptions.map((month) => <option key={month.key} value={month.key}>{month.label}</option>)}
+              </select>
+            </label>
+          )}
+          {currencies.length > 1 && (
+            <label>Currency
+              <select value={activeCurrency} onChange={(event) => setCurrencySelection(event.target.value)}>
+                {currencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      </div>
+      {!monthKeys.length ? (
+        <p className="empty-state">Add group expenses to see monthly spending charts.</p>
+      ) : (
+        <>
+          <div className="spending-insights-summary">
+            <div className="spending-chart-card spending-pie-card">
+              <div className="spending-chart-title">
+                <div><h4>Who paid this month</h4><p>{monthOptions.find((month) => month.key === activeMonth)?.label}</p></div>
+                <strong>{activeCurrency} {formatAmount(paidTotal)}</strong>
+              </div>
+              {paidData.length ? (
+                <div className="spending-pie-layout">
+                  <svg className="spending-pie" viewBox="0 0 160 160" role="img" aria-label={`Amount paid by each member for ${activeMonth}`}>
+                    <circle cx="80" cy="80" r={pieRadius} fill="none" stroke="#edf0ec" strokeWidth="22" />
+                    {paidData.map((payer) => {
+                      const segment = (payer.amount / paidTotal) * pieCircumference;
+                      const circle = (
+                        <circle
+                          key={payer.id}
+                          cx="80"
+                          cy="80"
+                          r={pieRadius}
+                          fill="none"
+                          stroke={colorById.get(payer.id)}
+                          strokeWidth="22"
+                          strokeDasharray={`${segment} ${pieCircumference - segment}`}
+                          strokeDashoffset={-pieOffset}
+                          transform="rotate(-90 80 80)"
+                        >
+                          <title>{payer.name} paid: {activeCurrency} {formatAmount(payer.amount)}</title>
+                        </circle>
+                      );
+                      pieOffset += segment;
+                      return circle;
+                    })}
+                    <text x="80" y="76" textAnchor="middle" className="spending-pie-total">{activeCurrency}</text>
+                    <text x="80" y="96" textAnchor="middle" className="spending-pie-amount">{formatAmount(paidTotal)}</text>
+                  </svg>
+                  <ul className="spending-payer-legend">
+                    {paidData.map((payer) => (
+                      <li key={payer.id}>
+                        <span style={{ '--payer-color': colorById.get(payer.id) }} />
+                        <div><strong>{payer.name}</strong><small>{Math.round((payer.amount / paidTotal) * 100)}%</small></div>
+                        <b>{activeCurrency} {formatAmount(payer.amount)}</b>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : <p className="empty-state">No expenses for this month in {activeCurrency}.</p>}
+            </div>
+            <div className="spending-chart-card spending-daily-card">
+              <div className="spending-chart-title">
+                <div><h4>Daily spending</h4><p>Each day of {monthOptions.find((month) => month.key === activeMonth)?.label}</p></div>
+              </div>
+              <div className="spending-daily-scroll">
+                <svg
+                  className="spending-daily-chart"
+                  viewBox={`0 0 ${Math.max(680, daysInMonth * 28)} 210`}
+                  role="img"
+                  aria-label={`Daily group expense shares during ${activeMonth}`}
+                >
+                  {[0, 1, 2, 3].map((tick) => {
+                    const value = maxDailyAmount * (3 - tick) / 3;
+                    const y = 166 - (value / maxDailyAmount) * 132;
+                    return <g key={tick}><line x1="35" x2={Math.max(680, daysInMonth * 28) - 8} y1={y} y2={y} /><text x="30" y={y + 3} textAnchor="end">{formatAmount(value)}</text></g>;
+                  })}
+                  {Array.from({ length: daysInMonth }, (_, index) => {
+                    const day = index + 1;
+                    const chartWidth = Math.max(680, daysInMonth * 28);
+                    const daySlot = (chartWidth - 54) / daysInMonth;
+                    const x = 42 + index * daySlot;
+                    const dayTotals = dailyTotals.get(day) || new Map();
+                    const width = Math.max(3, Math.min(8, 17 / Math.max(activePayers.length, 1)));
+                    return (
+                      <g
+                        key={day}
+                        className="spending-chart-selection"
+                        onMouseEnter={() => setHoveredDay(day)}
+                        onMouseLeave={() => setHoveredDay(null)}
+                      >
+                        {(visibleDay === day) && <rect className="spending-selection-band" x={x - 2} y="26" width={daySlot} height="142" />}
+                        {activePayers.map((payer, payerIndex) => {
+                          const value = dayTotals.get(payer.id) || 0;
+                          const height = (value / maxDailyAmount) * 132;
+                          return value > 0 ? (
+                            <rect
+                              key={payer.id}
+                              x={x + payerIndex * (width + 1)}
+                              y={166 - height}
+                              width={width}
+                              height={height}
+                              rx="2"
+                              fill={colorById.get(payer.id)}
+                            >
+                              <title>Day {day} · {payer.name}'s share: {activeCurrency} {formatAmount(value)}</title>
+                            </rect>
+                          ) : null;
+                        })}
+                        <rect
+                          className="spending-chart-hit-area"
+                          x={x - 2}
+                          y="24"
+                          width={daySlot}
+                          height="154"
+                          fill="transparent"
+                          role="button"
+                          tabIndex="0"
+                          aria-label={`Day ${day}, total ${activeCurrency} ${formatAmount([...dayTotals.values()].reduce((sum, amount) => sum + amount, 0))}. Click to pin details.`}
+                          onFocus={() => setHoveredDay(day)}
+                          onBlur={() => setHoveredDay(null)}
+                          onClick={() => setSelectedDay((current) => current === day ? null : day)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              setSelectedDay((current) => current === day ? null : day);
+                            }
+                          }}
+                        />
+                        {day === 1 || day % 5 === 0 || day === daysInMonth
+                          ? <text x={x + 4} y="190" textAnchor="middle">{day}</text>
+                          : null}
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+              {visibleDay !== null && visibleDay !== undefined && (
+                <div className="spending-chart-tooltip spending-daily-tooltip" role="status">
+                  <div><strong>{monthOptions.find((month) => month.key === activeMonth)?.label} {visibleDay}</strong><b>{activeCurrency} {formatAmount([...((dailyTotals.get(visibleDay)) || new Map()).values()].reduce((sum, amount) => sum + amount, 0))}</b></div>
+                  {activePayers.map((payer) => (
+                    <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(dailyTotals.get(visibleDay)?.get(payer.id) || 0)}</strong></p>
+                  ))}
+                </div>
+              )}
+              <p className="spending-axis-caption">Day of month · each member’s actual expense share</p>
+              <SpendingLegend payers={activePayers} colorById={colorById} />
+            </div>
+          </div>
+          <div className="spending-chart-card spending-monthly-card">
+            <div className="spending-chart-title">
+              <div><h4>Monthly expenditure</h4><p>Amount paid by each member · last {monthlyKeys.length} months</p></div>
+              <strong>{activeCurrency}</strong>
+            </div>
+            {monthlyKeys.length ? (
+              <>
+                <div className="spending-monthly-scroll">
+                  <div className="spending-monthly-chart-wrap">
+                    <svg className="spending-monthly-chart" viewBox="0 0 740 260" role="img" aria-label="Monthly actual expense share by group member">
+                    {[0, 1, 2, 3].map((tick) => {
+                      const value = maximumMonthly * (3 - tick) / 3;
+                      const y = chart.bottom - (value / maximumMonthly) * chartHeight;
+                      return <g key={tick}><line x1={chart.left} x2={chart.right} y1={y} y2={y} /><text x={chart.left - 8} y={y + 4} textAnchor="end">{formatAmount(value)}</text></g>;
+                    })}
+                    {monthlyKeys.map((key, monthIndex) => {
+                      const xCenter = chart.left + monthlySlot * monthIndex + monthlySlot / 2;
+                      const totals = monthlyTotals.get(key) || new Map();
+                      const plottedPayers = monthlyPayers.filter((payer) => (totals.get(payer.id) || 0) > 0);
+                      const groupWidth = plottedPayers.length * payerBarWidth;
+                      const total = monthlyTotalFor(key);
+                      return (
+                        <g
+                          key={key}
+                          className="spending-chart-selection"
+                          onMouseEnter={() => setHoveredMonth(key)}
+                          onMouseLeave={() => setHoveredMonth('')}
+                        >
+                          {visibleMonth === key && <rect className="spending-selection-band" x={chart.left + monthlySlot * monthIndex} y={chart.top} width={monthlySlot} height={chart.bottom - chart.top} />}
+                          {plottedPayers.map((payer, payerIndex) => {
+                            const amount = totals.get(payer.id) || 0;
+                            const height = (amount / maximumMonthly) * chartHeight;
+                            return <rect key={payer.id} x={xCenter - groupWidth / 2 + payerIndex * payerBarWidth} y={chart.bottom - height} width={Math.max(2, payerBarWidth - 2)} height={height} rx="2" fill={colorById.get(payer.id)}><title>{monthLabel(key)} · {payer.name}'s actual share: {activeCurrency} {formatAmount(amount)}</title></rect>;
+                          })}
+                          <rect
+                            className="spending-chart-hit-area"
+                            x={chart.left + monthlySlot * monthIndex}
+                            y={chart.top}
+                            width={monthlySlot}
+                            height={chart.bottom - chart.top}
+                            fill="transparent"
+                            role="button"
+                            tabIndex="0"
+                            aria-label={`${monthLabel(key)} total actual expense share ${activeCurrency} ${formatAmount(total)}. Click to pin details.`}
+                            onFocus={() => setHoveredMonth(key)}
+                            onBlur={() => setHoveredMonth('')}
+                            onClick={() => setSelectedMonth((current) => current === key ? '' : key)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setSelectedMonth((current) => current === key ? '' : key);
+                              }
+                            }}
+                          />
+                          <text x={xCenter} y={chart.bottom + 19} textAnchor="middle">{monthLabel(key)}</text>
+                        </g>
+                      );
+                    })}
+                    {monthlyKeys.length > 0 && <path d={averageLine} className="spending-average-line"><title>Average monthly spend: {activeCurrency} {formatAmount(averageMonthlyTotal)}</title></path>}
+                    {monthlyKeys.map((key, index) => {
+                      const x = chart.left + monthlySlot * index + monthlySlot / 2;
+                      const y = chart.bottom - (averageMonthlyTotal / maximumMonthly) * chartHeight;
+                      return <circle key={key} cx={x} cy={y} r="3.5" className="spending-average-point" />;
+                    })}
+                    </svg>
+                    {visibleMonth && monthlyTotals.has(visibleMonth) && (
+                      <div className="spending-chart-tooltip spending-monthly-tooltip" role="status">
+                        <div><strong>{monthLabel(visibleMonth)}</strong><b>{activeCurrency} {formatAmount(monthlyTotalFor(visibleMonth))}</b></div>
+                        {monthlyPayers.map((payer) => (
+                          <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(monthlyTotals.get(visibleMonth)?.get(payer.id) || 0)}</strong></p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="spending-chart-legend">
+                  <SpendingLegend payers={monthlyPayers} colorById={colorById} />
+                  <span className="spending-average-label"><i />Average monthly spend</span>
+                </div>
+                <div className="spending-monthly-totals">
+                  {monthlyKeys.map((key) => (
+                    <span key={key}><small>{monthLabel(key)}</small><strong>{activeCurrency} {formatAmount(monthlyTotalFor(key))}</strong></span>
+                  ))}
+                </div>
+              </>
+            ) : <p className="empty-state">No monthly spending data yet.</p>}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function SpendingLegend({ payers, colorById }) {
+  return (
+    <div className="spending-payer-key">
+      {payers.map((payer) => (
+        <span key={payer.id}><i style={{ background: colorById.get(payer.id) }} />{payer.name}</span>
+      ))}
+    </div>
+  );
+}
+
 const expenseSplitModes = [
   { id: 'EQUAL', label: 'Split equally' },
   { id: 'EXACT', label: 'Split by exact amounts' },
@@ -892,7 +1271,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setGroupSettlementError('');
     try {
       const [transactions, balances, settlements] = await Promise.all([
-        apiRequest(`/expenses?groupId=${group._id}`, { headers: authHeaders }),
+        apiRequest(`/expenses?groupId=${group._id}&history=true`, { headers: authHeaders }),
         apiRequest(`/groups/${group._id}/balances`, { headers: authHeaders }),
         apiRequest(`/groups/${group._id}/simplify-debts`, { headers: authHeaders }),
       ]);
@@ -2236,6 +2615,7 @@ function GroupDetails({
                     })}
                   </div>
                 ) : <p className="empty-state">You’re settled up in this group.</p>}
+                <SpendingInsights transactions={transactions} members={group.members || []} />
                 <div className="settlement-plan">
                   <h4>Suggested settlements</h4>
                   <button className="group-inline-action" onClick={() => openSettlementForm()}>Record a payment</button>
