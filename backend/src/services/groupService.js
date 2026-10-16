@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
+import Decimal from 'decimal.js';
 import { query, withTransaction } from '../db/index.js';
 import { simplifyDebts } from './debtSimplifier.js';
+import { getExchangeRate } from './exchangeRateService.js';
 import { recordGroupActivity } from './groupActivityService.js';
 
 const groupCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
@@ -159,6 +161,82 @@ export const getGroupBalances = async (groupId, userId) => {
 			netBalance: `${isOwed ? '' : '-'}${transfer.amount}`,
 		};
 	});
+};
+export const getDashboardBalanceSummary = async (userId) => {
+	const userResult = await query(
+		'SELECT default_currency AS "defaultCurrency" FROM users WHERE id = $1',
+		[userId],
+	);
+	if (!userResult.rowCount) throw Object.assign(new Error('User not found'), { statusCode: 404 });
+	const currency = userResult.rows[0].defaultCurrency || 'INR';
+	const sharedGroups = (await listGroupsForUser(userId)).filter((group) => !group.isPersonal);
+	const sharedEntries = (await Promise.all(sharedGroups.map(async (group) => {
+		const balances = await getGroupBalances(group._id, userId);
+		return balances.map((balance) => ({
+			key: group._id,
+			name: group.name,
+			currency: balance.currency || 'INR',
+			amount: balance.netBalance,
+		}));
+	}))).flat();
+	const directBalances = await query(
+		`SELECT g.id AS "groupId", friend.id AS "friendId",
+		        COALESCE(friend.fullnamae, friend.username) AS name,
+		        b.currency, b.net_owed::text AS amount,
+		        (b.user1 = $1) AS "userIsLow"
+		 FROM friend_ledgers f
+		 JOIN groups g ON g.id = f.group_id
+		 JOIN balances b ON b.group_id = g.id
+		 JOIN users friend ON friend.id = CASE
+		   WHEN f.user_low = $1 THEN f.user_high ELSE f.user_low END
+		 WHERE (f.user_low = $1 OR f.user_high = $1)
+		   AND b.net_owed <> 0 AND (b.user1 = $1 OR b.user2 = $1)`,
+		[userId],
+	);
+	const directEntries = directBalances.rows.map((balance) => ({
+		key: `direct:${balance.groupId}:${balance.friendId}`,
+		name: `With ${balance.name}`,
+		currency: balance.currency || 'INR',
+		amount: new Decimal(balance.amount).mul(balance.userIsLow ? 1 : -1).toString(),
+	}));
+	const entries = [...sharedEntries, ...directEntries];
+	const currencies = [...new Set(entries.map((entry) => entry.currency))];
+	const rates = Object.fromEntries(await Promise.all(currencies.map(async (fromCurrency) => ([
+		fromCurrency,
+		await getExchangeRate(fromCurrency, currency),
+	]))));
+	const groupedBalances = new Map();
+	for (const entry of entries) {
+		const balance = groupedBalances.get(entry.key) || {
+			id: entry.key,
+			name: entry.name,
+			youOwe: new Decimal(0),
+			youAreOwed: new Decimal(0),
+		};
+		const converted = new Decimal(entry.amount).mul(rates[entry.currency] || 1);
+		if (converted.isNegative()) balance.youOwe = balance.youOwe.plus(converted.abs());
+		else balance.youAreOwed = balance.youAreOwed.plus(converted);
+		groupedBalances.set(entry.key, balance);
+	}
+	const balances = [...groupedBalances.values()].map((balance) => ({
+		id: balance.id,
+		name: balance.name,
+		youOwe: balance.youOwe.toFixed(2),
+		youAreOwed: balance.youAreOwed.toFixed(2),
+	}));
+	const youOwe = balances.reduce((total, balance) => total.plus(balance.youOwe), new Decimal(0));
+	const youAreOwed = balances.reduce((total, balance) => total.plus(balance.youAreOwed), new Decimal(0));
+	const sortByAmount = (field) => balances
+		.filter((balance) => new Decimal(balance[field]).greaterThan(0))
+		.sort((first, second) => new Decimal(second[field]).minus(first[field]).toNumber());
+	return {
+		currency,
+		totalBalance: youAreOwed.minus(youOwe).toFixed(2),
+		youOwe: youOwe.toFixed(2),
+		youAreOwed: youAreOwed.toFixed(2),
+		outgoingBalances: sortByAmount('youOwe'),
+		incomingBalances: sortByAmount('youAreOwed'),
+	};
 };
 export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts, coverImageUrl, removeCoverImage = false }) => withTransaction(async (client) => {
 	const membership = await client.query(

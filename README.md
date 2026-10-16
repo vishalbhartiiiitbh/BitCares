@@ -81,6 +81,7 @@ The connected dashboard uses these authenticated endpoints:
 - `POST /api/groups` can include `memberIds` (friend user IDs) and/or `memberIdentifiers` (usernames or registered email addresses); the creator is added automatically.
 - `POST /api/groups/join` with `{ "groupCode": "A1B2C3D4" }`
 - `POST /api/groups/:groupId/members` with `{ "identifier": "username or registered email" }` (any current group member can add an account directly).
+- `GET /api/groups/balances/summary` returns the signed-in user's total net balance, amounts owed and owing across shared groups and direct friend ledgers, converted to their default currency.
 - `GET /api/groups/:groupId/balances` returns only the authenticated member's balances, with amounts owed to or by that member.
 - `POST /api/groups/:groupId/payment-requests` accepts `{ "memberId": "group-member-user-id", "amount": "25.00", "currency": "INR", "note": "Optional message" }` to notify a member who currently owes the authenticated member. Requests are limited to the outstanding amount and appear in group activity; they do not change balances.
 - `GET /api/groups/:groupId/whiteboard` and `PUT /api/groups/:groupId/whiteboard` let any current group member read or update the shared 5,000-character group whiteboard. Updates are recorded in group activity and notify the other members.

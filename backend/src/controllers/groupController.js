@@ -1,4 +1,4 @@
-import { addGroupMember, createGroup, deleteGroup, getGroupBalances, getGroupWhiteboard, joinGroupByCode, leaveGroup, listGroupsForUser, removeGroupMember, saveGroupWhiteboard, updateGroupSettings } from '../services/groupService.js';
+import { addGroupMember, createGroup, deleteGroup, getDashboardBalanceSummary, getGroupBalances, getGroupWhiteboard, joinGroupByCode, leaveGroup, listGroupsForUser, removeGroupMember, saveGroupWhiteboard, updateGroupSettings } from '../services/groupService.js';
 import { simplifyDebts } from '../services/debtSimplifier.js';
 import { recordSettlement } from '../services/settlementService.js';
 import { createPaymentRequest } from '../services/paymentRequestService.js';
@@ -84,6 +84,10 @@ export const remove = async (req, res) => {
 
 export const balances = async (req, res) => {
   res.json({ data: await getGroupBalances(req.params.groupId, req.user._id) });
+};
+
+export const dashboardBalances = async (req, res) => {
+  res.json({ data: await getDashboardBalanceSummary(req.user._id) });
 };
 
 export const getWhiteboard = async (req, res) => {

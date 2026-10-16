@@ -71,7 +71,7 @@ function getExpenseMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function SpendingInsights({ transactions, members }) {
+function SpendingInsights({ transactions, members, userId, personalOnly = false, balanceSummary = null, balanceSummaryBusy = false, scopeLabel = 'GROUP SPENDING' }) {
   const [monthSelection, setMonthSelection] = useState('');
   const [currencySelection, setCurrencySelection] = useState('');
   const [hoveredMonth, setHoveredMonth] = useState('');
@@ -96,7 +96,10 @@ function SpendingInsights({ transactions, members }) {
   const activeCurrency = currencies.includes(currencySelection) ? currencySelection : currencies[0] || 'INR';
   const selectedExpenses = monthExpenses.filter((expense) => (expense.currency || 'INR') === activeCurrency);
   const memberById = new Map();
-  members.forEach((member) => memberById.set(member._id, member.fullnamae || member.username));
+  members.forEach((member) => memberById.set(
+    member._id,
+    personalOnly && member._id === userId ? 'You' : member.fullnamae || member.username,
+  ));
   expenses.forEach((expense) => {
     expense.splits?.forEach((split) => {
       if (split.userId && !memberById.has(split.userId)) {
@@ -115,6 +118,10 @@ function SpendingInsights({ transactions, members }) {
       totals.set(memberId, (totals.get(memberId) || 0) + amount);
     });
   };
+  const getUserExpenseShare = (expense) => {
+    const share = expense.splits?.find((split) => split.userId === userId)?.amountOwed;
+    return Number.isFinite(Number(share)) ? Number(share) : 0;
+  };
   const paidTotals = new Map();
   selectedExpenses.forEach((expense) => {
     if (!expense.paidBy) return;
@@ -127,37 +134,68 @@ function SpendingInsights({ transactions, members }) {
     .map((payer) => ({ ...payer, amount: paidTotals.get(payer.id) || 0 }))
     .filter((payer) => payer.amount > 0);
   const paidTotal = paidData.reduce((total, payer) => total + payer.amount, 0);
+  const owesPieData = personalOnly
+    ? (balanceSummary?.outgoingBalances || []).map((balance) => ({
+      id: balance.id,
+      name: balance.name,
+      amount: Number(balance.youOwe),
+    }))
+    : paidData;
+  const owesPieTotal = owesPieData.reduce((total, entry) => total + entry.amount, 0);
   const shareTotals = new Map();
   const dailyTotals = new Map();
+  const dailyMemberTotals = new Map();
   selectedExpenses.forEach((expense) => {
     addExpenseShares(shareTotals, expense);
     const day = new Date(expense.createdAt).getDate();
-    const dayTotals = dailyTotals.get(day) || new Map();
-    addExpenseShares(dayTotals, expense);
-    dailyTotals.set(day, dayTotals);
+    dailyTotals.set(day, (dailyTotals.get(day) || 0) + getUserExpenseShare(expense));
+    const dayMemberTotals = dailyMemberTotals.get(day) || new Map();
+    addExpenseShares(dayMemberTotals, expense);
+    dailyMemberTotals.set(day, dayMemberTotals);
   });
   const pieData = payers
     .map((payer) => ({ ...payer, amount: shareTotals.get(payer.id) || 0 }))
     .filter((payer) => payer.amount > 0);
-  const activePayers = pieData;
   const monthTotal = pieData.reduce((total, payer) => total + payer.amount, 0);
+  const owedPieData = personalOnly
+    ? (balanceSummary?.incomingBalances || []).map((balance) => ({
+      id: balance.id,
+      name: balance.name,
+      amount: Number(balance.youAreOwed),
+    }))
+    : pieData;
+  const owesColorById = new Map(owesPieData.map((entry, index) => [
+    entry.id,
+    personalOnly ? colors[index % colors.length] : colorById.get(entry.id),
+  ]));
+  const owedColorById = new Map(owedPieData.map((entry, index) => [
+    entry.id,
+    personalOnly ? colors[index % colors.length] : colorById.get(entry.id),
+  ]));
+  const owedPieTotal = owedPieData.reduce((total, entry) => total + entry.amount, 0);
+  const pieCurrency = personalOnly ? balanceSummary?.currency || 'INR' : activeCurrency;
   const pieRadius = 62;
   const pieCircumference = 2 * Math.PI * pieRadius;
   let pieOffset = 0;
+  let sharePieOffset = 0;
   const selectedMonthDate = activeMonth
     ? new Date(Number(activeMonth.slice(0, 4)), Number(activeMonth.slice(5, 7)) - 1, 1)
     : new Date();
   const daysInMonth = new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 0).getDate();
   const monthlyKeys = monthKeys.slice(-6);
   const monthlyTotals = new Map();
+  const monthlyMemberTotals = new Map();
   expenses.filter((expense) => (expense.currency || 'INR') === activeCurrency).forEach((expense) => {
     const monthKey = getExpenseMonthKey(new Date(expense.createdAt));
-    const month = monthlyTotals.get(monthKey) || new Map();
-    addExpenseShares(month, expense);
-    monthlyTotals.set(monthKey, month);
+    monthlyTotals.set(monthKey, (monthlyTotals.get(monthKey) || 0) + getUserExpenseShare(expense));
+    const monthMemberTotals = monthlyMemberTotals.get(monthKey) || new Map();
+    addExpenseShares(monthMemberTotals, expense);
+    monthlyMemberTotals.set(monthKey, monthMemberTotals);
   });
-  const monthlyPayers = payers.filter((payer) => monthlyKeys.some((key) => (monthlyTotals.get(key)?.get(payer.id) || 0) > 0));
-  const monthlyTotalFor = (key) => [...(monthlyTotals.get(key)?.values() || [])].reduce((sum, amount) => sum + amount, 0);
+  const monthlyPayers = payers.filter((payer) => monthlyKeys.some((key) => (monthlyMemberTotals.get(key)?.get(payer.id) || 0) > 0));
+  const monthlyTotalFor = (key) => personalOnly
+    ? monthlyTotals.get(key) || 0
+    : [...(monthlyMemberTotals.get(key)?.values() || [])].reduce((sum, amount) => sum + amount, 0);
   const averageMonthlyTotal = monthlyKeys.length
     ? monthlyKeys.reduce((total, key) => total + monthlyTotalFor(key), 0) / monthlyKeys.length
     : 0;
@@ -182,12 +220,19 @@ function SpendingInsights({ transactions, members }) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
-  const maxDailyAmount = Math.max(...[...dailyTotals.values()].flatMap((totals) => [...totals.values()]), 1);
+  const maxDailyAmount = Math.max(
+    ...(personalOnly
+      ? [...dailyTotals.values()]
+      : [...dailyMemberTotals.values()].flatMap((totals) => [...totals.values()])),
+    1,
+  );
+  const userName = personalOnly ? 'You' : memberById.get(userId) || 'You';
+  const userColor = colorById.get(userId) || '#4eaa89';
 
   return (
     <section className="spending-insights">
       <div className="spending-insights-heading">
-        <div><p className="eyebrow">GROUP SPENDING</p><h3>Monthly spending insights</h3></div>
+        <div><p className="eyebrow">{scopeLabel}</p><h3>Monthly spending insights</h3></div>
         <div className="spending-insights-controls">
           {monthOptions.length > 0 && (
             <label>Month
@@ -206,21 +251,24 @@ function SpendingInsights({ transactions, members }) {
         </div>
       </div>
       {!monthKeys.length ? (
-        <p className="empty-state">Add group expenses to see monthly spending charts.</p>
+        <p className="empty-state">Add expenses to see monthly spending charts.</p>
       ) : (
         <>
           <div className="spending-insights-summary">
             <div className="spending-chart-card spending-pie-card">
               <div className="spending-chart-title">
-                <div><h4>Who paid this month</h4><p>{monthOptions.find((month) => month.key === activeMonth)?.label}</p></div>
-                <strong>{activeCurrency} {formatAmount(paidTotal)}</strong>
+                <div>
+                  <h4>{personalOnly ? 'You owe' : 'Who paid this month'}</h4>
+                  <p>{personalOnly ? 'Across all groups and friends' : monthOptions.find((month) => month.key === activeMonth)?.label}</p>
+                </div>
+                <strong className={personalOnly ? 'spending-amount-owed' : ''}>{pieCurrency} {formatAmount(personalOnly ? owesPieTotal : paidTotal)}</strong>
               </div>
-              {paidData.length ? (
+              {owesPieData.length ? (
                 <div className="spending-pie-layout">
-                  <svg className="spending-pie" viewBox="0 0 160 160" role="img" aria-label={`Amount paid by each member for ${activeMonth}`}>
+                  <svg className="spending-pie" viewBox="0 0 160 160" role="img" aria-label={personalOnly ? 'Amount you owe by group and friend' : `Amount paid by each member for ${activeMonth}`}>
                     <circle cx="80" cy="80" r={pieRadius} fill="none" stroke="#edf0ec" strokeWidth="22" />
-                    {paidData.map((payer) => {
-                      const segment = (payer.amount / paidTotal) * pieCircumference;
+                    {owesPieData.map((payer) => {
+                      const segment = (payer.amount / (personalOnly ? owesPieTotal : paidTotal)) * pieCircumference;
                       const circle = (
                         <circle
                           key={payer.id}
@@ -228,43 +276,100 @@ function SpendingInsights({ transactions, members }) {
                           cy="80"
                           r={pieRadius}
                           fill="none"
-                          stroke={colorById.get(payer.id)}
+                          stroke={owesColorById.get(payer.id)}
                           strokeWidth="22"
                           strokeDasharray={`${segment} ${pieCircumference - segment}`}
                           strokeDashoffset={-pieOffset}
                           transform="rotate(-90 80 80)"
                         >
-                          <title>{payer.name} paid: {activeCurrency} {formatAmount(payer.amount)}</title>
+                          <title>{personalOnly ? `You owe ${payer.name}` : `${payer.name} paid`}: {pieCurrency} {formatAmount(payer.amount)}</title>
                         </circle>
                       );
                       pieOffset += segment;
                       return circle;
                     })}
-                    <text x="80" y="76" textAnchor="middle" className="spending-pie-total">{activeCurrency}</text>
-                    <text x="80" y="96" textAnchor="middle" className="spending-pie-amount">{formatAmount(paidTotal)}</text>
+                    <text x="80" y="76" textAnchor="middle" className="spending-pie-total">{pieCurrency}</text>
+                    <text x="80" y="96" textAnchor="middle" className={`spending-pie-amount ${personalOnly ? 'spending-amount-owed' : ''}`}>{formatAmount(personalOnly ? owesPieTotal : paidTotal)}</text>
                   </svg>
                   <ul className="spending-payer-legend">
-                    {paidData.map((payer) => (
+                    {owesPieData.map((payer) => (
                       <li key={payer.id}>
-                        <span style={{ '--payer-color': colorById.get(payer.id) }} />
-                        <div><strong>{payer.name}</strong><small>{Math.round((payer.amount / paidTotal) * 100)}%</small></div>
-                        <b>{activeCurrency} {formatAmount(payer.amount)}</b>
+                        <span style={{ '--payer-color': owesColorById.get(payer.id) }} />
+                        <div><strong>{payer.name}</strong><small>{Math.round((payer.amount / (personalOnly ? owesPieTotal : paidTotal)) * 100)}%</small></div>
+                        <b className={personalOnly ? 'spending-amount-owed' : ''}>{pieCurrency} {formatAmount(payer.amount)}</b>
                       </li>
                     ))}
                   </ul>
                 </div>
-              ) : <p className="empty-state">No expenses for this month in {activeCurrency}.</p>}
+              ) : <p className="empty-state">{personalOnly
+                ? balanceSummaryBusy ? 'Loading balances…' : balanceSummary ? 'You do not owe anyone right now.' : 'Your balances are not available.'
+                : `No expenses for this month in ${activeCurrency}.`}</p>}
             </div>
-            <div className="spending-chart-card spending-daily-card">
+            <div className="spending-chart-card spending-pie-card">
               <div className="spending-chart-title">
-                <div><h4>Daily spending</h4><p>Each day of {monthOptions.find((month) => month.key === activeMonth)?.label}</p></div>
+                <div>
+                  <h4>{personalOnly ? 'You are owed' : 'Expense share by person'}</h4>
+                  <p>{personalOnly ? 'Across all groups and friends' : monthOptions.find((month) => month.key === activeMonth)?.label}</p>
+                </div>
+                <strong>{pieCurrency} {formatAmount(personalOnly ? owedPieTotal : monthTotal)}</strong>
+              </div>
+              {owedPieData.length ? (
+                <div className="spending-pie-layout">
+                  <svg className="spending-pie" viewBox="0 0 160 160" role="img" aria-label={personalOnly ? 'Amount others owe you by group and friend' : `Expense share by person for ${activeMonth}`}>
+                    <circle cx="80" cy="80" r={pieRadius} fill="none" stroke="#edf0ec" strokeWidth="22" />
+                    {owedPieData.map((payer) => {
+                      const segment = (payer.amount / (personalOnly ? owedPieTotal : monthTotal)) * pieCircumference;
+                      const circle = (
+                        <circle
+                          key={payer.id}
+                          cx="80"
+                          cy="80"
+                          r={pieRadius}
+                          fill="none"
+                          stroke={owedColorById.get(payer.id)}
+                          strokeWidth="22"
+                          strokeDasharray={`${segment} ${pieCircumference - segment}`}
+                          strokeDashoffset={-sharePieOffset}
+                          transform="rotate(-90 80 80)"
+                        >
+                          <title>{personalOnly ? `${payer.name} owes you` : `${payer.name}'s expense share`}: {pieCurrency} {formatAmount(payer.amount)}</title>
+                        </circle>
+                      );
+                      sharePieOffset += segment;
+                      return circle;
+                    })}
+                    <text x="80" y="76" textAnchor="middle" className="spending-pie-total">{pieCurrency}</text>
+                    <text x="80" y="96" textAnchor="middle" className="spending-pie-amount">{formatAmount(personalOnly ? owedPieTotal : monthTotal)}</text>
+                  </svg>
+                  <ul className="spending-payer-legend">
+                    {owedPieData.map((payer) => (
+                      <li key={payer.id}>
+                        <span style={{ '--payer-color': owedColorById.get(payer.id) }} />
+                        <div><strong>{payer.name}</strong><small>{Math.round((payer.amount / (personalOnly ? owedPieTotal : monthTotal)) * 100)}%</small></div>
+                        <b>{pieCurrency} {formatAmount(payer.amount)}</b>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : <p className="empty-state">{personalOnly
+                ? balanceSummaryBusy ? 'Loading balances…' : balanceSummary ? 'Nobody owes you right now.' : 'Your balances are not available.'
+                : `No expense shares for this month in ${activeCurrency}.`}</p>}
+            </div>
+            <div className="spending-chart-card spending-daily-card spending-chart-wide">
+              <div className="spending-chart-title">
+                <div>
+                  <h4>{personalOnly ? 'Your daily spending' : 'Daily spending'}</h4>
+                  <p>{personalOnly
+                    ? `Your share across group and friend expenses · ${monthOptions.find((month) => month.key === activeMonth)?.label}`
+                    : `Each day of ${monthOptions.find((month) => month.key === activeMonth)?.label}`}</p>
+                </div>
               </div>
               <div className="spending-daily-scroll">
                 <svg
                   className="spending-daily-chart"
                   viewBox={`0 0 ${Math.max(680, daysInMonth * 28)} 210`}
                   role="img"
-                  aria-label={`Daily group expense shares during ${activeMonth}`}
+                  aria-label={`${personalOnly ? 'Your daily expense share' : 'Daily group expense shares'} during ${activeMonth}`}
                 >
                   {[0, 1, 2, 3].map((tick) => {
                     const value = maxDailyAmount * (3 - tick) / 3;
@@ -276,8 +381,9 @@ function SpendingInsights({ transactions, members }) {
                     const chartWidth = Math.max(680, daysInMonth * 28);
                     const daySlot = (chartWidth - 54) / daysInMonth;
                     const x = 42 + index * daySlot;
-                    const dayTotals = dailyTotals.get(day) || new Map();
-                    const width = Math.max(3, Math.min(8, 17 / Math.max(activePayers.length, 1)));
+                    const amount = dailyTotals.get(day) || 0;
+                    const dayMemberTotals = dailyMemberTotals.get(day) || new Map();
+                    const barWidth = Math.max(3, Math.min(8, 17 / Math.max(pieData.length, 1)));
                     return (
                       <g
                         key={day}
@@ -286,23 +392,20 @@ function SpendingInsights({ transactions, members }) {
                         onMouseLeave={() => setHoveredDay(null)}
                       >
                         {(visibleDay === day) && <rect className="spending-selection-band" x={x - 2} y="26" width={daySlot} height="142" />}
-                        {activePayers.map((payer, payerIndex) => {
-                          const value = dayTotals.get(payer.id) || 0;
-                          const height = (value / maxDailyAmount) * 132;
-                          return value > 0 ? (
-                            <rect
-                              key={payer.id}
-                              x={x + payerIndex * (width + 1)}
-                              y={166 - height}
-                              width={width}
-                              height={height}
-                              rx="2"
-                              fill={colorById.get(payer.id)}
-                            >
-                              <title>Day {day} · {payer.name}'s share: {activeCurrency} {formatAmount(value)}</title>
-                            </rect>
-                          ) : null;
-                        })}
+                        {personalOnly
+                          ? amount > 0 && (() => {
+                            const height = (amount / maxDailyAmount) * 132;
+                            return <rect x={x + daySlot / 2 - 5} y={166 - height} width="10" height={height} rx="2" fill={userColor}><title>Day {day} · your share: {activeCurrency} {formatAmount(amount)}</title></rect>;
+                          })()
+                          : pieData.map((payer, payerIndex) => {
+                            const value = dayMemberTotals.get(payer.id) || 0;
+                            const height = (value / maxDailyAmount) * 132;
+                            return value > 0 ? (
+                              <rect key={payer.id} x={x + payerIndex * (barWidth + 1)} y={166 - height} width={barWidth} height={height} rx="2" fill={colorById.get(payer.id)}>
+                                <title>Day {day} · {payer.name}'s share: {activeCurrency} {formatAmount(value)}</title>
+                              </rect>
+                            ) : null;
+                          })}
                         <rect
                           className="spending-chart-hit-area"
                           x={x - 2}
@@ -312,7 +415,9 @@ function SpendingInsights({ transactions, members }) {
                           fill="transparent"
                           role="button"
                           tabIndex="0"
-                          aria-label={`Day ${day}, total ${activeCurrency} ${formatAmount([...dayTotals.values()].reduce((sum, amount) => sum + amount, 0))}. Click to pin details.`}
+                          aria-label={personalOnly
+                            ? `Day ${day}, your expense share ${activeCurrency} ${formatAmount(amount)}. Click to pin details.`
+                            : `Day ${day}, total group shares ${activeCurrency} ${formatAmount([...dayMemberTotals.values()].reduce((sum, value) => sum + value, 0))}. Click to pin details.`}
                           onFocus={() => setHoveredDay(day)}
                           onBlur={() => setHoveredDay(null)}
                           onClick={() => setSelectedDay((current) => current === day ? null : day)}
@@ -333,26 +438,37 @@ function SpendingInsights({ transactions, members }) {
               </div>
               {visibleDay !== null && visibleDay !== undefined && (
                 <div className="spending-chart-tooltip spending-daily-tooltip" role="status">
-                  <div><strong>{monthOptions.find((month) => month.key === activeMonth)?.label} {visibleDay}</strong><b>{activeCurrency} {formatAmount([...((dailyTotals.get(visibleDay)) || new Map()).values()].reduce((sum, amount) => sum + amount, 0))}</b></div>
-                  {activePayers.map((payer) => (
-                    <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(dailyTotals.get(visibleDay)?.get(payer.id) || 0)}</strong></p>
-                  ))}
+                  <div><strong>{monthOptions.find((month) => month.key === activeMonth)?.label} {visibleDay}</strong><b>{activeCurrency} {formatAmount(personalOnly
+                    ? dailyTotals.get(visibleDay) || 0
+                    : [...(dailyMemberTotals.get(visibleDay)?.values() || [])].reduce((sum, value) => sum + value, 0))}</b></div>
+                  {personalOnly
+                    ? <p><span style={{ color: userColor }}>{userName} · your share</span><strong>{activeCurrency} {formatAmount(dailyTotals.get(visibleDay) || 0)}</strong></p>
+                    : pieData.map((payer) => <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(dailyMemberTotals.get(visibleDay)?.get(payer.id) || 0)}</strong></p>)}
                 </div>
               )}
-              <p className="spending-axis-caption">Day of month · each member’s actual expense share</p>
-              <SpendingLegend payers={activePayers} colorById={colorById} />
+              <p className="spending-axis-caption">{personalOnly
+                ? 'Day of month · your expense share across all groups and friends'
+                : 'Day of month · each member’s actual expense share'}</p>
+              {personalOnly
+                ? <div className="spending-chart-legend"><span className="spending-average-label"><i style={{ background: userColor, height: 8, width: 8, borderRadius: 2 }} />{userName} · your share</span></div>
+                : <SpendingLegend payers={pieData} colorById={colorById} />}
             </div>
           </div>
           <div className="spending-chart-card spending-monthly-card">
             <div className="spending-chart-title">
-              <div><h4>Monthly expenditure</h4><p>Amount paid by each member · last {monthlyKeys.length} months</p></div>
+              <div>
+                <h4>{personalOnly ? 'Your monthly expenditure' : 'Monthly expenditure'}</h4>
+                <p>{personalOnly
+                  ? `Your share across all groups and friends · last ${monthlyKeys.length} months`
+                  : `Amount paid by each member · last ${monthlyKeys.length} months`}</p>
+              </div>
               <strong>{activeCurrency}</strong>
             </div>
             {monthlyKeys.length ? (
               <>
                 <div className="spending-monthly-scroll">
                   <div className="spending-monthly-chart-wrap">
-                    <svg className="spending-monthly-chart" viewBox="0 0 740 260" role="img" aria-label="Monthly actual expense share by group member">
+                    <svg className="spending-monthly-chart" viewBox="0 0 740 260" role="img" aria-label={personalOnly ? 'Your monthly expense share across all groups and friends' : 'Monthly actual expense share by group member'}>
                     {[0, 1, 2, 3].map((tick) => {
                       const value = maximumMonthly * (3 - tick) / 3;
                       const y = chart.bottom - (value / maximumMonthly) * chartHeight;
@@ -360,10 +476,10 @@ function SpendingInsights({ transactions, members }) {
                     })}
                     {monthlyKeys.map((key, monthIndex) => {
                       const xCenter = chart.left + monthlySlot * monthIndex + monthlySlot / 2;
-                      const totals = monthlyTotals.get(key) || new Map();
-                      const plottedPayers = monthlyPayers.filter((payer) => (totals.get(payer.id) || 0) > 0);
-                      const groupWidth = plottedPayers.length * payerBarWidth;
                       const total = monthlyTotalFor(key);
+                      const totalsByMember = monthlyMemberTotals.get(key) || new Map();
+                      const plottedPayers = monthlyPayers.filter((payer) => (totalsByMember.get(payer.id) || 0) > 0);
+                      const groupWidth = plottedPayers.length * payerBarWidth;
                       return (
                         <g
                           key={key}
@@ -372,11 +488,13 @@ function SpendingInsights({ transactions, members }) {
                           onMouseLeave={() => setHoveredMonth('')}
                         >
                           {visibleMonth === key && <rect className="spending-selection-band" x={chart.left + monthlySlot * monthIndex} y={chart.top} width={monthlySlot} height={chart.bottom - chart.top} />}
-                          {plottedPayers.map((payer, payerIndex) => {
-                            const amount = totals.get(payer.id) || 0;
-                            const height = (amount / maximumMonthly) * chartHeight;
-                            return <rect key={payer.id} x={xCenter - groupWidth / 2 + payerIndex * payerBarWidth} y={chart.bottom - height} width={Math.max(2, payerBarWidth - 2)} height={height} rx="2" fill={colorById.get(payer.id)}><title>{monthLabel(key)} · {payer.name}'s actual share: {activeCurrency} {formatAmount(amount)}</title></rect>;
-                          })}
+                          {personalOnly
+                            ? total > 0 && <rect x={xCenter - 12} y={chart.bottom - (total / maximumMonthly) * chartHeight} width="24" height={(total / maximumMonthly) * chartHeight} rx="3" fill={userColor}><title>{monthLabel(key)} · your expense share: {activeCurrency} {formatAmount(total)}</title></rect>
+                            : plottedPayers.map((payer, payerIndex) => {
+                              const amount = totalsByMember.get(payer.id) || 0;
+                              const height = (amount / maximumMonthly) * chartHeight;
+                              return <rect key={payer.id} x={xCenter - groupWidth / 2 + payerIndex * payerBarWidth} y={chart.bottom - height} width={Math.max(2, payerBarWidth - 2)} height={height} rx="2" fill={colorById.get(payer.id)}><title>{monthLabel(key)} · {payer.name}'s actual share: {activeCurrency} {formatAmount(amount)}</title></rect>;
+                            })}
                           <rect
                             className="spending-chart-hit-area"
                             x={chart.left + monthlySlot * monthIndex}
@@ -386,7 +504,9 @@ function SpendingInsights({ transactions, members }) {
                             fill="transparent"
                             role="button"
                             tabIndex="0"
-                            aria-label={`${monthLabel(key)} total actual expense share ${activeCurrency} ${formatAmount(total)}. Click to pin details.`}
+                            aria-label={personalOnly
+                              ? `${monthLabel(key)} your expense share ${activeCurrency} ${formatAmount(total)}. Click to pin details.`
+                              : `${monthLabel(key)} total actual expense share ${activeCurrency} ${formatAmount(total)}. Click to pin details.`}
                             onFocus={() => setHoveredMonth(key)}
                             onBlur={() => setHoveredMonth('')}
                             onClick={() => setSelectedMonth((current) => current === key ? '' : key)}
@@ -411,15 +531,17 @@ function SpendingInsights({ transactions, members }) {
                     {visibleMonth && monthlyTotals.has(visibleMonth) && (
                       <div className="spending-chart-tooltip spending-monthly-tooltip" role="status">
                         <div><strong>{monthLabel(visibleMonth)}</strong><b>{activeCurrency} {formatAmount(monthlyTotalFor(visibleMonth))}</b></div>
-                        {monthlyPayers.map((payer) => (
-                          <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(monthlyTotals.get(visibleMonth)?.get(payer.id) || 0)}</strong></p>
-                        ))}
+                        {personalOnly
+                          ? <p><span style={{ color: userColor }}>{userName} · your share</span><strong>{activeCurrency} {formatAmount(monthlyTotalFor(visibleMonth))}</strong></p>
+                          : monthlyPayers.map((payer) => <p key={payer.id}><span style={{ color: colorById.get(payer.id) }}>{payer.name}</span><strong>{activeCurrency} {formatAmount(monthlyMemberTotals.get(visibleMonth)?.get(payer.id) || 0)}</strong></p>)}
                       </div>
                     )}
                   </div>
                 </div>
                 <div className="spending-chart-legend">
-                  <SpendingLegend payers={monthlyPayers} colorById={colorById} />
+                  {personalOnly
+                    ? <span className="spending-average-label"><i style={{ background: userColor, height: 8, width: 8, borderRadius: 2 }} />{userName} · your share</span>
+                    : <SpendingLegend payers={monthlyPayers} colorById={colorById} />}
                   <span className="spending-average-label"><i />Average monthly spend</span>
                 </div>
                 <div className="spending-monthly-totals">
@@ -680,7 +802,7 @@ function App() {
 function Brand() {
   return (
     <div className="brand">
-      <span className="brand-mark">÷</span> splitcare
+      <span className="brand-mark">÷</span><span className="brand-name">splitcare</span>
     </div>
   );
 }
@@ -1043,6 +1165,10 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
 function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
+  const [dashboardBalanceSummary, setDashboardBalanceSummary] = useState(null);
+  const [dashboardBalancesBusy, setDashboardBalancesBusy] = useState(true);
+  const [dashboardBalancesError, setDashboardBalancesError] = useState('');
+  const dashboardBalanceRequestRef = useRef(0);
   const [personalGroup, setPersonalGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [friendActivities, setFriendActivities] = useState([]);
@@ -1201,6 +1327,24 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       })
       .catch((error) => setFormMessage(error.message));
   }, [accessToken]);
+
+  useEffect(() => {
+    let active = true;
+    const requestId = ++dashboardBalanceRequestRef.current;
+    setDashboardBalancesBusy(true);
+    setDashboardBalancesError('');
+    apiRequest('/groups/balances/summary', { headers: authHeaders })
+      .then((summary) => {
+        if (active && requestId === dashboardBalanceRequestRef.current) setDashboardBalanceSummary(summary);
+      })
+      .catch((error) => {
+        if (active && requestId === dashboardBalanceRequestRef.current) setDashboardBalancesError(error.message);
+      })
+      .finally(() => {
+        if (active && requestId === dashboardBalanceRequestRef.current) setDashboardBalancesBusy(false);
+      });
+    return () => { active = false; };
+  }, [accessToken, groups, expenses, friendActivities, groupTransactions, user.defaultCurrency]);
 
   useEffect(() => {
     if (activePage !== 'recent') return;
@@ -2086,13 +2230,22 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   ].sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
   const recentActivity = [...groupActivity, ...friendActivities]
     .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
+  const dashboardSpendingTransactions = [
+    ...expenses.filter((transaction) => transaction.type === 'EXPENSE'),
+    ...friendActivities.filter((transaction) => transaction.isDirect && transaction.type === 'EXPENSE'),
+  ];
+  const dashboardSpendingMembers = [
+    user,
+    ...friends,
+    ...groups.flatMap((group) => group.members || []),
+  ];
 
   return (
     <main className="dashboard-page">
       <nav className="dashboard-nav">
         <Brand />
         <div className="nav-links">
-          <button className={activePage === 'overview' ? 'active' : ''} type="button" onClick={() => setActivePage('overview')}>Dashboard</button>
+          <button className={`dashboard-nav-link ${activePage === 'overview' ? 'active' : ''}`} type="button" onClick={() => setActivePage('overview')}>Dashboard</button>
           <button className={activePage === 'recent' ? 'active' : ''} type="button" onClick={() => setActivePage('recent')}>Recent activity</button>
           <button className={activePage === 'all-expenses' ? 'active' : ''} type="button" onClick={() => setActivePage('all-expenses')}>All expenses</button>
           <button className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => setActivePage('personal')}>Personal expenses</button>
@@ -2484,17 +2637,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           {formMessage && (
             <p className="error-message dashboard-message">{formMessage}</p>
           )}
-          <div className="stat-grid">
+          <div className="stat-grid dashboard-stat-grid">
             <Stat
               label="TRACKED EXPENSES"
               value={expenses.filter((expense) => !['ACTIVITY', 'SETTLEMENT'].includes(expense.type)).length.toString().padStart(2, "0")}
               note="from your connected account"
               highlight
-            />
-            <Stat
-              label="ACTIVE GROUPS"
-              value={groups.length.toString().padStart(2, "0")}
-              note="shared spaces"
             />
             <Stat
               label="FRIENDS"
@@ -2505,27 +2653,44 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           <div className="balance-strip">
             <Stat
               label="TOTAL BALANCE"
-              value="₹0.00"
-              note="all groups"
+              value={dashboardBalancesBusy
+                ? 'Loading…'
+                : dashboardBalanceSummary
+                  ? `${dashboardBalanceSummary.currency} ${Number(dashboardBalanceSummary.totalBalance).toFixed(2)}`
+                  : '—'}
+              note="net across groups and friends"
               highlight
             />
-            <Stat label="YOU OWE" value="₹0.00" note="across your groups" />
+            <Stat
+              label="YOU OWE"
+              value={dashboardBalancesBusy
+                ? 'Loading…'
+                : dashboardBalanceSummary
+                  ? `${dashboardBalanceSummary.currency} ${Number(dashboardBalanceSummary.youOwe).toFixed(2)}`
+                  : '—'}
+              note="across your groups and friends"
+            />
             <Stat
               label="YOU ARE OWED"
-              value="₹0.00"
-              note="across your groups"
+              value={dashboardBalancesBusy
+                ? 'Loading…'
+                : dashboardBalanceSummary
+                  ? `${dashboardBalanceSummary.currency} ${Number(dashboardBalanceSummary.youAreOwed).toFixed(2)}`
+                  : '—'}
+              note="across your groups and friends"
             />
           </div>
+          {dashboardBalancesError && <p className="error-message">{dashboardBalancesError}</p>}
           <div className="balance-columns">
             <Panel title="You owe" eyebrow="OUTGOING BALANCES">
-              {groups.length ? (
-                groups
-                  .slice(0, 3)
-                  .map((group) => (
+              {dashboardBalancesBusy ? (
+                <p className="empty-state">Loading your balances…</p>
+              ) : dashboardBalanceSummary?.outgoingBalances.length ? (
+                dashboardBalanceSummary.outgoingBalances.map((balance) => (
                     <BalanceRow
-                      key={group._id}
-                      name={group.name}
-                      amount="₹0.00"
+                      key={balance.id}
+                      name={balance.name}
+                      amount={`${dashboardBalanceSummary.currency} ${Number(balance.youOwe).toFixed(2)}`}
                       tone="coral"
                     />
                   ))
@@ -2534,14 +2699,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               )}
             </Panel>
             <Panel title="You are owed" eyebrow="INCOMING BALANCES">
-              {groups.length ? (
-                groups
-                  .slice(0, 3)
-                  .map((group) => (
+              {dashboardBalancesBusy ? (
+                <p className="empty-state">Loading your balances…</p>
+              ) : dashboardBalanceSummary?.incomingBalances.length ? (
+                dashboardBalanceSummary.incomingBalances.map((balance) => (
                     <BalanceRow
-                      key={group._id}
-                      name={group.name}
-                      amount="₹0.00"
+                      key={balance.id}
+                      name={balance.name}
+                      amount={`${dashboardBalanceSummary.currency} ${Number(balance.youAreOwed).toFixed(2)}`}
                       tone="mint"
                     />
                   ))
@@ -2550,31 +2715,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               )}
             </Panel>
           </div>
-          <div className="content-grid">
-            <Panel title="Active groups" eyebrow="Your spaces">
-              {groups.length ? (
-                groups.map((group) => (
-                  <Group
-                    key={group._id}
-                    initials={group.name.slice(0, 2).toUpperCase()}
-                    coverImageUrl={group.coverImageUrl}
-                    name={group.name}
-                    groupCode={group.groupCode}
-                    amount={`${group.members?.length || 0} members`}
-                    note="connected"
-                    tone="coral"
-                    onSimplify={() => simplifyGroup(group._id)}
-                    onLeave={() => leaveGroup(group._id)}
-                    onOpen={() => openGroupDetails(group)}
-                  />
-                ))
-              ) : (
-                <p className="empty-state">
-                  No groups yet. Create your first shared space.
-                </p>
-              )}
-            </Panel>
-          </div>
+          <SpendingInsights
+            transactions={dashboardSpendingTransactions}
+            members={dashboardSpendingMembers}
+            userId={user._id}
+            personalOnly
+            balanceSummary={dashboardBalanceSummary}
+            balanceSummaryBusy={dashboardBalancesBusy}
+            scopeLabel="ALL YOUR SPENDING"
+          />
           </>
           )}
           {showGroupForm && (
@@ -3581,7 +3730,7 @@ function GroupDetails({
                     })}
                   </div>
                 ) : <p className="empty-state">You’re settled up in this group.</p>}
-                <SpendingInsights transactions={transactions} members={group.members || []} />
+                <SpendingInsights transactions={transactions} members={group.members || []} userId={user._id} />
                 <div className="settlement-plan">
                   <h4>Suggested settlements</h4>
                   <button className="group-inline-action" onClick={() => openSettlementForm()}>Record a payment</button>
@@ -4199,9 +4348,9 @@ function BalanceRow({ name, amount, tone }) {
       </span>
       <div>
         <b>{name}</b>
-        <small>settled balance</small>
+        <small>current balance</small>
       </div>
-      <strong>{amount}</strong>
+      <strong className={tone === 'coral' ? 'balance-amount-owed' : ''}>{amount}</strong>
     </div>
   );
 }
