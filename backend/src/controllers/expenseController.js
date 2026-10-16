@@ -12,7 +12,7 @@ const parseArray = (value, label) => {
   }
 };
 
-const validateExpenseOptions = (body) => {
+export const validateExpenseOptions = (body) => {
   const allowedCategories = ['Entertainment', 'Food and drink', 'Home', 'Life', 'Transportation', 'Uncategorized', 'Utilities'];
   if (!allowedCategories.includes(body.category || 'Uncategorized')) {
     throw Object.assign(new Error('Choose a supported expense category'), { statusCode: 400 });

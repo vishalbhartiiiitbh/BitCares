@@ -3020,6 +3020,26 @@ input::placeholder {
     min-width: 0;
 }
 
+.friend-profile-open {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.friend-profile-open:hover .friend-profile-identity h2 {
+    color: #388d79;
+}
+
+.friend-profile-open:focus-visible,
+.side-friend-link:focus-visible {
+    outline: 2px solid #43a990;
+    outline-offset: 3px;
+}
+
 .friend-profile-photo {
     display: grid;
     width: 58px;
@@ -3087,6 +3107,289 @@ input::placeholder {
 
 .friend-profile-remove:hover {
     background: #fbf1ee;
+}
+
+.side-friend-link {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.friend-history-page {
+    display: grid;
+    gap: 18px;
+    color: #19231d;
+}
+
+.friend-history-heading,
+.friend-history-person,
+.friend-history-actions,
+.friend-history-section-heading,
+.friend-balance-group-title {
+    display: flex;
+    align-items: center;
+}
+
+.friend-history-heading {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 14px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #dedbd0;
+}
+
+.friend-history-back {
+    padding: 8px 10px;
+    border: 1px solid #e2dfd5;
+    background: #fff;
+    color: #556158;
+    font-size: 11px;
+}
+
+.friend-history-person {
+    flex: 1;
+    gap: 12px;
+    min-width: 180px;
+}
+
+.friend-history-person img,
+.friend-history-person > span {
+    display: grid;
+    width: 46px;
+    height: 46px;
+    place-items: center;
+    border-radius: 50%;
+    background: #d8ee4c;
+    color: #19231d;
+    font-size: 17px;
+    font-weight: 800;
+    object-fit: cover;
+}
+
+.friend-history-person h1 {
+    margin: 0 0 3px;
+    font-size: 24px;
+    letter-spacing: -.05em;
+}
+
+.friend-history-person small {
+    color: #828b82;
+    font-size: 11px;
+}
+
+.friend-history-actions {
+    gap: 8px;
+}
+
+.friend-history-balance {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 15px;
+    border: 1px solid #e2dfd5;
+    background: #fff;
+}
+
+.friend-history-balance > div {
+    display: grid;
+    gap: 4px;
+}
+
+.friend-history-balance > div span {
+    color: #7b857c;
+    font-size: 11px;
+}
+
+.friend-history-balance > div strong {
+    color: #3ca88f;
+    font-size: 21px;
+}
+
+.friend-history-balance > div:nth-child(2) strong {
+    color: #e7624e;
+}
+
+.friend-history-balance > small {
+    grid-column: 1 / -1;
+    color: #92998f;
+    font-size: 10px;
+}
+
+.friend-history-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr);
+    align-items: start;
+    gap: 18px;
+}
+
+.friend-history-groups,
+.friend-history-settlement,
+.friend-history-activity {
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid #e2dfd5;
+    background: #fff;
+}
+
+.friend-history-section-heading {
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.friend-history-section-heading .eyebrow {
+    margin-bottom: 4px;
+}
+
+.friend-history-section-heading h2 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: -.04em;
+}
+
+.friend-history-section-heading > span {
+    color: #858d84;
+    font-size: 10px;
+}
+
+.friend-balance-group {
+    padding: 10px 0;
+    border-top: 1px solid #eeece5;
+}
+
+.friend-balance-group-title {
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 7px;
+    font-size: 12px;
+}
+
+.friend-balance-group-title > div,
+.friend-balance-group-title > span {
+    display: grid;
+    gap: 3px;
+}
+
+.friend-balance-group-title > span {
+    text-align: right;
+}
+
+.friend-balance-group-title small {
+    color: #828b82;
+    font-size: 9px;
+}
+
+.friend-balance-group-title > span strong {
+    color: #3b5145;
+    font-size: 10px;
+}
+
+.friend-balance-row {
+    display: grid;
+    grid-template-columns: 18px minmax(90px, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 0;
+    color: #737d74;
+    font-size: 10px;
+}
+
+.friend-balance-row input {
+    accent-color: #43a990;
+}
+
+.friend-balance-row strong {
+    color: #424d44;
+    font-size: 10px;
+}
+
+.friend-balance-row small {
+    color: #92998f;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+.friend-ledger-settled {
+    margin: 0;
+    color: #879087;
+    font-size: 10px;
+}
+
+.friend-history-settlement form {
+    display: grid;
+    gap: 12px;
+}
+
+.friend-history-settlement form > label {
+    display: grid;
+    gap: 5px;
+    color: #566157;
+    font-size: 11px;
+}
+
+.friend-history-settlement form > label input,
+.friend-history-settlement form > label select {
+    min-height: 36px;
+    padding: 8px 10px;
+    border: 1px solid #dfe5df;
+    background: #fff;
+    color: #46534a;
+    font: inherit;
+    font-size: 11px;
+}
+
+.friend-history-settlement form > small {
+    margin-top: -9px;
+    color: #828b82;
+    font-size: 10px;
+}
+
+.friend-settlement-modes {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid #e9e7df;
+    color: #59645a;
+    font-size: 10px;
+}
+
+.friend-settlement-modes legend {
+    padding: 0 4px;
+    color: #323e35;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.friend-settlement-modes label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.friend-settlement-modes input {
+    accent-color: #43a990;
+}
+
+.friend-history-activity {
+    overflow: hidden;
+}
+
+.friend-history-activity .group-activity-list {
+    margin: 0 -16px -16px;
+    width: calc(100% + 32px);
+}
+
+.friend-history-activity .group-activity-month {
+    min-width: 580px;
 }
 
 .friends-empty-state {
@@ -4231,7 +4534,37 @@ input::placeholder {
     clip-path: inset(50%);
 }
 
+@media (max-width: 980px) {
+    .friend-history-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
 @media (max-width: 560px) {
+    .friend-history-heading {
+        align-items: flex-start;
+    }
+
+    .friend-history-actions {
+        width: 100%;
+    }
+
+    .friend-history-actions > button {
+        flex: 1;
+    }
+
+    .friend-balance-row {
+        grid-template-columns: 18px minmax(0, 1fr) auto;
+    }
+
+    .friend-balance-row small {
+        grid-column: 2 / 4;
+    }
+
+    .friend-history-activity {
+        overflow-x: auto;
+    }
+
     .personal-expenses-page .welcome-row,
     .personal-expenses-summary,
     .personal-expense-month > header {

@@ -35,10 +35,13 @@ export const recordSettlement = async ({
 
   return withTransaction(async (client) => {
     const group = await client.query(
-      'SELECT id, simplify_debts AS "simplifyDebts" FROM groups WHERE id = $1 FOR UPDATE',
+      'SELECT id, simplify_debts AS "simplifyDebts", is_friend_ledger AS "isFriendLedger" FROM groups WHERE id = $1 FOR UPDATE',
       [groupId],
     );
     if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+    if (group.rows[0].isFriendLedger) {
+      throw Object.assign(new Error('Use the friend history page to settle a private friend ledger'), { statusCode: 404 });
+    }
 
     const members = await client.query(
       'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2::uuid[])',

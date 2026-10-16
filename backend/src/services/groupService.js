@@ -81,15 +81,16 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 	});
 	return hydrate(created.rows[0], client);
 });
-export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.is_personal AS "isPersonal", g.cover_image_url AS "coverImageUrl", g.simplify_debts AS "simplifyDebts", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
+export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.is_personal AS "isPersonal", g.cover_image_url AS "coverImageUrl", g.simplify_debts AS "simplifyDebts", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 AND NOT g.is_friend_ledger ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
 export const addGroupMember = async ({ groupId, requesterId, identifier }) => withTransaction(async (client) => {
 	const groupResult = await client.query(
-		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", created_at AS "createdAt" FROM groups WHERE id = $1',
+		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger", created_at AS "createdAt" FROM groups WHERE id = $1',
 		[groupId],
 	);
 	const group = groupResult.rows[0];
 	if (!group) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
 	if (group.isPersonal) throw Object.assign(new Error('Personal Expenses can only contain your account'), { statusCode: 400 });
+	if (group.isFriendLedger) throw Object.assign(new Error('This private friend ledger cannot be managed as a group'), { statusCode: 400 });
 
 	const requester = await client.query(
 		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
@@ -129,6 +130,13 @@ export const addGroupMember = async ({ groupId, requesterId, identifier }) => wi
 	return hydrate(group, client);
 });
 export const getGroupBalances = async (groupId, userId) => {
+	const group = await query(
+		'SELECT is_friend_ledger FROM groups WHERE id = $1',
+		[groupId],
+	);
+	if (group.rows[0]?.is_friend_ledger) {
+		throw Object.assign(new Error('Use the friend history page to view this private ledger'), { statusCode: 404 });
+	}
 	const transfers = await simplifyDebts(groupId, userId);
 	const personalTransfers = transfers.filter((transfer) => transfer.from === userId || transfer.to === userId);
 	if (!personalTransfers.length) return [];
@@ -155,7 +163,7 @@ export const getGroupBalances = async (groupId, userId) => {
 export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts, coverImageUrl, removeCoverImage = false }) => withTransaction(async (client) => {
 	const membership = await client.query(
 		`SELECT g.id, g.name, g.group_code AS "groupCode", g.created_by AS "createdBy",
-		        g.is_personal AS "isPersonal", g.cover_image_url AS "coverImageUrl",
+		        g.is_personal AS "isPersonal", g.is_friend_ledger AS "isFriendLedger", g.cover_image_url AS "coverImageUrl",
 		        g.simplify_debts AS "simplifyDebts", g.created_at AS "createdAt"
 		 FROM groups g JOIN group_members gm ON gm.group_id = g.id
 		 WHERE g.id = $1 AND gm.user_id = $2 FOR UPDATE OF g`,
@@ -164,6 +172,7 @@ export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts
 	if (!membership.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
 	const group = membership.rows[0];
 	if (group.isPersonal) throw Object.assign(new Error('Personal Expenses settings cannot be changed'), { statusCode: 400 });
+	if (group.isFriendLedger) throw Object.assign(new Error('This private friend ledger cannot be changed as a group'), { statusCode: 400 });
 	const nextName = name === undefined ? group.name : name.trim();
 	const nextSimplifyDebts = simplifyDebts === undefined ? group.simplifyDebts : simplifyDebts;
 	const nextCoverImageUrl = coverImageUrl || (removeCoverImage ? null : group.coverImageUrl);
@@ -198,11 +207,12 @@ export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts
 
 export const removeGroupMember = async ({ groupId, requesterId, memberId }) => withTransaction(async (client) => {
 	const group = await client.query(
-		'SELECT id, created_by AS "createdBy", is_personal AS "isPersonal" FROM groups WHERE id = $1 FOR UPDATE',
+		'SELECT id, created_by AS "createdBy", is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger" FROM groups WHERE id = $1 FOR UPDATE',
 		[groupId],
 	);
 	if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
 	if (group.rows[0].isPersonal) throw Object.assign(new Error('Personal Expenses members cannot be removed'), { statusCode: 400 });
+	if (group.rows[0].isFriendLedger) throw Object.assign(new Error('Members cannot be removed from a private friend ledger'), { statusCode: 400 });
 	const requester = await client.query(
 		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
 		[groupId, requesterId],
@@ -245,13 +255,14 @@ export const removeGroupMember = async ({ groupId, requesterId, memberId }) => w
 export const joinGroupByCode = async ({ groupCode: code, userId }) => withTransaction(async (client) => {
 	const result = await client.query(
 		`SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy",
-		        is_personal AS "isPersonal", created_at AS "createdAt"
+		        is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger", created_at AS "createdAt"
 		 FROM groups WHERE group_code = $1`,
 		[code.trim().toUpperCase()],
 	);
 	if (!result.rowCount) throw Object.assign(new Error('Group code not found'), { statusCode: 404 });
 	const group = result.rows[0];
 	if (group.isPersonal) throw Object.assign(new Error('Personal Expenses is private to its owner'), { statusCode: 403 });
+	if (group.isFriendLedger) throw Object.assign(new Error('This private friend ledger cannot be joined with a group code'), { statusCode: 403 });
 	const joined = await client.query(
 		'INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING user_id',
 		[group._id, userId],
@@ -279,9 +290,10 @@ const ensureGroupIsSettled = async (client, groupId) => {
 };
 
 export const leaveGroup = async (groupId, userId) => withTransaction(async (client) => {
-	const group = await client.query('SELECT id, is_personal FROM groups WHERE id = $1 FOR UPDATE', [groupId]);
+	const group = await client.query('SELECT id, is_personal, is_friend_ledger FROM groups WHERE id = $1 FOR UPDATE', [groupId]);
 	if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
 	if (group.rows[0].is_personal) throw Object.assign(new Error('Personal Expenses cannot be left'), { statusCode: 400 });
+	if (group.rows[0].is_friend_ledger) throw Object.assign(new Error('A private friend ledger cannot be left'), { statusCode: 400 });
 
 	const membership = await client.query(
 		'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
@@ -309,7 +321,7 @@ export const leaveGroup = async (groupId, userId) => withTransaction(async (clie
 
 export const deleteGroup = async (groupId, userId) => withTransaction(async (client) => {
 	const group = await client.query(
-		'SELECT id, is_personal FROM groups WHERE id = $1 AND created_by = $2 FOR UPDATE',
+		'SELECT id, is_personal, is_friend_ledger FROM groups WHERE id = $1 AND created_by = $2 FOR UPDATE',
 		[groupId, userId],
 	);
 	if (!group.rowCount) {
@@ -318,6 +330,7 @@ export const deleteGroup = async (groupId, userId) => withTransaction(async (cli
 		throw Object.assign(new Error('Only the group creator can delete this group'), { statusCode: 403 });
 	}
 	if (group.rows[0].is_personal) throw Object.assign(new Error('Personal Expenses cannot be deleted'), { statusCode: 400 });
+	if (group.rows[0].is_friend_ledger) throw Object.assign(new Error('A private friend ledger cannot be deleted as a group'), { statusCode: 400 });
 
 	await ensureGroupIsSettled(client, groupId);
 	await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
@@ -329,6 +342,7 @@ export const getGroupWhiteboard = async (groupId, userId) => {
 		`SELECT wb.content, wb.updated_at AS "updatedAt",
 		        wb.updated_by AS "updatedBy", u.fullnamae AS "updatedByName"
 		 FROM group_members gm
+		 JOIN groups g ON g.id = gm.group_id AND NOT g.is_friend_ledger
 		 LEFT JOIN group_whiteboards wb ON wb.group_id = gm.group_id
 		 LEFT JOIN users u ON u.id = wb.updated_by
 		 WHERE gm.group_id = $1 AND gm.user_id = $2`,
@@ -345,7 +359,8 @@ export const getGroupWhiteboard = async (groupId, userId) => {
 
 export const saveGroupWhiteboard = async ({ groupId, userId, content }) => withTransaction(async (client) => {
 	const membership = await client.query(
-		`SELECT g.name AS "groupName", u.fullnamae AS "updatedByName"
+		`SELECT g.name AS "groupName", g.is_friend_ledger AS "isFriendLedger",
+		        u.fullnamae AS "updatedByName"
 		 FROM group_members gm
 		 JOIN groups g ON g.id = gm.group_id
 		 JOIN users u ON u.id = gm.user_id
@@ -353,6 +368,7 @@ export const saveGroupWhiteboard = async ({ groupId, userId, content }) => withT
 		[groupId, userId],
 	);
 	if (!membership.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
+	if (membership.rows[0].isFriendLedger) throw Object.assign(new Error('A private friend ledger has no group whiteboard'), { statusCode: 404 });
 
 	const result = await client.query(
 		`INSERT INTO group_whiteboards (group_id, content, updated_by, updated_at)

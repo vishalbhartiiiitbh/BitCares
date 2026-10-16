@@ -49,7 +49,7 @@ export const createPaymentRequest = async ({
        FROM groups g
        JOIN group_members requester ON requester.group_id = g.id AND requester.user_id = $2
        JOIN group_members member ON member.group_id = g.id AND member.user_id = $3
-       WHERE g.id = $1 AND NOT g.is_personal`,
+       WHERE g.id = $1 AND NOT g.is_personal AND NOT g.is_friend_ledger`,
       [groupId, requesterId, memberId],
     );
     if (!membership.rowCount) {

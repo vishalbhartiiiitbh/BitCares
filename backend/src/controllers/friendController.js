@@ -1,4 +1,23 @@
 import { query, withTransaction } from '../db/index.js';
+import {
+  createFriendExpense as addFriendExpense,
+  getFriendHistory,
+  settleFriendBalances,
+} from '../services/friendLedgerService.js';
+import { deleteExpense, updateExpense } from '../services/expenseService.js';
+import { validateExpenseOptions } from './expenseController.js';
+
+const parseArray = (value, label) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') throw Object.assign(new Error(`${label} must be a list`), { statusCode: 400 });
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    // Use the same client-facing validation error for malformed JSON and non-list JSON.
+  }
+  throw Object.assign(new Error(`${label} must be a valid list`), { statusCode: 400 });
+};
 
 const friendKey = (firstId, secondId) => [firstId, secondId].sort();
 
@@ -11,6 +30,75 @@ export const listFriends = async (req, res) => {
     [req.user._id],
   );
   res.json({ data: result.rows });
+};
+
+export const friendHistory = async (req, res) => {
+  res.json({ data: await getFriendHistory(req.user._id, req.params.friendId) });
+};
+
+export const createFriendExpense = async (req, res) => {
+  validateExpenseOptions(req.body);
+  const expense = await addFriendExpense({
+    userId: req.user._id,
+    friendId: req.params.friendId,
+    expense: {
+      ...req.body,
+      actorId: req.user._id,
+      participants: parseArray(req.body.participants, 'Participants'),
+      values: req.body.values ? parseArray(req.body.values, 'Split values') : undefined,
+      items: req.body.items ? parseArray(req.body.items, 'Itemized expenses') : undefined,
+      paidBy: req.body.paidBy || req.user._id,
+      proofBuffer: req.file?.buffer || null,
+      type: req.body.type === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'EXPENSE',
+      category: req.body.category || 'Uncategorized',
+      subcategory: req.body.subcategory || null,
+    },
+  });
+  res.status(201).json({ data: expense });
+};
+
+export const updateFriendExpense = async (req, res) => {
+  validateExpenseOptions(req.body);
+  const expense = await updateExpense({
+    ...req.body,
+    expenseId: req.params.expenseId,
+    editorId: req.user._id,
+    friendId: req.params.friendId,
+    participants: parseArray(req.body.participants, 'Participants'),
+    values: req.body.values ? parseArray(req.body.values, 'Split values') : undefined,
+    items: req.body.items ? parseArray(req.body.items, 'Itemized expenses') : [],
+    paidBy: req.body.paidBy,
+    proofBuffer: req.file?.buffer || null,
+    removePaymentProof: req.body.removePaymentProof === 'true',
+    category: req.body.category || 'Uncategorized',
+    subcategory: req.body.subcategory || null,
+  });
+  res.json({ data: expense });
+};
+
+export const deleteFriendExpense = async (req, res) => {
+  res.json({
+    data: await deleteExpense({
+      expenseId: req.params.expenseId,
+      userId: req.user._id,
+      friendId: req.params.friendId,
+    }),
+  });
+};
+
+export const settleFriend = async (req, res) => {
+  res.status(201).json({
+    data: await settleFriendBalances({
+      userId: req.user._id,
+      friendId: req.params.friendId,
+      payerId: req.body?.payerId,
+      amount: req.body?.amount,
+      currency: req.body?.currency,
+      mode: req.body?.mode,
+      selections: req.body?.selections,
+      note: req.body?.note || null,
+    }),
+  });
 };
 
 

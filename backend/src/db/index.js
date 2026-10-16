@@ -31,10 +31,12 @@ const connectDB = async () => {
       fullnamae VARCHAR(120) NOT NULL,
       phone TEXT,
       coverimage TEXT,
+      default_currency VARCHAR(3) NOT NULL DEFAULT 'INR',
       password TEXT NOT NULL,
       refresh_token TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS default_currency VARCHAR(3) NOT NULL DEFAULT 'INR';
 
     CREATE TABLE IF NOT EXISTS friendships (
       user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -66,11 +68,14 @@ const connectDB = async () => {
       created_by UUID NOT NULL REFERENCES users(id),
       simplify_debts BOOLEAN NOT NULL DEFAULT FALSE,
       is_personal BOOLEAN NOT NULL DEFAULT FALSE,
+      is_friend_ledger BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     ALTER TABLE groups
       ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE groups
+      ADD COLUMN IF NOT EXISTS is_friend_ledger BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS cover_image_url TEXT;
     ALTER TABLE groups
       ADD COLUMN IF NOT EXISTS simplify_debts BOOLEAN NOT NULL DEFAULT FALSE;
@@ -84,6 +89,14 @@ const connectDB = async () => {
       group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       PRIMARY KEY (group_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS friend_ledgers (
+      user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      user_high UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      group_id UUID NOT NULL UNIQUE REFERENCES groups(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_low, user_high),
+      CHECK (user_low < user_high)
     );
 
     ALTER TABLE group_members
@@ -151,6 +164,24 @@ const connectDB = async () => {
       payment_proof_url TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CHECK (paid_by <> paid_to)
+    );
+    CREATE TABLE IF NOT EXISTS friend_settlements (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      paid_by UUID NOT NULL REFERENCES users(id),
+      paid_to UUID NOT NULL REFERENCES users(id),
+      amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+      currency VARCHAR(3) NOT NULL,
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (paid_by <> paid_to)
+    );
+    CREATE TABLE IF NOT EXISTS friend_settlement_allocations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      settlement_id UUID NOT NULL REFERENCES friend_settlements(id) ON DELETE CASCADE,
+      group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+      currency VARCHAR(3) NOT NULL,
+      exchange_rate NUMERIC(18, 8) NOT NULL CHECK (exchange_rate > 0)
     );
     UPDATE notifications
        SET notification_type = 'PAYMENT_REQUEST'

@@ -16,14 +16,19 @@ const expenseSubcategories = {
   Utilities: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'],
 };
 
-export const listExpenses = async (groupId, userId, unlimited = false) => {
+export const listExpenses = async (groupId, userId, unlimited = false, includeFriendLedger = false) => {
   if (groupId) {
     const membership = await query(
-      'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+      `SELECT g.is_friend_ledger AS "isFriendLedger"
+       FROM group_members gm JOIN groups g ON g.id = gm.group_id
+       WHERE gm.group_id = $1 AND gm.user_id = $2`,
       [groupId, userId],
     );
     if (!membership.rowCount) {
       throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
+    }
+    if (membership.rows[0].isFriendLedger && !includeFriendLedger) {
+      throw Object.assign(new Error('Use the friend history page to view this private ledger'), { statusCode: 404 });
     }
   }
   const result = await query(
@@ -62,7 +67,7 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
 			: `WHERE (
 		          EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = e.group_id AND gm.user_id = $1)
 		          OR (g.is_personal AND g.created_by = $1)
-		        )`}
+		        ) AND NOT g.is_friend_ledger`}
      ORDER BY e.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
     [groupId || userId],
   );
@@ -79,7 +84,7 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
        JOIN group_members gm ON gm.group_id = a.group_id AND gm.user_id = $1
        JOIN groups g ON g.id = a.group_id
        JOIN users actor ON actor.id = a.actor_id
-       WHERE NOT g.is_personal
+       WHERE NOT g.is_personal AND NOT g.is_friend_ledger
        ORDER BY a.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
       [userId],
     );
@@ -98,7 +103,7 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
               recipient.username AS "paidToUsername", recipient.fullnamae AS "paidToName",
               '[]'::json AS splits
        FROM group_settlements s
-       JOIN groups g ON g.id = s.group_id AND NOT g.is_personal
+       JOIN groups g ON g.id = s.group_id AND NOT g.is_personal AND NOT g.is_friend_ledger
        JOIN group_members gm ON gm.group_id = s.group_id AND gm.user_id = $1
        JOIN users payer ON payer.id = s.paid_by
        JOIN users recipient ON recipient.id = s.paid_to
@@ -118,7 +123,7 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
             actor.username AS "paidByUsername", actor.fullnamae AS "paidByName",
             ARRAY[]::text[] AS "participantIds", '[]'::json AS splits, '[]'::json AS items
      FROM group_activity a
-     JOIN groups g ON g.id = a.group_id AND NOT g.is_personal
+     JOIN groups g ON g.id = a.group_id AND NOT g.is_personal${includeFriendLedger ? '' : ' AND NOT g.is_friend_ledger'}
      JOIN users actor ON actor.id = a.actor_id
      WHERE a.group_id = $1`,
     [groupId],
@@ -157,12 +162,23 @@ export const listPersonalExpenses = async (userId) => {
 
 export const addExpenseComment = async ({ expenseId, userId, content }) => withTransaction(async (client) => {
   const expense = await client.query(
-    `SELECT e.group_id AS "groupId", g.is_personal AS "isPersonal"
+    `SELECT e.group_id AS "groupId", g.is_personal AS "isPersonal",
+            g.is_friend_ledger AS "isFriendLedger"
      FROM expenses e JOIN groups g ON g.id = e.group_id
      WHERE e.id = $1 AND e.type <> 'SETTLEMENT'`,
     [expenseId],
   );
   if (!expense.rowCount) throw Object.assign(new Error('Expense not found'), { statusCode: 404 });
+  if (expense.rows[0].isFriendLedger) {
+    const friendship = await client.query(
+      `SELECT 1 FROM friend_ledgers fl
+       JOIN friendships f ON f.user_low = fl.user_low AND f.user_high = fl.user_high
+       WHERE fl.group_id = $1 AND (fl.user_low = $2 OR fl.user_high = $2)
+       FOR UPDATE OF f`,
+      [expense.rows[0].groupId, userId],
+    );
+    if (!friendship.rowCount) throw Object.assign(new Error('Friend not found'), { statusCode: 404 });
+  }
   const membership = await client.query(
     'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
     [expense.rows[0].groupId, userId],
@@ -191,7 +207,8 @@ export const addExpenseComment = async ({ expenseId, userId, content }) => withT
 export const deleteExpenseComment = async ({ commentId, userId }) => withTransaction(async (client) => {
   const comment = await client.query(
     `SELECT ec.expense_id AS "expenseId", e.group_id AS "groupId", e.description,
-            author.fullnamae AS "authorName", g.is_personal AS "isPersonal"
+            author.fullnamae AS "authorName", g.is_personal AS "isPersonal",
+            g.is_friend_ledger AS "isFriendLedger"
      FROM expense_comments ec
      JOIN expenses e ON e.id = ec.expense_id
      JOIN groups g ON g.id = e.group_id
@@ -201,6 +218,16 @@ export const deleteExpenseComment = async ({ commentId, userId }) => withTransac
     [commentId, userId],
   );
   if (!comment.rowCount) throw Object.assign(new Error('Comment not found or you cannot delete it'), { statusCode: 404 });
+  if (comment.rows[0].isFriendLedger) {
+    const friendship = await client.query(
+      `SELECT 1 FROM friend_ledgers fl
+       JOIN friendships f ON f.user_low = fl.user_low AND f.user_high = fl.user_high
+       WHERE fl.group_id = $1 AND (fl.user_low = $2 OR fl.user_high = $2)
+       FOR UPDATE OF f`,
+      [comment.rows[0].groupId, userId],
+    );
+    if (!friendship.rowCount) throw Object.assign(new Error('Comment not found or you cannot delete it'), { statusCode: 404 });
+  }
   const result = await client.query(
     `DELETE FROM expense_comments ec
      USING expenses e, group_members gm
@@ -310,6 +337,7 @@ const applyGroupBalances = async (client, { groupId, paidBy, currency, splits, m
 
 export const addExpense = async ({
   groupId = null,
+  friendId = null,
   actorId,
   paidBy,
   totalAmount,
@@ -392,6 +420,29 @@ export const addExpense = async ({
   if (isPersonal) groupId = (await ensurePersonalExpenseGroup(paidBy))._id;
   const expense = await withTransaction(async (client) => {
     if (!isPersonal) {
+      const group = await client.query(
+        'SELECT is_friend_ledger AS "isFriendLedger" FROM groups WHERE id = $1 FOR SHARE',
+        [groupId],
+      );
+      if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+      if (group.rows[0].isFriendLedger) {
+        if (!friendId) {
+          throw Object.assign(new Error('Use the friend history page to add an expense to this private ledger'), { statusCode: 404 });
+        }
+        const friendship = await client.query(
+          `SELECT 1 FROM friend_ledgers fl
+           JOIN friendships f ON f.user_low = fl.user_low AND f.user_high = fl.user_high
+           WHERE fl.group_id = $1
+             AND fl.user_low = LEAST($2::uuid, $3::uuid)
+             AND fl.user_high = GREATEST($2::uuid, $3::uuid)
+             AND ($2 = fl.user_low OR $2 = fl.user_high)
+           FOR UPDATE OF f`,
+          [groupId, actorId, friendId],
+        );
+        if (!friendship.rowCount) throw Object.assign(new Error('Friend not found'), { statusCode: 404 });
+      } else if (friendId) {
+        throw Object.assign(new Error('This expense is not in the selected friend ledger'), { statusCode: 404 });
+      }
       const allowed = await client.query(
         'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2::uuid[])',
         [groupId, [...new Set([paidBy, ...participants])]],
@@ -461,6 +512,7 @@ export const addExpense = async ({
 export const updateExpense = async ({
   expenseId,
   editorId,
+  friendId = null,
   description,
   totalAmount,
   currency,
@@ -485,6 +537,7 @@ export const updateExpense = async ({
               e.description, e.total_amount::text AS "totalAmount",
               e.currency, e.type, e.payment_proof_url AS "paymentProofUrl",
               g.name AS "groupName", g.is_personal AS "isPersonal",
+              g.is_friend_ledger AS "isFriendLedger",
               COALESCE((SELECT json_agg(json_build_object(
                 'userId', es.user_id::text,
                 'amountOwed', es.amount_owed::text,
@@ -506,6 +559,24 @@ export const updateExpense = async ({
     );
     if (!membership.rowCount) {
       throw Object.assign(new Error('Only group members can edit this expense'), { statusCode: 403 });
+    }
+    if (existing.isFriendLedger) {
+      if (!friendId) {
+        throw Object.assign(new Error('Use the friend history page to edit this private ledger expense'), { statusCode: 404 });
+      }
+      const friendship = await client.query(
+        `SELECT 1 FROM friend_ledgers fl
+         JOIN friendships f ON f.user_low = fl.user_low AND f.user_high = fl.user_high
+         WHERE fl.group_id = $1
+           AND fl.user_low = LEAST($2::uuid, $3::uuid)
+           AND fl.user_high = GREATEST($2::uuid, $3::uuid)
+           AND ($2 = fl.user_low OR $2 = fl.user_high)
+         FOR UPDATE OF f`,
+        [existing.groupId, editorId, friendId],
+      );
+      if (!friendship.rowCount) throw Object.assign(new Error('Friend not found'), { statusCode: 404 });
+    } else if (friendId) {
+      throw Object.assign(new Error('This expense is not in the selected friend ledger'), { statusCode: 404 });
     }
     if (existing.isPersonal && editorId !== existing.paidBy) {
       throw Object.assign(new Error('Only the account owner can edit a personal expense'), { statusCode: 403 });
@@ -591,13 +662,14 @@ export const updateExpense = async ({
   return updated;
 };
 
-export const deleteExpense = async ({ expenseId, userId }) => {
+export const deleteExpense = async ({ expenseId, userId, friendId = null }) => {
   const deleted = await withTransaction(async (client) => {
     const result = await client.query(
       `SELECT e.id AS "_id", e.group_id AS "groupId", e.description,
               e.total_amount::text AS "totalAmount", e.currency, e.type,
               e.paid_by AS "paidBy", e.payment_proof_url AS "paymentProofUrl",
               g.name AS "groupName", g.is_personal AS "isPersonal",
+              g.is_friend_ledger AS "isFriendLedger",
               COALESCE((SELECT json_agg(json_build_object(
                 'userId', es.user_id::text,
                 'amountOwed', es.amount_owed::text
@@ -614,6 +686,24 @@ export const deleteExpense = async ({ expenseId, userId }) => {
       [expense.groupId, userId],
     );
     if (!membership.rowCount) throw Object.assign(new Error('Only group members can delete this expense'), { statusCode: 403 });
+    if (expense.isFriendLedger) {
+      if (!friendId) {
+        throw Object.assign(new Error('Use the friend history page to delete this private ledger expense'), { statusCode: 404 });
+      }
+      const friendship = await client.query(
+        `SELECT 1 FROM friend_ledgers fl
+         JOIN friendships f ON f.user_low = fl.user_low AND f.user_high = fl.user_high
+         WHERE fl.group_id = $1
+           AND fl.user_low = LEAST($2::uuid, $3::uuid)
+           AND fl.user_high = GREATEST($2::uuid, $3::uuid)
+           AND ($2 = fl.user_low OR $2 = fl.user_high)
+         FOR UPDATE OF f`,
+        [expense.groupId, userId, friendId],
+      );
+      if (!friendship.rowCount) throw Object.assign(new Error('Friend not found'), { statusCode: 404 });
+    } else if (friendId) {
+      throw Object.assign(new Error('This expense is not in the selected friend ledger'), { statusCode: 404 });
+    }
     if (expense.isPersonal && expense.paidBy !== userId) {
       throw Object.assign(new Error('Only the account owner can delete a personal expense'), { statusCode: 403 });
     }

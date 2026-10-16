@@ -5,7 +5,7 @@ export const simplifyDebts = async (groupId, userId) => {
   const membership = await query(
     `SELECT g.simplify_debts AS "simplifyDebts"
      FROM group_members gm JOIN groups g ON g.id = gm.group_id
-     WHERE gm.group_id = $1 AND gm.user_id = $2`,
+     WHERE gm.group_id = $1 AND gm.user_id = $2 AND NOT g.is_friend_ledger`,
     [groupId, userId],
   );
   if (!membership.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });

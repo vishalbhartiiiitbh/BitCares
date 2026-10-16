@@ -790,6 +790,203 @@ function RecentActivityPage({ transactions, notifications, friendRequests, group
   );
 }
 
+function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, onBack, onAddExpense, onRefresh, onOpenExpense }) {
+  const [settlementMode, setSettlementMode] = useState('one');
+  const [payerId, setPayerId] = useState(userId);
+  const [selectedKeys, setSelectedKeys] = useState([]);
+  const [settlementAmount, setSettlementAmount] = useState('');
+  const [settlementNote, setSettlementNote] = useState('');
+  const [settlementBusy, setSettlementBusy] = useState(false);
+  const [settlementError, setSettlementError] = useState('');
+  const defaultCurrency = history?.defaultCurrency || 'INR';
+  const balanceItems = (history?.groups || []).flatMap((group) => group.balances.map((balance) => ({
+    ...balance,
+    groupId: group.groupId,
+    groupName: group.groupName,
+    isDirect: group.isDirect,
+    selectionKey: `${group.groupId}:${balance.currency}`,
+  })));
+  const selectedItems = balanceItems.filter((balance) => (
+    settlementMode === 'all' || selectedKeys.includes(balance.selectionKey)
+  ));
+  const eligibleItems = selectedItems.filter((balance) => {
+    const amount = Number(balance.convertedBalance);
+    return payerId === userId ? amount < 0 : amount > 0;
+  });
+  const maxAmount = eligibleItems.reduce((sum, balance) => sum + Math.abs(Number(balance.convertedBalance)), 0);
+  const friendOwes = balanceItems.filter((balance) => Number(balance.convertedBalance) > 0)
+    .reduce((sum, balance) => sum + Number(balance.convertedBalance), 0);
+  const userOwes = balanceItems.filter((balance) => Number(balance.convertedBalance) < 0)
+    .reduce((sum, balance) => sum + Math.abs(Number(balance.convertedBalance)), 0);
+
+  useEffect(() => {
+    setSettlementAmount(maxAmount > 0 ? maxAmount.toFixed(2) : '');
+  }, [maxAmount]);
+
+  const changeMode = (mode) => {
+    setSettlementMode(mode);
+    setSelectedKeys([]);
+    setSettlementError('');
+  };
+  const toggleBalance = (key) => setSelectedKeys((current) => {
+    if (current.includes(key)) return current.filter((item) => item !== key);
+    if (settlementMode === 'one') return [key];
+    return [...current, key];
+  });
+  const saveSettlement = async (event) => {
+    event.preventDefault();
+    setSettlementBusy(true);
+    setSettlementError('');
+    try {
+      await apiRequest(`/friends/${friend._id}/settlements`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          payerId,
+          amount: settlementAmount,
+          currency: defaultCurrency,
+          mode: settlementMode === 'all' ? 'all' : 'selected',
+          selections: settlementMode === 'all' ? [] : selectedItems.map((item) => ({
+            groupId: item.groupId,
+            currency: item.currency,
+          })),
+          note: settlementNote.trim() || null,
+        }),
+      });
+      setSettlementNote('');
+      await onRefresh();
+    } catch (requestError) {
+      setSettlementError(requestError.message);
+    } finally {
+      setSettlementBusy(false);
+    }
+  };
+
+  return (
+    <div className="friend-history-page">
+      <header className="friend-history-heading">
+        <button type="button" className="friend-history-back" onClick={onBack}>← Friends</button>
+        <div className="friend-history-person">
+          {friend.coverimage
+            ? <img src={friend.coverimage} alt="" />
+            : <span>{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
+          <div><h1>{friend.fullnamae || friend.username}</h1><small>@{friend.username}</small></div>
+        </div>
+        <div className="friend-history-actions">
+          <button type="button" className="quiet-button" onClick={onAddExpense}>＋ Add expense</button>
+          <button type="button" className="primary-action" onClick={() => {
+            setSettlementError('');
+            document.getElementById('friend-settlement-panel')?.scrollIntoView({ behavior: 'smooth' });
+          }}>Settle up</button>
+        </div>
+      </header>
+      {error && <p className="error-message" role="alert">{error}</p>}
+      <section className="friend-history-balance">
+        <div><span>{friend.fullnamae || friend.username} owes you</span><strong>{defaultCurrency} {friendOwes.toFixed(2)}</strong></div>
+        <div><span>You owe {friend.fullnamae || friend.username}</span><strong>{defaultCurrency} {userOwes.toFixed(2)}</strong></div>
+        <small>Converted using daily reference exchange rates.</small>
+      </section>
+      <div className="friend-history-layout">
+        <section className="friend-history-groups">
+          <div className="friend-history-section-heading">
+            <div><p className="eyebrow">YOUR BALANCES</p><h2>By group</h2></div>
+            <span>{history?.groups?.length || 0} ledgers</span>
+          </div>
+          {history?.groups?.length ? history.groups.map((group) => (
+            <article className="friend-balance-group" key={group.groupId}>
+              <div className="friend-balance-group-title">
+                <div>
+                  <strong>{group.groupName}</strong>
+                  {group.isDirect && <small>One-to-one</small>}
+                </div>
+                <span>
+                  <small>Total expenses</small>
+                  <strong>{defaultCurrency} {(group.expenseTotals || [])
+                    .reduce((total, item) => total + Number(item.convertedAmount), 0).toFixed(2)}</strong>
+                </span>
+              </div>
+              {group.balances.length ? group.balances.map((balance) => {
+                const key = `${group.groupId}:${balance.currency}`;
+                const selected = selectedKeys.includes(key);
+                return (
+                  <label className="friend-balance-row" key={key}>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={settlementMode === 'all' || (payerId === userId
+                        ? Number(balance.convertedBalance) >= 0
+                        : Number(balance.convertedBalance) <= 0)}
+                      onChange={() => toggleBalance(key)}
+                      aria-label={`Select ${group.groupName} balance in ${balance.currency}`}
+                    />
+                    <span className={Number(balance.convertedBalance) >= 0 ? 'balance-positive' : 'balance-negative'}>
+                      {Number(balance.netBalance) >= 0 ? `${friend.fullnamae || friend.username} owes you` : `You owe ${friend.fullnamae || friend.username}`}
+                    </span>
+                    <strong>{balance.currency} {Math.abs(Number(balance.netBalance)).toFixed(2)}</strong>
+                    <small>≈ {defaultCurrency} {Math.abs(Number(balance.convertedBalance)).toFixed(2)}</small>
+                  </label>
+                );
+              }) : <p className="friend-ledger-settled">Settled up</p>}
+            </article>
+          )) : <p className="empty-state">You have no shared group or direct friend balances yet.</p>}
+        </section>
+        <section className="friend-history-settlement" id="friend-settlement-panel">
+          <div className="friend-history-section-heading">
+            <div><p className="eyebrow">PAYMENTS</p><h2>Settle balances</h2></div>
+          </div>
+          <form onSubmit={saveSettlement}>
+            <fieldset className="friend-settlement-modes">
+              <legend>Choose what to settle</legend>
+              <label><input type="radio" checked={settlementMode === 'one'} onChange={() => changeMode('one')} /> One group balance</label>
+              <label><input type="radio" checked={settlementMode === 'multiple'} onChange={() => changeMode('multiple')} /> Multiple selected balances</label>
+              <label><input type="radio" checked={settlementMode === 'all'} onChange={() => changeMode('all')} /> All balances in this direction</label>
+            </fieldset>
+            <label>Who paid?
+              <select value={payerId} onChange={(event) => {
+                setPayerId(event.target.value);
+                setSelectedKeys([]);
+              }}>
+                <option value={userId}>You pay {friend.fullnamae || friend.username}</option>
+                <option value={friend._id}>{friend.fullnamae || friend.username} pays you</option>
+              </select>
+            </label>
+            {settlementMode !== 'all' && <p className="modal-help">Select {settlementMode === 'one' ? 'one' : 'one or more'} balances above. The payment is applied in the selected group order.</p>}
+            <label>Amount ({defaultCurrency})
+              <input
+                type="number"
+                min="0.01"
+                max={maxAmount.toFixed(2)}
+                step="0.01"
+                value={settlementAmount}
+                onChange={(event) => setSettlementAmount(event.target.value)}
+                required
+              />
+            </label>
+            <small>Up to {defaultCurrency} {maxAmount.toFixed(2)} available for this choice.</small>
+            <label>Payment note (optional)
+              <input value={settlementNote} onChange={(event) => setSettlementNote(event.target.value)} maxLength="500" placeholder="Cash, bank transfer…" />
+            </label>
+            {settlementError && <p className="error-message" role="alert">{settlementError}</p>}
+            <button className="primary-action" disabled={settlementBusy || maxAmount <= 0 || (settlementMode !== 'all' && !selectedKeys.length)}>
+              {settlementBusy ? 'Saving payment…' : 'Record payment'}
+            </button>
+          </form>
+        </section>
+      </div>
+      <section className="friend-history-activity">
+        <div className="friend-history-section-heading">
+          <div><p className="eyebrow">THE PAPER TRAIL</p><h2>Expenses and payments</h2></div>
+          <span>{history?.transactions?.length || 0} records</span>
+        </div>
+        {busy ? <p className="empty-state">Loading friend history…</p>
+          : history?.transactions?.length
+            ? <GroupActivityList transactions={history.transactions} userId={userId} onOpenExpense={onOpenExpense} />
+            : <p className="empty-state">Expenses and payment history with this friend will appear here.</p>}
+      </section>
+    </div>
+  );
+}
+
 function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
@@ -798,6 +995,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [personalExpenses, setPersonalExpenses] = useState([]);
   const [activityNotifications, setActivityNotifications] = useState([]);
   const [friends, setFriends] = useState([]);
+  const [selectedFriend, setSelectedFriend] = useState(null);
+  const [friendHistory, setFriendHistory] = useState(null);
+  const [friendHistoryBusy, setFriendHistoryBusy] = useState(false);
+  const [friendHistoryError, setFriendHistoryError] = useState('');
   const [friendRequests, setFriendRequests] = useState([]);
   const [sentFriendRequests, setSentFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
@@ -831,7 +1032,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [expenseDraft, setExpenseDraft] = useState({
     description: '',
     totalAmount: '',
-    currency: 'INR',
+    currency: user.defaultCurrency || 'INR',
     category: 'Uncategorized',
     subcategory: '',
     groupId: '',
@@ -844,6 +1045,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     paymentProof: null,
     existingProofUrl: null,
   });
+  const [friendExpenseTarget, setFriendExpenseTarget] = useState(null);
   const [expenseError, setExpenseError] = useState('');
   const [expenseBusy, setExpenseBusy] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState('');
@@ -860,7 +1062,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [showProfile, setShowProfile] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationControlRef = useRef(null);
-  const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
+  const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', defaultCurrency: user.defaultCurrency || 'INR', currentPassword: '', newPassword: '', coverimage: null });
   const [passwordUpdateEnabled, setPasswordUpdateEnabled] = useState(false);
   const [currentPasswordVerified, setCurrentPasswordVerified] = useState(false);
   const [usernameAvailability, setUsernameAvailability] = useState({ username: '', status: 'checking' });
@@ -1070,6 +1272,63 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     }
   };
 
+  const loadFriendHistory = async (friend) => {
+    setFriendHistoryBusy(true);
+    setFriendHistoryError('');
+    try {
+      const history = await apiRequest(`/friends/${friend._id}/history`, { headers: authHeaders });
+      setFriendHistory(history);
+      return history;
+    } catch (error) {
+      setFriendHistoryError(error.message);
+      throw error;
+    } finally {
+      setFriendHistoryBusy(false);
+    }
+  };
+
+  const openFriendDetails = async (friend) => {
+    setSelectedFriend(friend);
+    setFriendHistory(null);
+    setActivePage('friend-detail');
+    try {
+      await loadFriendHistory(friend);
+    } catch {
+      // The error is displayed on the friend history page.
+    }
+  };
+
+  const refreshFriendHistory = async () => {
+    if (selectedFriend) await loadFriendHistory(selectedFriend);
+  };
+
+  const openFriendExpenseForm = (friend = selectedFriend) => {
+    if (!friend) return;
+    setFriendExpenseTarget(friend._id);
+    setExpenseDraft({
+      description: '',
+      totalAmount: '',
+      currency: user.defaultCurrency || 'INR',
+      category: 'Uncategorized',
+      subcategory: '',
+      groupId: '',
+      paidBy: user._id,
+      participantIds: [user._id, friend._id],
+      strategy: 'EQUAL',
+      splitValues: {},
+      items: [],
+      note: '',
+      paymentProof: null,
+      existingProofUrl: null,
+    });
+    setExpenseError('');
+    setEditingExpenseId('');
+    setFriendExpenseTarget(null);
+    setClearExpenseProof(false);
+    setShowExpenseCategories(false);
+    setShowExpenseForm(true);
+  };
+
   const closeGroupForm = () => {
     setShowGroupForm(false);
     setGroupName('');
@@ -1145,6 +1404,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const addExpense = async (event) => {
     event.preventDefault();
     const group = groups.find((item) => item._id === expenseDraft.groupId);
+    const targetFriendId = friendExpenseTarget;
     const participants = expenseDraft.participantIds;
     if (!participants.length) {
       setExpenseError('Select at least one person to split this expense with.');
@@ -1209,19 +1469,23 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setExpenseError('');
     try {
       const isEditing = Boolean(editingExpenseId);
-      const expense = await apiRequest(isEditing ? `/expenses/${editingExpenseId}` : '/expenses', {
+      const expense = await apiRequest(isEditing
+        ? targetFriendId
+          ? `/friends/${targetFriendId}/expenses/${editingExpenseId}`
+          : `/expenses/${editingExpenseId}`
+        : targetFriendId ? `/friends/${targetFriendId}/expenses` : '/expenses', {
         method: isEditing ? "PATCH" : "POST",
         headers: { Authorization: `Bearer ${accessToken}` },
         body,
       });
-      setExpenses((current) => isEditing
+      if (!targetFriendId) setExpenses((current) => isEditing
         ? current.map((item) => item._id === expense._id ? { ...item, ...expense } : item)
         : [{
           ...expense,
           groupName: group?.name || 'Personal Expenses',
           isPersonal: !expenseDraft.groupId,
         }, ...current]);
-      if (!expenseDraft.groupId && !isEditing) {
+      if (!targetFriendId && !expenseDraft.groupId && !isEditing) {
         setPersonalGroup((current) => current || {
           _id: expense.groupId,
           name: 'Personal Expenses',
@@ -1231,20 +1495,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       }
       setShowExpenseForm(false);
       setEditingExpenseId('');
+      setFriendExpenseTarget(null);
       setClearExpenseProof(false);
       setSelectedExpense(null);
-      if (isEditing && !expenseDraft.groupId) {
+      if (!targetFriendId && isEditing && !expenseDraft.groupId) {
         setPersonalExpenses(await apiRequest('/expenses/personal', { headers: authHeaders }));
       }
       if (isEditing) {
-        setFormMessage('Expense updated. The group has been notified.');
-        apiRequest('/users/notifications', { headers: authHeaders })
-          .then((data) => setActivityNotifications(data || []))
-          .catch((error) => setFormMessage(error.message));
+        setFormMessage(targetFriendId ? 'Friend expense updated.' : 'Expense updated. The group has been notified.');
+        if (!targetFriendId) {
+          apiRequest('/users/notifications', { headers: authHeaders })
+            .then((data) => setActivityNotifications(data || []))
+            .catch((error) => setFormMessage(error.message));
+        }
       }
-      apiRequest('/expenses?history=true', { headers: authHeaders })
-        .then((data) => setExpenses(data || []))
-        .catch((error) => setFormMessage(`Expense saved, but recent activity could not be refreshed: ${error.message}`));
+      if (targetFriendId && selectedFriend) {
+        await loadFriendHistory(selectedFriend);
+      } else {
+        apiRequest('/expenses?history=true', { headers: authHeaders })
+          .then((data) => setExpenses(data || []))
+          .catch((error) => setFormMessage(`Expense saved, but recent activity could not be refreshed: ${error.message}`));
+      }
       if (selectedGroup?._id === expenseDraft.groupId) {
         await openGroupDetails({ ...selectedGroup, ...group });
       }
@@ -1261,7 +1532,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     setExpenseDraft({
       description: '',
       totalAmount: '',
-      currency: 'INR',
+      currency: user.defaultCurrency || 'INR',
       category: 'Uncategorized',
       subcategory: '',
       groupId,
@@ -1283,6 +1554,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
 
   const editExpense = (expense) => {
     const group = groups.find((item) => item._id === expense.groupId);
+    const isFriendExpense = friendHistory?.groups.some((item) => item.groupId === expense.groupId && item.isDirect);
     const participants = expense.participantIds || [user._id];
     setExpenseDraft({
       description: expense.description || '',
@@ -1290,7 +1562,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       currency: expense.currency || 'INR',
       category: expense.category || 'Uncategorized',
       subcategory: expense.subcategory || '',
-      groupId: group?._id || '',
+      groupId: group?._id || (isFriendExpense ? expense.groupId : ''),
       paidBy: expense.paidBy || user._id,
       participantIds: participants,
       strategy: expense.splitStrategy || 'EQUAL',
@@ -1305,6 +1577,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       paymentProof: null,
       existingProofUrl: expense.paymentProofUrl || null,
     });
+    setFriendExpenseTarget(isFriendExpense ? selectedFriend?._id || null : null);
     setEditingExpenseId(expense._id);
     setClearExpenseProof(false);
     setExpenseError('');
@@ -1316,14 +1589,23 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const removeExpense = async (expense) => {
     if (!window.confirm(`Delete “${expense.description}” (${expense.currency} ${Number(expense.totalAmount).toFixed(2)})? Group balances will be adjusted and the deletion will appear in group activity.`)) return null;
     try {
-      const result = await apiRequest(`/expenses/${expense._id}`, {
+      const isFriendExpense = friendHistory?.groups.some((group) => group.groupId === expense.groupId && group.isDirect);
+      const endpoint = isFriendExpense && selectedFriend
+        ? `/friends/${selectedFriend._id}/expenses/${expense._id}`
+        : `/expenses/${expense._id}`;
+      const result = await apiRequest(endpoint, {
         method: 'DELETE',
         headers: authHeaders,
       });
       setSelectedExpense(null);
-      setExpenses(await apiRequest('/expenses?history=true', { headers: authHeaders }));
+      if (!isFriendExpense) {
+        setExpenses(await apiRequest('/expenses?history=true', { headers: authHeaders }));
+      }
       if (expense.groupId && selectedGroup?._id === expense.groupId) {
         await openGroupDetails(selectedGroup);
+      }
+      if (selectedFriend && friendHistory?.groups.some((group) => group.groupId === expense.groupId && group.isDirect)) {
+        await loadFriendHistory(selectedFriend);
       }
       if (!expense.groupId || personalGroup?._id === expense.groupId) {
         setPersonalExpenses(await apiRequest('/expenses/personal', { headers: authHeaders }));
@@ -1339,6 +1621,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const updateExpenseDraft = (key, value) => setExpenseDraft((current) => ({ ...current, [key]: value }));
   const changeExpenseGroup = (groupId) => {
     const group = groups.find((item) => item._id === groupId);
+    setFriendExpenseTarget(null);
     const participantIds = group?.members?.map((member) => member._id) || [user._id];
     setExpenseDraft((current) => ({
       ...current,
@@ -1574,8 +1857,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     }
     setProfileBusy(true);
     setProfileError('');
+    let historyWarning = '';
     const body = new FormData();
-    ['username', 'email', 'fullnamae', 'phone'].forEach((key) => body.append(key, profileForm[key]));
+    ['username', 'email', 'fullnamae', 'phone', 'defaultCurrency'].forEach((key) => body.append(key, profileForm[key]));
     if (profileForm.coverimage) body.append('coverimage', profileForm.coverimage);
     if (passwordUpdateEnabled) {
       body.append('currentPassword', profileForm.currentPassword);
@@ -1584,11 +1868,18 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     try {
       const result = await apiRequest(`/users/profile/${user._id}`, { method: 'PUT', headers: authHeaders, body });
       onProfileUpdated(result.user);
-      setProfileForm({ username: result.user.username || '', email: result.user.email || '', fullnamae: result.user.fullnamae || '', phone: result.user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
+      if (selectedFriend && result.user.defaultCurrency !== user.defaultCurrency) {
+        try {
+          await loadFriendHistory(selectedFriend);
+        } catch (error) {
+          historyWarning = `Profile updated, but friend balances could not be refreshed: ${error.message}`;
+        }
+      }
+      setProfileForm({ username: result.user.username || '', email: result.user.email || '', fullnamae: result.user.fullnamae || '', phone: result.user.phone || '', defaultCurrency: result.user.defaultCurrency || 'INR', currentPassword: '', newPassword: '', coverimage: null });
       setPasswordUpdateEnabled(false);
       setCurrentPasswordVerified(false);
       setShowProfile(false);
-      setFormMessage(result.cleanupWarning || 'Profile updated successfully.');
+      setFormMessage(historyWarning || result.cleanupWarning || 'Profile updated successfully.');
     } catch (error) {
       if (error.message.includes('username is already taken')) {
         setUsernameAvailability({ username, status: 'taken' });
@@ -1608,7 +1899,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     ['PAYMENT_REQUEST', 'PAYMENT_RECEIVED'].includes(notification.notificationType)
   ));
   const expenseGroup = groups.find((group) => group._id === expenseDraft.groupId);
-  const expenseMembers = expenseGroup?.members || [user];
+  const selectedExpenseFriendGroup = selectedExpense
+    ? friendHistory?.groups.find((group) => group.groupId === selectedExpense.groupId && group.isDirect)
+    : null;
+  const expenseMembers = friendExpenseTarget && selectedFriend
+    ? [user, selectedFriend]
+    : expenseGroup?.members || [user];
   const selectedExpenseMembers = expenseMembers.filter((member) => expenseDraft.participantIds.includes(member._id));
   const itemizedTotal = expenseDraft.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   const expenseSplitDefaults = getDefaultSplitValues(expenseDraft.strategy, expenseDraft.participantIds, expenseDraft.totalAmount);
@@ -1627,7 +1923,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           <button className={activePage === 'recent' ? 'active' : ''} type="button" onClick={() => setActivePage('recent')}>Recent activity</button>
           <button className={activePage === 'all-expenses' ? 'active' : ''} type="button" onClick={() => setActivePage('all-expenses')}>All expenses</button>
           <button className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => setActivePage('personal')}>Personal expenses</button>
-          <button className={activePage === 'friends' ? 'active' : ''} type="button" onClick={() => setActivePage('friends')}>Friends</button>
+          <button className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => setActivePage('friends')}>Friends</button>
         </div>
         <div className="notification-control" ref={notificationControlRef}>
           <button
@@ -1726,7 +2022,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               </div>
               <button
                 onClick={() => {
-                  setProfileForm({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
+                  setProfileForm({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', defaultCurrency: user.defaultCurrency || 'INR', currentPassword: '', newPassword: '', coverimage: null });
                   setPasswordUpdateEnabled(false);
                   setCurrentPasswordVerified(false);
                   setProfileError('');
@@ -1744,7 +2040,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           )}
         </div>
       </nav>
-      <div className={`dashboard-shell ${activePage === 'friends' ? 'friend-management-shell' : ''}`}>
+      <div className={`dashboard-shell ${activePage === 'friends' || activePage === 'friend-detail' ? 'friend-management-shell' : ''}`}>
         <aside className="dashboard-sidebar">
           <div className="side-links">
             <button className={`side-link ${activePage === 'overview' ? 'active' : ''}`} onClick={() => setActivePage('overview')} type="button">
@@ -1795,10 +2091,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </label>
             {sortedFriends.map((friend) => (
               <div className="side-friend" key={friend._id}>
-                {friend.coverimage
-                  ? <img src={friend.coverimage} alt="" />
-                  : <span className="side-friend-avatar">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
-                <span className="side-friend-name">{friend.fullnamae || friend.username}</span>
+                <button className="side-friend-link" type="button" onClick={() => void openFriendDetails(friend)}>
+                  {friend.coverimage
+                    ? <img src={friend.coverimage} alt="" />
+                    : <span className="side-friend-avatar">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
+                  <span className="side-friend-name">{friend.fullnamae || friend.username}</span>
+                </button>
                 <button
                   className="remove-friend-button"
                   type="button"
@@ -1817,7 +2115,20 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           <button className="friend-add-card" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>Add friend by username or email</button>
         </aside>
         <section className="dashboard-content">
-          {activePage === 'friends' ? (
+          {activePage === 'friend-detail' && selectedFriend ? (
+            <FriendHistoryPage
+              friend={selectedFriend}
+              history={friendHistory}
+              userId={user._id}
+              accessToken={accessToken}
+              busy={friendHistoryBusy}
+              error={friendHistoryError}
+              onBack={() => setActivePage('friends')}
+              onAddExpense={() => openFriendExpenseForm()}
+              onRefresh={refreshFriendHistory}
+              onOpenExpense={setSelectedExpense}
+            />
+          ) : activePage === 'friends' ? (
             <div className="friend-management-page">
               <div className="friend-management-heading">
                 <div>
@@ -1846,7 +2157,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                 <div className="friend-profile-grid">
                   {sortedFriends.map((friend) => (
                     <article className="friend-profile-card" key={friend._id}>
-                      <div className="friend-profile-main">
+                      <button type="button" className="friend-profile-main friend-profile-open" onClick={() => void openFriendDetails(friend)}>
                         {friend.coverimage
                           ? <img className="friend-profile-photo" src={friend.coverimage} alt={`${friend.fullnamae || friend.username}'s profile`} />
                           : <span className="friend-profile-photo friend-profile-photo-fallback">{(friend.fullnamae || friend.username).slice(0, 1).toUpperCase()}</span>}
@@ -1854,7 +2165,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                           <h2>{friend.fullnamae || friend.username}</h2>
                           <span>@{friend.username}</span>
                         </div>
-                      </div>
+                      </button>
                       <div className="friend-profile-details">
                         <span>Email</span>
                         <strong>{friend.email}</strong>
@@ -2244,12 +2555,18 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   )}
                 </div>
 
-                <label>Group
-                  <select value={expenseDraft.groupId} onChange={(event) => changeExpenseGroup(event.target.value)} disabled={Boolean(editingExpenseId)}>
-                    <option value="">Personal expense</option>
-                    {groups.map((group) => <option key={group._id} value={group._id}>{group.name}</option>)}
-                  </select>
-                </label>
+                {friendExpenseTarget && selectedFriend ? (
+                  <label>Expense with
+                    <input value={selectedFriend.fullnamae || selectedFriend.username} readOnly />
+                  </label>
+                ) : (
+                  <label>Group
+                    <select value={expenseDraft.groupId} onChange={(event) => changeExpenseGroup(event.target.value)} disabled={Boolean(editingExpenseId)}>
+                      <option value="">Personal expense</option>
+                      {groups.map((group) => <option key={group._id} value={group._id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                )}
 
                 <label>Who paid?
                   <select value={expenseDraft.paidBy} onChange={(event) => updateExpenseDraft('paidBy', event.target.value)}>
@@ -2406,6 +2723,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                 <label>Email<input name="email" type="email" value={profileForm.email} onChange={updateProfileField} required /></label>
                 <label>Full name<input name="fullnamae" value={profileForm.fullnamae} onChange={updateProfileField} required /></label>
                 <label>Phone<input name="phone" value={profileForm.phone} onChange={updateProfileField} placeholder="Optional" /></label>
+                <label>Default currency
+                  <select name="defaultCurrency" value={profileForm.defaultCurrency} onChange={updateProfileField}>
+                    <option value="INR">INR ₹</option><option value="USD">USD $</option><option value="EUR">EUR €</option>
+                    <option value="GBP">GBP £</option><option value="CAD">CAD $</option><option value="AUD">AUD $</option>
+                  </select>
+                  <small>Friend balances are converted using the latest daily exchange rates.</small>
+                </label>
                 <button className="password-update-toggle" type="button" aria-expanded={passwordUpdateEnabled} onClick={() => {
                   setPasswordUpdateEnabled((enabled) => !enabled);
                   setProfileForm((current) => ({ ...current, currentPassword: '', newPassword: '' }));
@@ -2481,8 +2805,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           {selectedExpense && (
             <ExpenseDetails
               expense={selectedExpense}
-              group={groups.find((item) => item._id === selectedExpense.groupId) || personalGroup}
-              members={groups.find((item) => item._id === selectedExpense.groupId)?.members || [user]}
+              group={groups.find((item) => item._id === selectedExpense.groupId)
+                || (selectedExpenseFriendGroup ? { _id: selectedExpenseFriendGroup.groupId, name: selectedExpenseFriendGroup.groupName } : personalGroup)}
+              members={groups.find((item) => item._id === selectedExpense.groupId)?.members
+                || (selectedExpenseFriendGroup && selectedFriend ? [user, selectedFriend] : [user])}
               userId={user._id}
               accessToken={accessToken}
               onClose={() => setSelectedExpense(null)}
@@ -2491,6 +2817,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               onCommentAdded={async () => {
                 setExpenses(await apiRequest('/expenses?history=true', { headers: authHeaders }));
                 if (selectedGroup?._id === selectedExpense.groupId) await openGroupDetails(selectedGroup);
+                if (selectedFriend) await loadFriendHistory(selectedFriend);
               }}
             />
           )}
@@ -3554,7 +3881,7 @@ function GroupActivityList({
                 </article>
               );
             }
-            const isSettlement = transaction.type === 'SETTLEMENT';
+            const isSettlement = ['SETTLEMENT', 'FRIEND_SETTLEMENT'].includes(transaction.type);
             const total = Number(transaction.totalAmount) || 0;
             const ownSplit = Number(transaction.splits?.find((split) => split.userId === userId)?.amountOwed || 0);
             const isPayer = transaction.paidBy === userId;
@@ -3612,13 +3939,16 @@ function GroupActivityList({
                   {categoryIcon}
                 </span>
                 <div className="group-activity-description">
-                  <strong>{transaction.description}</strong>
+                  <strong>{transaction.description || `${payerName} paid ${transaction.paidToName || 'a friend'}`}</strong>
                   {(transaction.note || transaction.comments?.length > 0) && <span className="group-activity-comment" aria-label="Has a note or comments">●</span>}
                   <small>
                     {transaction.groupName && !personalLedger ? `${transaction.groupName} · ` : ''}
                     {transaction.category || 'Uncategorized'}
                     {transaction.subcategory ? ` · ${transaction.subcategory}` : ''}
                     {isSettlement ? ` · ${payerName} paid ${transaction.paidToName || 'a member'}` : ''}
+                    {transaction.type === 'FRIEND_SETTLEMENT' && transaction.allocations?.length
+                      ? ` · Applied to ${transaction.allocations.map((allocation) => `${allocation.groupName} (${allocation.currency} ${Number(allocation.amount).toFixed(2)})`).join(', ')}`
+                      : ''}
                   </small>
                   {transaction.paymentProofUrl && (
                     <a
