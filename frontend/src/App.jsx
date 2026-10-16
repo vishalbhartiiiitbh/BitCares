@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 const emptyForm = { username: "", email: "", fullnamae: "", password: "" };
@@ -702,6 +702,125 @@ function Brand() {
   );
 }
 
+function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpense, groupExpenses = false, userId }) {
+  const totalByCurrency = new Map();
+  expenses.forEach((expense) => {
+    totalByCurrency.set(expense.currency, (totalByCurrency.get(expense.currency) || 0) + Number(expense.totalAmount));
+  });
+  return (
+    <div className="personal-expenses-page">
+      <div className="welcome-row">
+        <div>
+          <p className="eyebrow">{groupExpenses ? 'YOUR GROUPS' : 'ONLY YOU CAN SEE THIS'}</p>
+          <h1>{title}</h1>
+          <p className="lede">{description}</p>
+        </div>
+        <button className="primary-action" type="button" onClick={onAddExpense}>
+          {groupExpenses ? '＋ Add an expense' : '＋ Add personal expense'}
+        </button>
+      </div>
+      <div className="personal-expenses-summary">
+        <strong>{expenses.length} {expenses.length === 1 ? 'expense' : 'expenses'}</strong>
+        <span>{[...totalByCurrency].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ') || 'No spending recorded'}</span>
+      </div>
+      {expenses.length ? (
+        groupExpenses ? (
+          <GroupActivityList transactions={expenses} userId={userId} onOpenExpense={onOpenExpense} showGroupName />
+        ) : (
+          <div className="personal-expense-months">
+            {groupExpensesByMonth(expenses).map((month) => {
+              const totals = new Map();
+              month.expenses.forEach((expense) => {
+                totals.set(expense.currency, (totals.get(expense.currency) || 0) + Number(expense.totalAmount));
+              });
+              return (
+                <section className="personal-expense-month" key={month.key}>
+                  <header>
+                    <div><p className="eyebrow">MONTHLY RECORD</p><h2>{month.label}</h2></div>
+                    <span>{month.expenses.length} {month.expenses.length === 1 ? 'expense' : 'expenses'} · {[...totals].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ')}</span>
+                  </header>
+                  <div className="personal-expense-list">
+                    {month.expenses.map((expense) => (
+                      <article
+                        className="personal-expense-row"
+                        key={expense._id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onOpenExpense(expense)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onOpenExpense(expense);
+                          }
+                        }}
+                      >
+                        <div className="personal-expense-icon">{expenseCategories.find((category) => category.name === expense.category)?.icon || '🧾'}</div>
+                        <div className="personal-expense-info">
+                          <strong>{expense.description}</strong>
+                          <span>{expense.category || 'Uncategorized'}{expense.subcategory ? ` · ${expense.subcategory}` : ''} · {new Date(expense.createdAt).toLocaleDateString()}</span>
+                          {expense.note && <small>{expense.note}</small>}
+                          {expense.items?.map((item, index) => <small key={`${expense._id}-${index}`}>{item.description}: {expense.currency} {item.amount}</small>)}
+                          {expense.paymentProofUrl && <a className="expense-proof-link" href={expense.paymentProofUrl} target="_blank" rel="noreferrer">View receipt</a>}
+                        </div>
+                        <strong>{expense.currency} {expense.totalAmount}</strong>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )
+      ) : (
+        <div className="friends-empty-state">
+          <span>▤</span>
+          <h2>No {groupExpenses ? 'group' : 'personal'} expenses yet</h2>
+          <p>{groupExpenses
+            ? 'Expenses you and your group members add will appear here, organized by month.'
+            : 'Add an expense just for yourself. It will be saved in your private Personal Expenses group and shown under its month.'}</p>
+          <button className="primary-action" type="button" onClick={onAddExpense}>
+            {groupExpenses ? 'Add your first group expense' : 'Add your first personal expense'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecentActivityPage({ transactions, notifications, friendRequests, groups, userId, friendBusy, friendError, errorMessage, onOpenExpense, onOpenGroup, onRespondToFriendRequest }) {
+  const feedItems = [
+    ...transactions.map((transaction) => ({ ...transaction, feedType: 'group' })),
+    ...notifications.map((notification) => ({ ...notification, feedType: 'notification' })),
+    ...friendRequests.map((request) => ({ ...request, feedType: 'friend-request' })),
+  ].sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
+  return (
+    <div className="recent-activity-page">
+      <div className="welcome-row">
+        <div>
+          <p className="eyebrow">THE PAPER TRAIL</p>
+          <h1>Recent activity</h1>
+          <p className="lede">All group activity, updates, and friend requests in one place.</p>
+        </div>
+      </div>
+      {friendError && <p className="error-message" role="alert">{friendError}</p>}
+      {errorMessage && <p className="friend-page-message" role="status">{errorMessage}</p>}
+      <section className="recent-group-activity">
+        <GroupActivityList
+          transactions={feedItems}
+          userId={userId}
+          groups={groups}
+          onOpenExpense={onOpenExpense}
+          onOpenGroup={onOpenGroup}
+          onRespondToFriendRequest={onRespondToFriendRequest}
+          friendBusy={friendBusy}
+          showGroupName
+        />
+        {!feedItems.length && <p className="empty-state">Your group activity and notifications will appear here.</p>}
+      </section>
+    </div>
+  );
+}
+
 function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
@@ -722,7 +841,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
   const [friendToRemove, setFriendToRemove] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [selectedExpense, setSelectedExpense] = useState(null);
@@ -771,6 +889,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [joinCode, setJoinCode] = useState('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const notificationControlRef = useRef(null);
   const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', currentPassword: '', newPassword: '', coverimage: null });
   const [passwordUpdateEnabled, setPasswordUpdateEnabled] = useState(false);
   const [currentPasswordVerified, setCurrentPasswordVerified] = useState(false);
@@ -780,6 +900,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [profileError, setProfileError] = useState('');
   const [formMessage, setFormMessage] = useState("");
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  useEffect(() => {
+    if (!showNotifications) return undefined;
+    const closeOnOutsideClick = (event) => {
+      if (!notificationControlRef.current?.contains(event.target)) setShowNotifications(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [showNotifications]);
 
   useEffect(() => {
     if (!profileForm.coverimage) {
@@ -818,7 +947,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   useEffect(() => {
     Promise.all([
       apiRequest("/groups", { headers: authHeaders }),
-      apiRequest("/expenses", { headers: authHeaders }),
+      apiRequest("/expenses?history=true", { headers: authHeaders }),
       apiRequest("/expenses/personal", { headers: authHeaders }),
     ])
       .then(([groupData, expenseData, personalExpenseData]) => {
@@ -830,6 +959,25 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       })
       .catch((error) => setFormMessage(error.message));
   }, [accessToken]);
+
+  useEffect(() => {
+    if (activePage !== 'recent') return;
+    Promise.all([
+      apiRequest('/expenses?history=true', { headers: authHeaders }),
+      apiRequest('/users/notifications', { headers: authHeaders }),
+      apiRequest('/friends/requests', { headers: authHeaders }),
+      apiRequest('/users/notifications/read', { method: 'PATCH', headers: authHeaders }),
+    ])
+      .then(([activity, notifications, requests]) => {
+        setExpenses(activity || []);
+        setActivityNotifications((notifications || []).map((item) => ({
+          ...item,
+          readAt: item.readAt || new Date().toISOString(),
+        })));
+        setFriendRequests(requests || []);
+      })
+      .catch((error) => setFormMessage(error.message));
+  }, [activePage, accessToken]);
 
   useEffect(() => {
     let active = true;
@@ -1099,7 +1247,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       });
       setExpenses((current) => isEditing
         ? current.map((item) => item._id === expense._id ? { ...item, ...expense } : item)
-        : [expense, ...current]);
+        : [{
+          ...expense,
+          groupName: group?.name || 'Personal Expenses',
+          isPersonal: !expenseDraft.groupId,
+        }, ...current]);
       if (!expenseDraft.groupId && !isEditing) {
         setPersonalGroup((current) => current || {
           _id: expense.groupId,
@@ -1117,13 +1269,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       }
       if (isEditing) {
         setFormMessage('Expense updated. The group has been notified.');
-        apiRequest('/expenses', { headers: authHeaders })
-          .then((data) => setExpenses(data || []))
-          .catch((error) => setFormMessage(error.message));
         apiRequest('/users/notifications', { headers: authHeaders })
           .then((data) => setActivityNotifications(data || []))
           .catch((error) => setFormMessage(error.message));
       }
+      apiRequest('/expenses?history=true', { headers: authHeaders })
+        .then((data) => setExpenses(data || []))
+        .catch((error) => setFormMessage(`Expense saved, but recent activity could not be refreshed: ${error.message}`));
       if (selectedGroup?._id === expenseDraft.groupId) {
         await openGroupDetails({ ...selectedGroup, ...group });
       }
@@ -1200,7 +1352,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
         headers: authHeaders,
       });
       setSelectedExpense(null);
-      setExpenses(await apiRequest('/expenses', { headers: authHeaders }));
+      setExpenses(await apiRequest('/expenses?history=true', { headers: authHeaders }));
       if (expense.groupId && selectedGroup?._id === expense.groupId) {
         await openGroupDetails(selectedGroup);
       }
@@ -1483,6 +1635,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     ? (first.fullnamae || first.username).localeCompare(second.fullnamae || second.username, undefined, { sensitivity: 'base' })
     : new Date(second.addedAt) - new Date(first.addedAt));
   const pendingFriendRequests = friendRequests.filter((request) => request.status === 'pending');
+  const notificationItems = activityNotifications.filter((notification) => (
+    ['PAYMENT_REQUEST', 'PAYMENT_RECEIVED'].includes(notification.notificationType)
+  ));
   const expenseGroup = groups.find((group) => group._id === expenseDraft.groupId);
   const expenseMembers = expenseGroup?.members || [user];
   const selectedExpenseMembers = expenseMembers.filter((member) => expenseDraft.participantIds.includes(member._id));
@@ -1491,38 +1646,42 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const splitModeTotal = selectedExpenseMembers.reduce((sum, member) => sum + (
     Number(expenseDraft.splitValues[member._id] ?? expenseSplitDefaults[member._id]) || 0
   ), 0);
-  const personalExpenseMonths = groupExpensesByMonth(personalExpenses);
+  const groupExpenses = expenses.filter((expense) => expense.groupId && !expense.isPersonal && !['ACTIVITY', 'SETTLEMENT'].includes(expense.type));
+  const groupActivity = expenses.filter((entry) => entry.groupId && !entry.isPersonal);
 
   return (
     <main className="dashboard-page">
       <nav className="dashboard-nav">
         <Brand />
         <div className="nav-links">
-          <button className={activePage === 'overview' ? 'active' : ''} type="button" onClick={() => setActivePage('overview')}>Overview</button>
+          <button className={activePage === 'overview' ? 'active' : ''} type="button" onClick={() => setActivePage('overview')}>Dashboard</button>
+          <button className={activePage === 'recent' ? 'active' : ''} type="button" onClick={() => setActivePage('recent')}>Recent activity</button>
+          <button className={activePage === 'all-expenses' ? 'active' : ''} type="button" onClick={() => setActivePage('all-expenses')}>All expenses</button>
           <button className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => setActivePage('personal')}>Personal expenses</button>
           <button className={activePage === 'friends' ? 'active' : ''} type="button" onClick={() => setActivePage('friends')}>Friends</button>
         </div>
-        <div className="notification-control">
+        <div className="notification-control" ref={notificationControlRef}>
           <button
             className="notification-trigger"
             type="button"
-            aria-label={`Notifications, ${pendingFriendRequests.length} pending friend requests and ${activityNotifications.filter((item) => !item.readAt).length} expense updates`}
+            aria-label={`Notifications, ${pendingFriendRequests.length + notificationItems.filter((item) => !item.readAt).length} unread`}
             aria-expanded={showNotifications}
-            onClick={async () => {
+            onClick={() => {
               const opening = !showNotifications;
               setShowNotifications(opening);
+              setShowProfileMenu(false);
               if (opening) {
-                try {
-                  await apiRequest('/users/notifications/read', { method: 'PATCH', headers: authHeaders });
-                  setActivityNotifications((current) => current.map((item) => ({ ...item, readAt: item.readAt || new Date().toISOString() })));
-                } catch (error) {
-                  setFormMessage(error.message);
-                }
+                apiRequest('/users/notifications/read', { method: 'PATCH', headers: authHeaders })
+                  .then(() => setActivityNotifications((current) => current.map((item) => ({
+                    ...item,
+                    readAt: item.readAt || new Date().toISOString(),
+                  }))))
+                  .catch((error) => setFormMessage(error.message));
               }
             }}
           >
             <span aria-hidden="true">♧</span>
-            {(pendingFriendRequests.length + activityNotifications.filter((item) => !item.readAt).length) > 0 && <span className="notification-count">{pendingFriendRequests.length + activityNotifications.filter((item) => !item.readAt).length}</span>}
+            {(pendingFriendRequests.length + notificationItems.filter((item) => !item.readAt).length) > 0 && <span className="notification-count">{pendingFriendRequests.length + notificationItems.filter((item) => !item.readAt).length}</span>}
           </button>
           {showNotifications && (
             <div className="notification-panel">
@@ -1530,22 +1689,26 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                 <strong>Notifications</strong>
                 <button type="button" onClick={() => setShowNotifications(false)} aria-label="Close notifications">×</button>
               </div>
-              {friendRequests.length ? friendRequests.map((request) => (
-                <div className="notification-item" key={request._id}>
+              {pendingFriendRequests.map((request) => (
+                <div className="notification-item" key={`friend-request-${request._id}`}>
                   <div className="notification-copy">
                     <strong>{request.senderName || request.senderUsername}</strong>
-                    <span>{request.status === 'pending' ? 'sent you a friend request' : `Friend request ${request.status}`}</span>
-                    <small>{new Date(request.createdAt).toLocaleDateString()}</small>
+                    <span>sent you a friend request</span>
+                    <small>{new Date(request.createdAt).toLocaleString()}</small>
                   </div>
-                  {request.status === 'pending' && (
-                    <div className="notification-actions">
-                      <button type="button" disabled={friendBusy} onClick={() => respondToFriendRequest(request._id, 'accept')}>Accept</button>
-                      <button type="button" disabled={friendBusy} onClick={() => respondToFriendRequest(request._id, 'decline')}>Decline</button>
-                    </div>
-                  )}
+                  <div className="notification-actions">
+                    <button type="button" disabled={friendBusy} onClick={() => {
+                      setShowNotifications(false);
+                      void respondToFriendRequest(request._id, 'accept');
+                    }}>Accept</button>
+                    <button type="button" disabled={friendBusy} onClick={() => {
+                      setShowNotifications(false);
+                      void respondToFriendRequest(request._id, 'decline');
+                    }}>Decline</button>
+                  </div>
                 </div>
-              )) : <p className="notification-empty">No notifications yet.</p>}
-              {activityNotifications.map((notification) => (
+              ))}
+              {notificationItems.map((notification) => (
                 <button
                   className={`notification-item expense-notification-item ${notification.readAt ? '' : 'unread'}`}
                   key={notification._id}
@@ -1554,16 +1717,19 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                     setShowNotifications(false);
                     const group = groups.find((item) => item._id === notification.groupId);
                     if (group) void openGroupDetails(group);
+                    else setActivePage('recent');
                   }}
                 >
                   <span className="notification-copy">
-                    <strong>Expense updated</strong>
+                    <strong>{notification.notificationType === 'PAYMENT_REQUEST' ? 'Payment request' : 'Payment received'}</strong>
                     <span>{notification.message}</span>
                     <small>{new Date(notification.createdAt).toLocaleString()}</small>
                   </span>
                 </button>
               ))}
-              {friendError && <p className="error-message notification-error">{friendError}</p>}
+              {!pendingFriendRequests.length && !notificationItems.length && (
+                <p className="notification-empty">No friend or payment notifications.</p>
+              )}
             </div>
           )}
         </div>
@@ -1615,8 +1781,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             <button className={`side-link ${activePage === 'overview' ? 'active' : ''}`} onClick={() => setActivePage('overview')} type="button">
               ▣ <span>Dashboard</span>
             </button>
-            <button className="side-link" onClick={() => setActivePage('overview')} type="button">
+            <button className={`side-link ${activePage === 'recent' ? 'active' : ''}`} onClick={() => setActivePage('recent')} type="button">
               ⚑ <span>Recent activity</span>
+            </button>
+            <button className={`side-link ${activePage === 'all-expenses' ? 'active' : ''}`} onClick={() => setActivePage('all-expenses')} type="button">
+              ▤ <span>All expenses</span>
             </button>
             <button className={`side-link ${activePage === 'personal' ? 'active' : ''}`} onClick={() => setActivePage('personal')} type="button">
               ☷ <span>Personal expenses</span>
@@ -1639,74 +1808,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   {group.name}
                 </button>
               ))
-            ) : activePage === 'personal' ? (
-              <div className="personal-expenses-page">
-                <div className="welcome-row">
-                  <div>
-                    <p className="eyebrow">ONLY YOU CAN SEE THIS</p>
-                    <h1>Personal expenses</h1>
-                    <p className="lede">Your private spending, organized month by month.</p>
-                  </div>
-                  <button className="primary-action" type="button" onClick={() => openExpenseForm('')}>＋ Add personal expense</button>
-                </div>
-                {formMessage && <p className="error-message dashboard-message">{formMessage}</p>}
-                <div className="personal-expenses-summary">
-                  <strong>{personalExpenses.length} {personalExpenses.length === 1 ? 'expense' : 'expenses'}</strong>
-                  <span>{personalGroup ? 'Saved in your private Personal Expenses group' : 'Your private group will be created when you add your first expense'}</span>
-                </div>
-                {personalExpenseMonths.length ? (
-                  <div className="personal-expense-months">
-                    {personalExpenseMonths.map((month) => {
-                      const totals = new Map();
-                      month.expenses.forEach((expense) => {
-                        totals.set(expense.currency, (totals.get(expense.currency) || 0) + Number(expense.totalAmount));
-                      });
-                      return (
-                        <section className="personal-expense-month" key={month.key}>
-                          <header>
-                            <div><p className="eyebrow">MONTHLY RECORD</p><h2>{month.label}</h2></div>
-                            <span>{month.expenses.length} {month.expenses.length === 1 ? 'expense' : 'expenses'} · {[...totals].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ')}</span>
-                          </header>
-                          <div className="personal-expense-list">
-                            {month.expenses.map((expense) => (
-                              <article
-                                className="personal-expense-row"
-                                key={expense._id}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => setSelectedExpense(expense)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    setSelectedExpense(expense);
-                                  }
-                                }}
-                              >
-                                <div className="personal-expense-icon">{expenseCategories.find((category) => category.name === expense.category)?.icon || '🧾'}</div>
-                                <div className="personal-expense-info">
-                                  <strong>{expense.description}</strong>
-                                  <span>{expense.category || 'Uncategorized'}{expense.subcategory ? ` · ${expense.subcategory}` : ''} · {new Date(expense.createdAt).toLocaleDateString()}</span>
-                                  {expense.note && <small>{expense.note}</small>}
-                                  {expense.items?.map((item, index) => <small key={`${expense._id}-${index}`}>{item.description}: {expense.currency} {item.amount}</small>)}
-                                  {expense.paymentProofUrl && <a className="expense-proof-link" href={expense.paymentProofUrl} target="_blank" rel="noreferrer">View receipt</a>}
-                                </div>
-                                <strong>{expense.currency} {expense.totalAmount}</strong>
-                              </article>
-                            ))}
-                          </div>
-                        </section>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="friends-empty-state">
-                    <span>▤</span>
-                    <h2>No personal expenses yet</h2>
-                    <p>Add an expense just for yourself. It will be saved in your private Personal Expenses group and shown under its month.</p>
-                    <button className="primary-action" type="button" onClick={() => openExpenseForm('')}>Add your first personal expense</button>
-                  </div>
-                )}
-              </div>
             ) : (
               <p className="side-empty">No groups yet</p>
             )}
@@ -1841,6 +1942,38 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                 ) : <p className="friends-request-empty">No friend requests yet.</p>}
               </section>
             </div>
+          ) : activePage === 'personal' ? (
+            <ExpenseLedger
+              expenses={personalExpenses}
+              title="Personal expenses"
+              description="Your private spending, organized month by month."
+              onAddExpense={() => openExpenseForm('')}
+              onOpenExpense={setSelectedExpense}
+            />
+          ) : activePage === 'all-expenses' ? (
+            <ExpenseLedger
+              expenses={groupExpenses}
+              title="All expenses"
+              description="Every expense from all the groups you belong to, organized by month."
+              onAddExpense={() => openExpenseForm('')}
+              onOpenExpense={setSelectedExpense}
+              userId={user._id}
+              groupExpenses
+            />
+          ) : activePage === 'recent' ? (
+            <RecentActivityPage
+              transactions={groupActivity}
+              notifications={activityNotifications}
+              friendRequests={friendRequests}
+              groups={groups}
+              userId={user._id}
+              friendBusy={friendBusy}
+              friendError={friendError}
+              errorMessage={formMessage}
+              onOpenExpense={setSelectedExpense}
+              onOpenGroup={openGroupDetails}
+              onRespondToFriendRequest={respondToFriendRequest}
+            />
           ) : (
           <>
           <div className="welcome-row">
@@ -1876,7 +2009,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           <div className="stat-grid">
             <Stat
               label="TRACKED EXPENSES"
-              value={expenses.length.toString().padStart(2, "0")}
+              value={expenses.filter((expense) => !['ACTIVITY', 'SETTLEMENT'].includes(expense.type)).length.toString().padStart(2, "0")}
               note="from your connected account"
               highlight
             />
@@ -1960,19 +2093,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               ) : (
                 <p className="empty-state">
                   No groups yet. Create your first shared space.
-                </p>
-              )}
-            </Panel>
-            <Panel title="Recent activity" eyebrow="THE PAPER TRAIL">
-              {expenses.length ? (
-                <GroupActivityList
-                  transactions={expenses.slice(0, 4)}
-                  userId={user._id}
-                  onOpenExpense={setSelectedExpense}
-                />
-              ) : (
-                <p className="empty-state">
-                  Expenses you add will appear here.
                 </p>
               )}
             </Panel>
@@ -2400,13 +2520,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               onEdit={() => editExpense(selectedExpense)}
               onDelete={() => removeExpense(selectedExpense)}
               onCommentAdded={async () => {
-                setExpenses(await apiRequest('/expenses', { headers: authHeaders }));
+                setExpenses(await apiRequest('/expenses?history=true', { headers: authHeaders }));
                 if (selectedGroup?._id === selectedExpense.groupId) await openGroupDetails(selectedGroup);
               }}
             />
           )}
         </section>
-        {activePage !== 'friends' && <aside className="dashboard-right-rail">
+        {activePage === 'overview' && <aside className="dashboard-right-rail">
           <p className="eyebrow">SPLITCARE PLUS</p>
           <div className="plus-mark">✦</div>
           <h2>Make every split feel effortless.</h2>
@@ -3335,7 +3455,15 @@ function ExpenseDetails({ expense, group, members, userId, accessToken, onClose,
     </div>
   );
 }
-function GroupActivityList({ transactions, userId, onOpenExpense }) {
+function GroupActivityList({
+  transactions,
+  userId,
+  onOpenExpense,
+  groups = [],
+  onOpenGroup,
+  onRespondToFriendRequest,
+  friendBusy = false,
+}) {
   const months = new Map();
   transactions.forEach((transaction) => {
     const date = new Date(transaction.createdAt);
@@ -3356,6 +3484,62 @@ function GroupActivityList({ transactions, userId, onOpenExpense }) {
           <h4>{month.label}</h4>
           {month.transactions.map((transaction) => {
             const date = new Date(transaction.createdAt);
+            if (transaction.feedType === 'notification') {
+              const isPaymentRequest = transaction.notificationType === 'PAYMENT_REQUEST';
+              const group = groups.find((item) => item._id === transaction.groupId);
+              const canOpenGroup = Boolean(group && typeof onOpenGroup === 'function');
+              return (
+                <article
+                  className={`group-activity-row group-activity-audit ${canOpenGroup ? 'group-activity-clickable' : ''}`}
+                  key={`notification-${transaction._id}`}
+                  role={canOpenGroup ? 'button' : undefined}
+                  tabIndex={canOpenGroup ? 0 : undefined}
+                  onClick={canOpenGroup ? () => onOpenGroup(group) : undefined}
+                  onKeyDown={canOpenGroup ? (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onOpenGroup(group);
+                    }
+                  } : undefined}
+                >
+                  <div className="group-activity-date">
+                    <span>{date.toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</span>
+                    <strong>{date.getDate()}</strong>
+                  </div>
+                  <span className="group-activity-icon">{isPaymentRequest ? '↗' : '💸'}</span>
+                  <div className="group-activity-description">
+                    <strong>{transaction.message}</strong>
+                    <small>{transaction.groupName || (isPaymentRequest ? 'PAYMENT REQUEST' : 'PAYMENT RECEIVED')}</small>
+                  </div>
+                  <span className="group-activity-update-label">{isPaymentRequest ? 'PAYMENT REQUEST' : 'PAYMENT RECEIVED'}</span>
+                </article>
+              );
+            }
+            if (transaction.feedType === 'friend-request') {
+              const sender = transaction.senderName || transaction.senderUsername || 'A member';
+              const canRespond = transaction.status === 'pending' && typeof onRespondToFriendRequest === 'function';
+              return (
+                <article className="group-activity-row group-activity-audit" key={`friend-request-${transaction._id}`}>
+                  <div className="group-activity-date">
+                    <span>{date.toLocaleDateString(undefined, { month: 'short' }).toUpperCase()}</span>
+                    <strong>{date.getDate()}</strong>
+                  </div>
+                  <span className="group-activity-icon">＋</span>
+                  <div className="group-activity-description">
+                    <strong>{sender} sent you a friend request</strong>
+                    <small>{transaction.status === 'pending' ? 'FRIEND REQUEST' : `FRIEND REQUEST ${transaction.status.toUpperCase()}`}</small>
+                  </div>
+                  {canRespond ? (
+                    <div className="notification-actions">
+                      <button type="button" disabled={friendBusy} onClick={() => onRespondToFriendRequest(transaction._id, 'accept')}>Accept</button>
+                      <button type="button" disabled={friendBusy} onClick={() => onRespondToFriendRequest(transaction._id, 'decline')}>Decline</button>
+                    </div>
+                  ) : (
+                    <span className="group-activity-update-label">{transaction.status.toUpperCase()}</span>
+                  )}
+                </article>
+              );
+            }
             if (transaction.type === 'ACTIVITY') {
               const activityIcon = transaction.activityType === 'EXPENSE_DELETED'
                 ? '🗑'
@@ -3457,6 +3641,7 @@ function GroupActivityList({ transactions, userId, onOpenExpense }) {
                   <strong>{transaction.description}</strong>
                   {(transaction.note || transaction.comments?.length > 0) && <span className="group-activity-comment" aria-label="Has a note or comments">●</span>}
                   <small>
+                    {transaction.groupName ? `${transaction.groupName} · ` : ''}
                     {transaction.category || 'Uncategorized'}
                     {transaction.subcategory ? ` · ${transaction.subcategory}` : ''}
                     {isSettlement ? ` · ${payerName} paid ${transaction.paidToName || 'a member'}` : ''}

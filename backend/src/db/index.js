@@ -119,6 +119,7 @@ const connectDB = async () => {
     CREATE TABLE IF NOT EXISTS expense_item_splits (item_id UUID NOT NULL REFERENCES expense_items(id) ON DELETE CASCADE, user_id UUID NOT NULL REFERENCES users(id), amount_owed NUMERIC(12,2) NOT NULL, PRIMARY KEY (item_id, user_id));
     CREATE TABLE IF NOT EXISTS expense_comments (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), expense_id UUID NOT NULL REFERENCES expenses(id) ON DELETE CASCADE, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, content VARCHAR(1000) NOT NULL CHECK (length(trim(content)) > 0), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, group_id UUID REFERENCES groups(id) ON DELETE CASCADE, expense_id UUID REFERENCES expenses(id) ON DELETE CASCADE, message TEXT NOT NULL, created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), read_at TIMESTAMPTZ);
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS notification_type VARCHAR(30) NOT NULL DEFAULT 'GROUP_ACTIVITY';
     CREATE TABLE IF NOT EXISTS group_activity (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE, expense_id UUID REFERENCES expenses(id) ON DELETE SET NULL, actor_id UUID NOT NULL REFERENCES users(id), activity_type VARCHAR(40) NOT NULL, description TEXT NOT NULL, details TEXT NOT NULL, amount NUMERIC(12,2), currency VARCHAR(3), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
     CREATE INDEX IF NOT EXISTS group_activity_group_created_idx ON group_activity (group_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS group_whiteboards (
@@ -151,6 +152,24 @@ const connectDB = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CHECK (paid_by <> paid_to)
     );
+    UPDATE notifications
+       SET notification_type = 'PAYMENT_REQUEST'
+     WHERE notification_type = 'GROUP_ACTIVITY'
+       AND message LIKE '% requested % from %';
+    UPDATE notifications n
+       SET notification_type = 'PAYMENT_RECEIVED'
+     WHERE n.notification_type = 'GROUP_ACTIVITY'
+       AND EXISTS (
+         SELECT 1
+           FROM group_settlements s
+           JOIN users payer ON payer.id = s.paid_by
+           JOIN users payee ON payee.id = s.paid_to
+          WHERE s.group_id = n.group_id
+            AND s.paid_by = n.created_by
+            AND s.paid_to = n.user_id
+            AND abs(extract(epoch FROM (s.created_at - n.created_at))) < 10
+            AND n.message = payer.fullnamae || ' paid ' || payee.fullnamae || ' ' || s.currency || ' ' || to_char(s.amount, 'FM999999999990.00') || '.'
+       );
   `);
   console.log("PostgreSQL connected and schema ready");
 };

@@ -27,7 +27,8 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
     }
   }
   const result = await query(
-    `SELECT e.id AS "_id", e.group_id AS "groupId", e.description,
+    `SELECT e.id AS "_id", e.group_id AS "groupId", g.name AS "groupName",
+            g.is_personal AS "isPersonal", e.description,
             e.total_amount::text AS "totalAmount", e.currency, e.type,
             e.category, e.subcategory,
             e.split_strategy AS "splitStrategy", e.paid_by AS "paidBy",
@@ -53,12 +54,15 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
             ) ORDER BY ec.created_at) FROM expense_comments ec
               JOIN users comment_author ON comment_author.id = ec.user_id
               WHERE ec.expense_id = e.id), '[]'::json) AS comments
-     FROM expenses e JOIN users u ON u.id = e.paid_by
+     FROM expenses e
+     JOIN users u ON u.id = e.paid_by
+     JOIN groups g ON g.id = e.group_id
      ${groupId
 			? 'WHERE e.group_id = $1'
-			: `WHERE (e.paid_by = $1 OR EXISTS (
-		          SELECT 1 FROM expense_splits es WHERE es.expense_id = e.id AND es.user_id = $1
-		        ))`}
+			: `WHERE (
+		          EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = e.group_id AND gm.user_id = $1)
+		          OR (g.is_personal AND g.created_by = $1)
+		        )`}
      ORDER BY e.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
     [groupId || userId],
   );
@@ -68,6 +72,7 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
               a.activity_type AS "activityType", 'ACTIVITY' AS type,
               a.description, a.details, a.amount::text AS "totalAmount",
               a.currency, a.created_at AS "createdAt", a.actor_id AS "paidBy",
+              FALSE AS "isPersonal",
               actor.username AS "paidByUsername", actor.fullnamae AS "paidByName",
               ARRAY[]::text[] AS "participantIds", '[]'::json AS splits, '[]'::json AS items
        FROM group_activity a
@@ -75,11 +80,33 @@ export const listExpenses = async (groupId, userId, unlimited = false) => {
        JOIN groups g ON g.id = a.group_id
        JOIN users actor ON actor.id = a.actor_id
        WHERE NOT g.is_personal
-       ORDER BY a.created_at DESC
-       LIMIT 100`,
+       ORDER BY a.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
+      [userId],
+    );
+    const settlements = await query(
+      `SELECT s.id AS "_id", s.group_id AS "groupId", g.name AS "groupName",
+              FALSE AS "isPersonal",
+              'Settlement to ' || recipient.fullnamae AS description,
+              s.amount::text AS "totalAmount", s.currency, 'SETTLEMENT' AS type,
+              'Settlement' AS category, NULL::text AS subcategory,
+              'SETTLEMENT' AS "splitStrategy", s.paid_by AS "paidBy",
+              s.created_at AS "createdAt", s.note,
+              s.payment_proof_url AS "paymentProofUrl",
+              payer.username AS "paidByUsername", payer.fullnamae AS "paidByName",
+              ARRAY[s.paid_by::text, s.paid_to::text] AS "participantIds",
+              '[]'::json AS items, s.paid_to AS "paidTo",
+              recipient.username AS "paidToUsername", recipient.fullnamae AS "paidToName",
+              '[]'::json AS splits
+       FROM group_settlements s
+       JOIN groups g ON g.id = s.group_id AND NOT g.is_personal
+       JOIN group_members gm ON gm.group_id = s.group_id AND gm.user_id = $1
+       JOIN users payer ON payer.id = s.paid_by
+       JOIN users recipient ON recipient.id = s.paid_to
+       ORDER BY s.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
       [userId],
     );
     return [...result.rows, ...activity.rows]
+      .concat(settlements.rows)
       .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
       .slice(0, unlimited ? undefined : 100);
   }

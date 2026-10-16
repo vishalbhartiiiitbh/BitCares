@@ -24,7 +24,7 @@ const validateExpenseOptions = (body) => {
 };
 
 export const list = async (req, res) => {
-  const includeHistory = Boolean(req.query.groupId) && req.query.history === 'true';
+  const includeHistory = req.query.history === 'true';
   res.json({ data: await listExpenses(req.query.groupId, req.user._id, includeHistory) });
 };
 

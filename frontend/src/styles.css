@@ -3201,6 +3201,66 @@ input::placeholder {
     color: #687269;
 }
 
+.recent-activity-page .welcome-row {
+    margin-bottom: 24px;
+}
+
+.recent-notifications-section,
+.recent-group-activity {
+    margin-bottom: 34px;
+}
+
+.recent-notification {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 13px 4px;
+    border: 0;
+    border-bottom: 1px solid #e9e6de;
+    background: transparent;
+    color: #303a32;
+    text-align: left;
+}
+
+.recent-notification-copy {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+}
+
+.recent-notification-copy strong {
+    font-size: 12px;
+}
+
+.recent-notification-copy span {
+    color: #657067;
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.recent-notification-copy small {
+    color: #879087;
+    font-size: 10px;
+}
+
+.recent-notification-button {
+    cursor: pointer;
+}
+
+.recent-notification-button:hover {
+    background: #f8f8f3;
+}
+
+.recent-notification.unread .recent-notification-copy strong {
+    color: #25856d;
+}
+
+.recent-group-activity .group-activity-list {
+    margin-top: 14px;
+}
+
 .friend-request-status {
     color: #7c857b;
     font-size: 10px;

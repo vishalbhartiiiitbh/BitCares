@@ -16,8 +16,8 @@ export const recordGroupActivity = async (client, {
     [groupId, expenseId, actorId, activityType, description, details, amount, currency],
   );
   await client.query(
-    `INSERT INTO notifications (user_id, group_id, expense_id, message, created_by)
-     SELECT user_id, $1, $2, $3, $4 FROM group_members
+    `INSERT INTO notifications (user_id, group_id, expense_id, message, created_by, notification_type)
+     SELECT user_id, $1, $2, $3, $4, 'GROUP_ACTIVITY' FROM group_members
      WHERE group_id = $1 AND user_id <> $4`,
     [groupId, expenseId, details, actorId],
   );

@@ -44,9 +44,10 @@ export const currentUser = async (req, res) => res.json({ data: { user: req.user
 export const listNotifications = async (req, res) => {
   const result = await query(
     `SELECT id AS "_id", group_id AS "groupId", expense_id AS "expenseId",
-            message, created_at AS "createdAt", read_at AS "readAt"
+            message, notification_type AS "notificationType",
+            created_by AS "createdBy", created_at AS "createdAt", read_at AS "readAt"
      FROM notifications WHERE user_id = $1
-     ORDER BY created_at DESC LIMIT 50`,
+     ORDER BY created_at DESC`,
     [req.user._id],
   );
   res.json({ data: result.rows });

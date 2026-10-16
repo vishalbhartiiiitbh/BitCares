@@ -79,9 +79,10 @@ export const createPaymentRequest = async ({
       [groupId, requesterId, description, details, formattedAmount, currency],
     );
     const notificationResult = await client.query(
-      `INSERT INTO notifications (user_id, group_id, message, created_by)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id AS "_id", group_id AS "groupId", message, created_at AS "createdAt",
+      `INSERT INTO notifications (user_id, group_id, message, created_by, notification_type)
+       VALUES ($1, $2, $3, $4, 'PAYMENT_REQUEST')
+       RETURNING id AS "_id", group_id AS "groupId", message,
+                 notification_type AS "notificationType", created_at AS "createdAt",
                  read_at AS "readAt"`,
       [memberId, groupId, details, requesterId],
     );
