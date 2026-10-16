@@ -71,7 +71,7 @@ cp .env.example .env
 npm run dev
 ```
 
-The frontend runs at `http://localhost:5173` and uses `Backend_API_URL` from `frontend/.env` to reach the backend.
+The frontend runs at `http://localhost:5173` and uses `VITE_API_URL` from `frontend/.env` to reach the backend.
 
 The connected dashboard uses these authenticated endpoints:
 
