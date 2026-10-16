@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-const API_URL = import.meta.env.Backend_API_URL || "/api";
+const API_URL = process.env.Backend_API_URL || "/api";
 const emptyForm = { username: "", email: "", fullnamae: "", password: "" };
 
 async function apiRequest(path, options = {}) {
