@@ -1,7 +1,11 @@
 import pg from "pg";
 
 const { Pool } = pg;
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // Required for Supabase pooler connections
+  connectionTimeoutMillis: 10000,    // Fail fast instead of hanging forever
+});
 export const query = (text, params) => pool.query(text, params);
 
 export const withTransaction = async (callback) => {
