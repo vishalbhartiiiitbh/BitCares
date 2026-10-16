@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   listFriendRequests,
   listFriends,
+  listSentFriendRequests,
   removeFriend,
   respondToFriendRequest,
   sendFriendRequest,
@@ -13,6 +14,7 @@ const router = Router();
 
 router.use(requireAuth);
 router.get('/', asyncHandler(listFriends));
+router.get('/requests/sent', asyncHandler(listSentFriendRequests));
 router.get('/requests', asyncHandler(listFriendRequests));
 router.post('/requests', asyncHandler(sendFriendRequest));
 router.post('/requests/:requestId/respond', asyncHandler(respondToFriendRequest));
