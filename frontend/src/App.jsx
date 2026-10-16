@@ -67,23 +67,6 @@ function getDefaultSplitValues(strategy, participants, totalAmount) {
   return defaults;
 }
 
-function groupExpensesByMonth(expenses) {
-  const months = new Map();
-  expenses.forEach((expense) => {
-    const date = new Date(expense.createdAt);
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    if (!months.has(key)) {
-      months.set(key, {
-        key,
-        label: date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
-        expenses: [],
-      });
-    }
-    months.get(key).expenses.push(expense);
-  });
-  return [...months.values()].sort((first, second) => second.key.localeCompare(first.key));
-}
-
 function getExpenseMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -727,49 +710,7 @@ function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpen
         groupExpenses ? (
           <GroupActivityList transactions={expenses} userId={userId} onOpenExpense={onOpenExpense} showGroupName />
         ) : (
-          <div className="personal-expense-months">
-            {groupExpensesByMonth(expenses).map((month) => {
-              const totals = new Map();
-              month.expenses.forEach((expense) => {
-                totals.set(expense.currency, (totals.get(expense.currency) || 0) + Number(expense.totalAmount));
-              });
-              return (
-                <section className="personal-expense-month" key={month.key}>
-                  <header>
-                    <div><p className="eyebrow">MONTHLY RECORD</p><h2>{month.label}</h2></div>
-                    <span>{month.expenses.length} {month.expenses.length === 1 ? 'expense' : 'expenses'} · {[...totals].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ')}</span>
-                  </header>
-                  <div className="personal-expense-list">
-                    {month.expenses.map((expense) => (
-                      <article
-                        className="personal-expense-row"
-                        key={expense._id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => onOpenExpense(expense)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            onOpenExpense(expense);
-                          }
-                        }}
-                      >
-                        <div className="personal-expense-icon">{expenseCategories.find((category) => category.name === expense.category)?.icon || '🧾'}</div>
-                        <div className="personal-expense-info">
-                          <strong>{expense.description}</strong>
-                          <span>{expense.category || 'Uncategorized'}{expense.subcategory ? ` · ${expense.subcategory}` : ''} · {new Date(expense.createdAt).toLocaleDateString()}</span>
-                          {expense.note && <small>{expense.note}</small>}
-                          {expense.items?.map((item, index) => <small key={`${expense._id}-${index}`}>{item.description}: {expense.currency} {item.amount}</small>)}
-                          {expense.paymentProofUrl && <a className="expense-proof-link" href={expense.paymentProofUrl} target="_blank" rel="noreferrer">View receipt</a>}
-                        </div>
-                        <strong>{expense.currency} {expense.totalAmount}</strong>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
+          <GroupActivityList transactions={expenses} userId={userId} onOpenExpense={onOpenExpense} personalLedger />
         )
       ) : (
         <div className="friends-empty-state">
@@ -3463,6 +3404,7 @@ function GroupActivityList({
   onOpenGroup,
   onRespondToFriendRequest,
   friendBusy = false,
+  personalLedger = false,
 }) {
   const months = new Map();
   transactions.forEach((transaction) => {
@@ -3593,7 +3535,11 @@ function GroupActivityList({
             let shareAmount = null;
             let shareClass = 'not-involved';
 
-            if (isSettlement && transaction.paidTo === userId) {
+            if (personalLedger) {
+              shareLabel = 'you spent';
+              shareAmount = total;
+              shareClass = 'activity-share-negative';
+            } else if (isSettlement && transaction.paidTo === userId) {
               shareLabel = `${payerName} paid you`;
               shareAmount = total;
               shareClass = 'activity-share-positive';
@@ -3641,7 +3587,7 @@ function GroupActivityList({
                   <strong>{transaction.description}</strong>
                   {(transaction.note || transaction.comments?.length > 0) && <span className="group-activity-comment" aria-label="Has a note or comments">●</span>}
                   <small>
-                    {transaction.groupName ? `${transaction.groupName} · ` : ''}
+                    {transaction.groupName && !personalLedger ? `${transaction.groupName} · ` : ''}
                     {transaction.category || 'Uncategorized'}
                     {transaction.subcategory ? ` · ${transaction.subcategory}` : ''}
                     {isSettlement ? ` · ${payerName} paid ${transaction.paidToName || 'a member'}` : ''}
