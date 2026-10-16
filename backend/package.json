@@ -22,7 +22,10 @@
     "pg": "^8.23.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10",
+    "nodemon": "^3.1.14",
     "prettier": "^3.9.9"
+  },
+  "allowScripts": {
+    "bcrypt@6.0.0": true
   }
 }
