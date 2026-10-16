@@ -71,6 +71,72 @@ export const createFriendExpense = async ({ userId, friendId, expense }) => {
   return addExpense({ ...expense, groupId: group._id, friendId, actorId: userId });
 };
 
+export const listFriendActivity = async (userId) => {
+  const ledgers = await query(
+    `SELECT f.user_low AS "userLow", f.user_high AS "userHigh",
+            friend.id AS "friendId", friend.username AS "friendUsername",
+            friend.fullnamae AS "friendName", fl.group_id AS "groupId"
+     FROM friendships f
+     JOIN users friend ON friend.id = CASE
+       WHEN f.user_low = $1 THEN f.user_high ELSE f.user_low END
+     LEFT JOIN friend_ledgers fl ON fl.user_low = f.user_low AND fl.user_high = f.user_high
+     WHERE f.user_low = $1 OR f.user_high = $1
+     ORDER BY friend.fullnamae, friend.username`,
+    [userId],
+  );
+  const transactions = [];
+  for (const ledger of ledgers.rows) {
+    if (!ledger.groupId) continue;
+    const activity = await listExpenses(ledger.groupId, userId, true, true);
+    transactions.push(...activity.map((item) => ({
+      ...item,
+      groupName: `With ${ledger.friendName || ledger.friendUsername}`,
+      friendId: ledger.friendId,
+      friendName: ledger.friendName || ledger.friendUsername,
+      isDirect: true,
+    })));
+  }
+
+  const settlements = await query(
+    `SELECT s.id AS "_id", s.paid_by AS "paidBy", s.paid_to AS "paidTo",
+            payer.username AS "paidByUsername", payer.fullnamae AS "paidByName",
+            recipient.username AS "paidToUsername", recipient.fullnamae AS "paidToName",
+            s.amount::text AS "totalAmount", s.currency, s.note,
+            s.created_at AS "createdAt",
+            'FRIEND_SETTLEMENT' AS type, 'Settlement' AS category,
+            'SETTLEMENT' AS "splitStrategy",
+            ARRAY[s.paid_by::text, s.paid_to::text] AS "participantIds",
+            COALESCE(json_agg(json_build_object(
+              'groupId', a.group_id, 'groupName', g.name,
+              'amount', a.amount::text, 'currency', a.currency,
+              'exchangeRate', a.exchange_rate::text
+            )) FILTER (WHERE a.id IS NOT NULL), '[]'::json) AS allocations,
+            friend.id AS "friendId",
+            friend.fullnamae AS "friendName",
+            'With ' || COALESCE(friend.fullnamae, friend.username) AS "groupName",
+            TRUE AS "isDirect"
+     FROM friend_settlements s
+     JOIN friendships f
+       ON f.user_low = LEAST(s.paid_by, s.paid_to)
+      AND f.user_high = GREATEST(s.paid_by, s.paid_to)
+     JOIN users payer ON payer.id = s.paid_by
+     JOIN users recipient ON recipient.id = s.paid_to
+     JOIN users friend ON friend.id = CASE WHEN s.paid_by = $1 THEN s.paid_to ELSE s.paid_by END
+     LEFT JOIN friend_settlement_allocations a ON a.settlement_id = s.id
+     LEFT JOIN groups g ON g.id = a.group_id
+     WHERE s.paid_by = $1 OR s.paid_to = $1
+     GROUP BY s.id, payer.username, payer.fullnamae, recipient.username,
+              recipient.fullnamae, friend.id, friend.fullnamae, friend.username
+     ORDER BY s.created_at DESC`,
+    [userId],
+  );
+  transactions.push(...settlements.rows.map((settlement) => ({
+    ...settlement,
+    description: `${settlement.paidByName} paid ${settlement.paidToName}`,
+  })));
+  return transactions.sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
+};
+
 export const getFriendHistory = async (userId, friendId) => {
   if (!validId(userId) || !validId(friendId) || userId === friendId) {
     throw Object.assign(new Error('Choose a valid friend'), { statusCode: 400 });
@@ -135,12 +201,13 @@ export const getFriendHistory = async (userId, friendId) => {
     ...group,
     balances: balanceByGroup.get(group.groupId) || [],
   }));
-  const transactions = [];
+  const sharedGroupTransactions = [];
   for (const group of groups) {
     const activity = await listExpenses(group.groupId, userId, true, Boolean(group.isDirect));
-    transactions.push(...activity.map((item) => ({
+    sharedGroupTransactions.push(...activity.map((item) => ({
       ...item,
       groupName: group.groupName,
+      friendId,
       isDirect: Boolean(group.isDirect),
     })));
   }
@@ -164,20 +231,26 @@ export const getFriendHistory = async (userId, friendId) => {
      ORDER BY s.created_at DESC`,
     [userId, friendId],
   );
-  transactions.push(...settlements.rows.map((settlement) => ({
+  const friendSettlements = settlements.rows.map((settlement) => ({
     ...settlement,
     description: `${settlement.paidByName} paid ${settlement.paidToName}`,
+    friendId,
     type: 'FRIEND_SETTLEMENT',
-  })));
+    isDirect: true,
+  }));
 
   const expenseTotalsByGroup = new Map();
-  for (const transaction of transactions) {
+  for (const transaction of sharedGroupTransactions) {
     if (['ACTIVITY', 'SETTLEMENT', 'FRIEND_SETTLEMENT'].includes(transaction.type)) continue;
     const totals = expenseTotalsByGroup.get(transaction.groupId) || new Map();
     totals.set(transaction.currency, (totals.get(transaction.currency) || new Decimal(0))
       .plus(transaction.totalAmount));
     expenseTotalsByGroup.set(transaction.groupId, totals);
   }
+  const personalTransactions = sharedGroupTransactions.filter((transaction) => (
+    transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type)
+  ));
+  personalTransactions.push(...friendSettlements);
   const conversionRates = {};
   const currenciesToConvert = new Set(balancesResult.rows.map((row) => row.currency));
   for (const totals of expenseTotalsByGroup.values()) {
@@ -202,7 +275,7 @@ export const getFriendHistory = async (userId, friendId) => {
     friend,
     defaultCurrency,
     groups: convertedGroups,
-    transactions: transactions.sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt)),
+    transactions: personalTransactions.sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt)),
     exchangeRates: conversionRates,
   };
 };

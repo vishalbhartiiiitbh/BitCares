@@ -2,6 +2,7 @@ import { query, withTransaction } from '../db/index.js';
 import {
   createFriendExpense as addFriendExpense,
   getFriendHistory,
+  listFriendActivity as getFriendActivity,
   settleFriendBalances,
 } from '../services/friendLedgerService.js';
 import { deleteExpense, updateExpense } from '../services/expenseService.js';
@@ -34,6 +35,10 @@ export const listFriends = async (req, res) => {
 
 export const friendHistory = async (req, res) => {
   res.json({ data: await getFriendHistory(req.user._id, req.params.friendId) });
+};
+
+export const friendActivity = async (req, res) => {
+  res.json({ data: await getFriendActivity(req.user._id) });
 };
 
 export const createFriendExpense = async (req, res) => {

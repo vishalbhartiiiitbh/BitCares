@@ -685,7 +685,20 @@ function Brand() {
   );
 }
 
-function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpense, groupExpenses = false, userId }) {
+function ExpenseLedger({
+  expenses,
+  title,
+  description,
+  onAddExpense,
+  onOpenExpense,
+  groupExpenses = false,
+  userId,
+  friends = [],
+  selectedFriendId = '',
+  onFriendChange,
+  friendExpensesError = '',
+  friendExpensesBusy = false,
+}) {
   const [search, setSearch] = useState('');
   const searchTerms = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const visibleExpenses = expenses.filter((expense) => {
@@ -706,14 +719,28 @@ function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpen
     <div className="personal-expenses-page">
       <div className="welcome-row">
         <div>
-          <p className="eyebrow">{groupExpenses ? 'YOUR GROUPS' : 'ONLY YOU CAN SEE THIS'}</p>
+          <p className="eyebrow">{groupExpenses ? 'YOUR GROUPS' : selectedFriendId ? 'ONE-TO-ONE WITH FRIEND' : 'ONLY YOU CAN SEE THIS'}</p>
           <h1>{title}</h1>
           <p className="lede">{description}</p>
         </div>
         <button className="primary-action" type="button" onClick={onAddExpense}>
-          {groupExpenses ? '＋ Add an expense' : '＋ Add personal expense'}
+          {groupExpenses ? '＋ Add an expense' : selectedFriendId ? '＋ Add expense with friend' : '＋ Add personal expense'}
         </button>
       </div>
+      {onFriendChange && (
+        <label className="personal-friend-filter">
+          Show personal expenses
+          <select value={selectedFriendId} onChange={(event) => onFriendChange(event.target.value)}>
+            <option value="">Only me</option>
+            {friends.map((friend) => (
+              <option key={friend._id} value={friend._id}>
+                With {friend.fullnamae || friend.username}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {friendExpensesError && <p className="error-message" role="alert">{friendExpensesError}</p>}
       <div className="personal-expenses-summary">
         <strong>{expenses.length} {expenses.length === 1 ? 'expense' : 'expenses'}</strong>
         <span>{[...totalByCurrency].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ') || 'No spending recorded'}</span>
@@ -730,13 +757,13 @@ function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpen
         </label>
         {search.trim() && <span>{visibleExpenses.length} of {expenses.length} expenses</span>}
       </div>
-      {expenses.length ? (
+      {friendExpensesBusy ? <p className="empty-state">Loading expenses with your friend…</p> : expenses.length ? (
         visibleExpenses.length ? (
           <GroupActivityList
             transactions={visibleExpenses}
             userId={userId}
             onOpenExpense={onOpenExpense}
-            personalLedger={!groupExpenses}
+            personalLedger={!groupExpenses && !selectedFriendId}
             showGroupName={groupExpenses}
           />
         ) : <p className="empty-state">No expenses match your search. Try a description or amount.</p>
@@ -746,7 +773,9 @@ function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpen
           <h2>No {groupExpenses ? 'group' : 'personal'} expenses yet</h2>
           <p>{groupExpenses
             ? 'Expenses you and your group members add will appear here, organized by month.'
-            : 'Add an expense just for yourself. It will be saved in your private Personal Expenses group and shown under its month.'}</p>
+            : selectedFriendId
+              ? 'Direct expenses you share with this friend will appear here. Group expenses are shown in All expenses.'
+              : 'Add an expense just for yourself. It will be saved in your private Personal Expenses group and shown under its month.'}</p>
           <button className="primary-action" type="button" onClick={onAddExpense}>
             {groupExpenses ? 'Add your first group expense' : 'Add your first personal expense'}
           </button>
@@ -791,6 +820,7 @@ function RecentActivityPage({ transactions, notifications, friendRequests, group
 }
 
 function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, onBack, onAddExpense, onRefresh, onOpenExpense }) {
+  const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementMode, setSettlementMode] = useState('one');
   const [payerId, setPayerId] = useState(userId);
   const [selectedKeys, setSelectedKeys] = useState([]);
@@ -798,6 +828,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   const [settlementNote, setSettlementNote] = useState('');
   const [settlementBusy, setSettlementBusy] = useState(false);
   const [settlementError, setSettlementError] = useState('');
+  const settlementPanelRef = useRef(null);
   const defaultCurrency = history?.defaultCurrency || 'INR';
   const balanceItems = (history?.groups || []).flatMap((group) => group.balances.map((balance) => ({
     ...balance,
@@ -818,10 +849,22 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
     .reduce((sum, balance) => sum + Number(balance.convertedBalance), 0);
   const userOwes = balanceItems.filter((balance) => Number(balance.convertedBalance) < 0)
     .reduce((sum, balance) => sum + Math.abs(Number(balance.convertedBalance)), 0);
+  const personalTransactions = (history?.transactions || []).filter((transaction) => (
+    (transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type))
+    || transaction.type === 'FRIEND_SETTLEMENT'
+  ));
+  const personalExpenseTotal = (history?.groups || [])
+    .filter((group) => group.isDirect)
+    .flatMap((group) => group.expenseTotals || [])
+    .reduce((total, expenseTotal) => total + Number(expenseTotal.convertedAmount), 0);
 
   useEffect(() => {
     setSettlementAmount(maxAmount > 0 ? maxAmount.toFixed(2) : '');
   }, [maxAmount]);
+
+  useEffect(() => {
+    if (settlementOpen) settlementPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [settlementOpen]);
 
   const changeMode = (mode) => {
     setSettlementMode(mode);
@@ -865,7 +908,12 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   return (
     <div className="friend-history-page">
       <header className="friend-history-heading">
-        <button type="button" className="friend-history-back" onClick={onBack}>← Friends</button>
+        <button
+          type="button"
+          className="friend-history-back"
+          onClick={onBack}
+          aria-label="Close friend history and return to dashboard"
+        >×</button>
         <div className="friend-history-person">
           {friend.coverimage
             ? <img src={friend.coverimage} alt="" />
@@ -876,7 +924,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
           <button type="button" className="quiet-button" onClick={onAddExpense}>＋ Add expense</button>
           <button type="button" className="primary-action" onClick={() => {
             setSettlementError('');
-            document.getElementById('friend-settlement-panel')?.scrollIntoView({ behavior: 'smooth' });
+            setSettlementOpen(true);
           }}>Settle up</button>
         </div>
       </header>
@@ -886,7 +934,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
         <div><span>You owe {friend.fullnamae || friend.username}</span><strong>{defaultCurrency} {userOwes.toFixed(2)}</strong></div>
         <small>Converted using daily reference exchange rates.</small>
       </section>
-      <div className="friend-history-layout">
+      <div className={`friend-history-layout ${settlementOpen ? 'settlement-open' : ''}`}>
         <section className="friend-history-groups">
           <div className="friend-history-section-heading">
             <div><p className="eyebrow">YOUR BALANCES</p><h2>By group</h2></div>
@@ -929,10 +977,25 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
               }) : <p className="friend-ledger-settled">Settled up</p>}
             </article>
           )) : <p className="empty-state">You have no shared group or direct friend balances yet.</p>}
+          <section className="friend-history-personal-spend">
+            <div className="friend-history-section-heading">
+              <div><p className="eyebrow">ONE-TO-ONE LEDGER</p><h2>Personal spend with {friend.fullnamae || friend.username}</h2></div>
+              <span>{personalTransactions.length} records · {defaultCurrency} {personalExpenseTotal.toFixed(2)}</span>
+            </div>
+            {busy ? <p className="empty-state">Loading personal expenses…</p>
+              : personalTransactions.length
+                ? <GroupActivityList
+                    transactions={personalTransactions}
+                    userId={userId}
+                    onOpenExpense={onOpenExpense}
+                  />
+                : <p className="empty-state">Personal expenses and payments between you and {friend.fullnamae || friend.username} will appear here.</p>}
+          </section>
         </section>
-        <section className="friend-history-settlement" id="friend-settlement-panel">
+        {settlementOpen && <section className="friend-history-settlement" ref={settlementPanelRef} id="friend-settlement-panel">
           <div className="friend-history-section-heading">
             <div><p className="eyebrow">PAYMENTS</p><h2>Settle balances</h2></div>
+            <button type="button" className="friend-history-back" onClick={() => setSettlementOpen(false)}>Close</button>
           </div>
           <form onSubmit={saveSettlement}>
             <fieldset className="friend-settlement-modes">
@@ -971,18 +1034,8 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
               {settlementBusy ? 'Saving payment…' : 'Record payment'}
             </button>
           </form>
-        </section>
+        </section>}
       </div>
-      <section className="friend-history-activity">
-        <div className="friend-history-section-heading">
-          <div><p className="eyebrow">THE PAPER TRAIL</p><h2>Expenses and payments</h2></div>
-          <span>{history?.transactions?.length || 0} records</span>
-        </div>
-        {busy ? <p className="empty-state">Loading friend history…</p>
-          : history?.transactions?.length
-            ? <GroupActivityList transactions={history.transactions} userId={userId} onOpenExpense={onOpenExpense} />
-            : <p className="empty-state">Expenses and payment history with this friend will appear here.</p>}
-      </section>
     </div>
   );
 }
@@ -992,7 +1045,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [groups, setGroups] = useState([]);
   const [personalGroup, setPersonalGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
+  const [friendActivities, setFriendActivities] = useState([]);
   const [personalExpenses, setPersonalExpenses] = useState([]);
+  const [personalFriendId, setPersonalFriendId] = useState('');
+  const [personalFriendExpenses, setPersonalFriendExpenses] = useState([]);
+  const [personalFriendExpensesBusy, setPersonalFriendExpensesBusy] = useState(false);
+  const [personalFriendExpensesError, setPersonalFriendExpensesError] = useState('');
+  const personalFriendRequestRef = useRef(0);
   const [activityNotifications, setActivityNotifications] = useState([]);
   const [friends, setFriends] = useState([]);
   const [selectedFriend, setSelectedFriend] = useState(null);
@@ -1062,6 +1121,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [showProfile, setShowProfile] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationControlRef = useRef(null);
+  const profileControlRef = useRef(null);
   const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', defaultCurrency: user.defaultCurrency || 'INR', currentPassword: '', newPassword: '', coverimage: null });
   const [passwordUpdateEnabled, setPasswordUpdateEnabled] = useState(false);
   const [currentPasswordVerified, setCurrentPasswordVerified] = useState(false);
@@ -1080,6 +1140,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     document.addEventListener('pointerdown', closeOnOutsideClick);
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
   }, [showNotifications]);
+
+  useEffect(() => {
+    if (!showProfileMenu) return undefined;
+    const closeOnOutsideClick = (event) => {
+      if (!profileControlRef.current?.contains(event.target)) setShowProfileMenu(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [showProfileMenu]);
 
   useEffect(() => {
     if (!profileForm.coverimage) {
@@ -1120,13 +1189,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       apiRequest("/groups", { headers: authHeaders }),
       apiRequest("/expenses?history=true", { headers: authHeaders }),
       apiRequest("/expenses/personal", { headers: authHeaders }),
+      apiRequest("/friends/activity", { headers: authHeaders }),
     ])
-      .then(([groupData, expenseData, personalExpenseData]) => {
+      .then(([groupData, expenseData, personalExpenseData, friendActivityData]) => {
         const loadedGroups = groupData || [];
         setGroups(loadedGroups.filter((group) => !group.isPersonal));
         setPersonalGroup(loadedGroups.find((group) => group.isPersonal) || null);
         setExpenses(expenseData || []);
         setPersonalExpenses(personalExpenseData || []);
+        setFriendActivities(friendActivityData || []);
       })
       .catch((error) => setFormMessage(error.message));
   }, [accessToken]);
@@ -1135,12 +1206,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     if (activePage !== 'recent') return;
     Promise.all([
       apiRequest('/expenses?history=true', { headers: authHeaders }),
+      apiRequest('/friends/activity', { headers: authHeaders }),
       apiRequest('/users/notifications', { headers: authHeaders }),
       apiRequest('/friends/requests', { headers: authHeaders }),
       apiRequest('/users/notifications/read', { method: 'PATCH', headers: authHeaders }),
     ])
-      .then(([activity, notifications, requests]) => {
+      .then(([activity, friendActivity, notifications, requests]) => {
         setExpenses(activity || []);
+        setFriendActivities(friendActivity || []);
         setActivityNotifications((notifications || []).map((item) => ({
           ...item,
           readAt: item.readAt || new Date().toISOString(),
@@ -1168,14 +1241,22 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   }, [accessToken]);
 
   const refreshFriendData = async () => {
-    const [friendData, requestData, sentRequestData] = await Promise.all([
+    const [friendData, requestData, sentRequestData, friendActivityData] = await Promise.all([
       apiRequest('/friends', { headers: authHeaders }),
       apiRequest('/friends/requests', { headers: authHeaders }),
       apiRequest('/friends/requests/sent', { headers: authHeaders }),
+      apiRequest('/friends/activity', { headers: authHeaders }),
     ]);
     setFriends(friendData);
     setFriendRequests(requestData);
     setSentFriendRequests(sentRequestData);
+    setFriendActivities(friendActivityData || []);
+  };
+
+  const refreshFriendActivity = async () => {
+    const activity = await apiRequest('/friends/activity', { headers: authHeaders });
+    setFriendActivities(activity || []);
+    return activity || [];
   };
 
   useEffect(() => {
@@ -1287,6 +1368,32 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     }
   };
 
+  const loadPersonalFriendExpenses = async (friendId) => {
+    const requestId = ++personalFriendRequestRef.current;
+    if (!friendId) {
+      setPersonalFriendExpenses([]);
+      setPersonalFriendExpensesError('');
+      setPersonalFriendExpensesBusy(false);
+      return [];
+    }
+    setPersonalFriendExpenses([]);
+    setPersonalFriendExpensesBusy(true);
+    setPersonalFriendExpensesError('');
+    try {
+      const history = await apiRequest(`/friends/${friendId}/history`, { headers: authHeaders });
+      const directExpenses = (history.transactions || []).filter((transaction) => (
+        transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type)
+      ));
+      if (requestId === personalFriendRequestRef.current) setPersonalFriendExpenses(directExpenses);
+      return directExpenses;
+    } catch (error) {
+      if (requestId === personalFriendRequestRef.current) setPersonalFriendExpensesError(error.message);
+      throw error;
+    } finally {
+      if (requestId === personalFriendRequestRef.current) setPersonalFriendExpensesBusy(false);
+    }
+  };
+
   const openFriendDetails = async (friend) => {
     setSelectedFriend(friend);
     setFriendHistory(null);
@@ -1299,7 +1406,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   };
 
   const refreshFriendHistory = async () => {
-    if (selectedFriend) await loadFriendHistory(selectedFriend);
+    const refreshes = [refreshFriendActivity()];
+    if (selectedFriend) refreshes.push(loadFriendHistory(selectedFriend));
+    await Promise.all(refreshes);
   };
 
   const openFriendExpenseForm = (friend = selectedFriend) => {
@@ -1323,7 +1432,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     });
     setExpenseError('');
     setEditingExpenseId('');
-    setFriendExpenseTarget(null);
     setClearExpenseProof(false);
     setShowExpenseCategories(false);
     setShowExpenseForm(true);
@@ -1405,7 +1513,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     event.preventDefault();
     const group = groups.find((item) => item._id === expenseDraft.groupId);
     const targetFriendId = friendExpenseTarget;
+    const targetFriend = friends.find((friend) => friend._id === targetFriendId);
     const participants = expenseDraft.participantIds;
+    if (targetFriendId && (!targetFriend || !participants.includes(user._id) || !participants.includes(targetFriendId))) {
+      setExpenseError('Select a friend and include both people in the one-to-one expense.');
+      return;
+    }
     if (!participants.length) {
       setExpenseError('Select at least one person to split this expense with.');
       return;
@@ -1509,12 +1622,18 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             .catch((error) => setFormMessage(error.message));
         }
       }
-      if (targetFriendId && selectedFriend) {
+      if (targetFriendId && activePage === 'personal' && personalFriendId === targetFriendId) {
+        await loadPersonalFriendExpenses(targetFriendId);
+      } else if (targetFriendId && selectedFriend?._id === targetFriendId) {
         await loadFriendHistory(selectedFriend);
       } else {
         apiRequest('/expenses?history=true', { headers: authHeaders })
           .then((data) => setExpenses(data || []))
           .catch((error) => setFormMessage(`Expense saved, but recent activity could not be refreshed: ${error.message}`));
+      }
+      if (targetFriendId) {
+        refreshFriendActivity()
+          .catch((error) => setFormMessage(`Expense saved, but friend activity could not be refreshed: ${error.message}`));
       }
       if (selectedGroup?._id === expenseDraft.groupId) {
         await openGroupDetails({ ...selectedGroup, ...group });
@@ -1546,6 +1665,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       existingProofUrl: null,
     });
     setExpenseError('');
+    setFriendExpenseTarget(null);
     setEditingExpenseId('');
     setClearExpenseProof(false);
     setShowExpenseCategories(false);
@@ -1554,7 +1674,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
 
   const editExpense = (expense) => {
     const group = groups.find((item) => item._id === expense.groupId);
-    const isFriendExpense = friendHistory?.groups.some((item) => item.groupId === expense.groupId && item.isDirect);
+    const matchingFriendHistoryGroup = friendHistory?.groups.find((item) => item.groupId === expense.groupId && item.isDirect);
+    const isFriendExpense = expense.isDirect || Boolean(matchingFriendHistoryGroup);
     const participants = expense.participantIds || [user._id];
     setExpenseDraft({
       description: expense.description || '',
@@ -1577,7 +1698,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       paymentProof: null,
       existingProofUrl: expense.paymentProofUrl || null,
     });
-    setFriendExpenseTarget(isFriendExpense ? selectedFriend?._id || null : null);
+    setFriendExpenseTarget(isFriendExpense
+      ? expense.friendId || (matchingFriendHistoryGroup ? selectedFriend?._id : personalFriendId) || null
+      : null);
     setEditingExpenseId(expense._id);
     setClearExpenseProof(false);
     setExpenseError('');
@@ -1589,20 +1712,31 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const removeExpense = async (expense) => {
     if (!window.confirm(`Delete “${expense.description}” (${expense.currency} ${Number(expense.totalAmount).toFixed(2)})? Group balances will be adjusted and the deletion will appear in group activity.`)) return null;
     try {
-      const isFriendExpense = friendHistory?.groups.some((group) => group.groupId === expense.groupId && group.isDirect);
-      const endpoint = isFriendExpense && selectedFriend
-        ? `/friends/${selectedFriend._id}/expenses/${expense._id}`
+      const isFriendExpense = expense.isDirect || friendHistory?.groups.some((group) => group.groupId === expense.groupId && group.isDirect);
+      const expenseFriend = selectedFriend?._id === personalFriendId
+        ? selectedFriend
+        : friends.find((friend) => friend._id === personalFriendId);
+      const historyFriendId = selectedFriend && friendHistory?.groups.some((group) => group.groupId === expense.groupId && group.isDirect)
+        ? selectedFriend._id
+        : null;
+      const friendId = expense.friendId || historyFriendId || expenseFriend?._id;
+      const endpoint = isFriendExpense && friendId
+        ? `/friends/${friendId}/expenses/${expense._id}`
         : `/expenses/${expense._id}`;
       const result = await apiRequest(endpoint, {
         method: 'DELETE',
         headers: authHeaders,
       });
+      if (isFriendExpense) await refreshFriendActivity();
       setSelectedExpense(null);
       if (!isFriendExpense) {
         setExpenses(await apiRequest('/expenses?history=true', { headers: authHeaders }));
       }
       if (expense.groupId && selectedGroup?._id === expense.groupId) {
         await openGroupDetails(selectedGroup);
+      }
+      if (isFriendExpense && friendId && personalFriendId === friendId) {
+        await loadPersonalFriendExpenses(friendId);
       }
       if (selectedFriend && friendHistory?.groups.some((group) => group.groupId === expense.groupId && group.isDirect)) {
         await loadFriendHistory(selectedFriend);
@@ -1630,6 +1764,31 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       participantIds,
       splitValues: {},
       items: current.items.map((item) => ({ ...item, participantIds: item.participantIds.filter((id) => participantIds.includes(id)) })),
+    }));
+  };
+
+  const changePersonalFriend = async (friendId) => {
+    setPersonalFriendId(friendId);
+    try {
+      await loadPersonalFriendExpenses(friendId);
+    } catch {
+      // The request error is displayed alongside the personal expense filters.
+    }
+  };
+
+  const changeExpenseFriend = (friendId) => {
+    setFriendExpenseTarget(friendId || null);
+    const participantIds = friendId ? [user._id, friendId] : [user._id];
+    setExpenseDraft((current) => ({
+      ...current,
+      groupId: '',
+      paidBy: participantIds.includes(current.paidBy) ? current.paidBy : user._id,
+      participantIds,
+      splitValues: {},
+      items: current.items.map((item) => ({
+        ...item,
+        participantIds: item.participantIds.filter((id) => participantIds.includes(id)),
+      })),
     }));
   };
 
@@ -1898,12 +2057,18 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const notificationItems = activityNotifications.filter((notification) => (
     ['PAYMENT_REQUEST', 'PAYMENT_RECEIVED'].includes(notification.notificationType)
   ));
+  const expenseTargetFriend = friends.find((friend) => friend._id === friendExpenseTarget);
   const expenseGroup = groups.find((group) => group._id === expenseDraft.groupId);
   const selectedExpenseFriendGroup = selectedExpense
     ? friendHistory?.groups.find((group) => group.groupId === selectedExpense.groupId && group.isDirect)
+      || (selectedExpense.isDirect ? { groupId: selectedExpense.groupId, groupName: 'Direct friend expenses', isDirect: true } : null)
     : null;
-  const expenseMembers = friendExpenseTarget && selectedFriend
-    ? [user, selectedFriend]
+  const selectedExpenseFriend = friends.find((friend) => friend._id === selectedExpense?.friendId)
+    || (friendHistory?.groups.some((group) => group.groupId === selectedExpense?.groupId && group.isDirect)
+      ? selectedFriend
+      : friends.find((friend) => friend._id === personalFriendId));
+  const expenseMembers = expenseTargetFriend
+    ? [user, expenseTargetFriend]
     : expenseGroup?.members || [user];
   const selectedExpenseMembers = expenseMembers.filter((member) => expenseDraft.participantIds.includes(member._id));
   const itemizedTotal = expenseDraft.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
@@ -1913,6 +2078,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   ), 0);
   const groupExpenses = expenses.filter((expense) => expense.groupId && !expense.isPersonal && !['ACTIVITY', 'SETTLEMENT'].includes(expense.type));
   const groupActivity = expenses.filter((entry) => entry.groupId && !entry.isPersonal);
+  const allExpenses = [
+    ...groupExpenses,
+    ...friendActivities.filter((transaction) => (
+      transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type)
+    )),
+  ].sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
+  const recentActivity = [...groupActivity, ...friendActivities]
+    .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
 
   return (
     <main className="dashboard-page">
@@ -1998,7 +2171,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </div>
           )}
         </div>
-        <div className="profile-control">
+        <div className="profile-control" ref={profileControlRef}>
           <button
             className="profile-trigger"
             onClick={() => setShowProfileMenu((current) => !current)}
@@ -2116,18 +2289,31 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
         </aside>
         <section className="dashboard-content">
           {activePage === 'friend-detail' && selectedFriend ? (
-            <FriendHistoryPage
-              friend={selectedFriend}
-              history={friendHistory}
-              userId={user._id}
-              accessToken={accessToken}
-              busy={friendHistoryBusy}
-              error={friendHistoryError}
-              onBack={() => setActivePage('friends')}
-              onAddExpense={() => openFriendExpenseForm()}
-              onRefresh={refreshFriendHistory}
-              onOpenExpense={setSelectedExpense}
-            />
+            <div
+              className="friend-history-backdrop"
+              onMouseDown={() => setActivePage('overview')}
+            >
+              <section
+                className="friend-history-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`${selectedFriend.fullnamae || selectedFriend.username} friend history`}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <FriendHistoryPage
+                  friend={selectedFriend}
+                  history={friendHistory}
+                  userId={user._id}
+                  accessToken={accessToken}
+                  busy={friendHistoryBusy}
+                  error={friendHistoryError}
+                  onBack={() => setActivePage('overview')}
+                  onAddExpense={() => openFriendExpenseForm()}
+                  onRefresh={refreshFriendHistory}
+                  onOpenExpense={setSelectedExpense}
+                />
+              </section>
+            </div>
           ) : activePage === 'friends' ? (
             <div className="friend-management-page">
               <div className="friend-management-heading">
@@ -2224,15 +2410,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </div>
           ) : activePage === 'personal' ? (
             <ExpenseLedger
-              expenses={personalExpenses}
-              title="Personal expenses"
-              description="Your private spending, organized month by month."
-              onAddExpense={() => openExpenseForm('')}
+              expenses={personalFriendId ? personalFriendExpenses : personalExpenses}
+              title={personalFriendId
+                ? `Personal expenses with ${friends.find((friend) => friend._id === personalFriendId)?.fullnamae || friends.find((friend) => friend._id === personalFriendId)?.username || 'friend'}`
+                : 'Personal expenses'}
+              description={personalFriendId
+                ? 'Only one-to-one expenses between you and this friend. Group expenses stay in All expenses.'
+                : 'Your private spending, organized month by month.'}
+              onAddExpense={() => personalFriendId
+                ? openFriendExpenseForm(friends.find((friend) => friend._id === personalFriendId))
+                : openExpenseForm('')}
               onOpenExpense={setSelectedExpense}
+              userId={user._id}
+              friends={friends}
+              selectedFriendId={personalFriendId}
+              onFriendChange={changePersonalFriend}
+              friendExpensesError={personalFriendExpensesError}
+              friendExpensesBusy={personalFriendExpensesBusy}
             />
           ) : activePage === 'all-expenses' ? (
             <ExpenseLedger
-              expenses={groupExpenses}
+              expenses={allExpenses}
               title="All expenses"
               description="Every expense from all the groups you belong to, organized by month."
               onAddExpense={() => openExpenseForm('')}
@@ -2242,7 +2440,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             />
           ) : activePage === 'recent' ? (
             <RecentActivityPage
-              transactions={groupActivity}
+              transactions={recentActivity}
               notifications={activityNotifications}
               friendRequests={friendRequests}
               groups={groups}
@@ -2555,15 +2753,25 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                   )}
                 </div>
 
-                {friendExpenseTarget && selectedFriend ? (
+                {expenseTargetFriend && editingExpenseId ? (
                   <label>Expense with
-                    <input value={selectedFriend.fullnamae || selectedFriend.username} readOnly />
+                    <input value={expenseTargetFriend.fullnamae || expenseTargetFriend.username} readOnly />
                   </label>
                 ) : (
                   <label>Group
                     <select value={expenseDraft.groupId} onChange={(event) => changeExpenseGroup(event.target.value)} disabled={Boolean(editingExpenseId)}>
                       <option value="">Personal expense</option>
                       {groups.map((group) => <option key={group._id} value={group._id}>{group.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                {!expenseDraft.groupId && !editingExpenseId && (
+                  <label>Split personal expense with
+                    <select value={friendExpenseTarget || ''} onChange={(event) => changeExpenseFriend(event.target.value)}>
+                      <option value="">Only me</option>
+                      {friends.map((friend) => (
+                        <option key={friend._id} value={friend._id}>{friend.fullnamae || friend.username}</option>
+                      ))}
                     </select>
                   </label>
                 )}
@@ -2582,6 +2790,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                         <input
                           type="checkbox"
                           checked={expenseDraft.participantIds.includes(member._id)}
+                          disabled={Boolean(expenseTargetFriend)}
                           onChange={(event) => setExpenseDraft((current) => {
                             const participantIds = event.target.checked
                               ? [...current.participantIds, member._id]
@@ -2694,7 +2903,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
             </Modal>
           )}
           {showProfile && (
-            <Modal title="Your profile" onClose={() => setShowProfile(false)}>
+            <Modal title="Your profile" onClose={() => setShowProfile(false)} closeOnBackdrop={false}>
               <form onSubmit={updateProfile} className="profile-edit-form">
                 <div className="profile-editor-summary">
                   {photoPreview || user.coverimage
@@ -2808,7 +3017,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               group={groups.find((item) => item._id === selectedExpense.groupId)
                 || (selectedExpenseFriendGroup ? { _id: selectedExpenseFriendGroup.groupId, name: selectedExpenseFriendGroup.groupName } : personalGroup)}
               members={groups.find((item) => item._id === selectedExpense.groupId)?.members
-                || (selectedExpenseFriendGroup && selectedFriend ? [user, selectedFriend] : [user])}
+                || (selectedExpenseFriendGroup && selectedExpenseFriend ? [user, selectedExpenseFriend] : [user])}
               userId={user._id}
               accessToken={accessToken}
               onClose={() => setSelectedExpense(null)}
@@ -2817,7 +3026,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               onCommentAdded={async () => {
                 setExpenses(await apiRequest('/expenses?history=true', { headers: authHeaders }));
                 if (selectedGroup?._id === selectedExpense.groupId) await openGroupDetails(selectedGroup);
-                if (selectedFriend) await loadFriendHistory(selectedFriend);
+                if (selectedFriend && friendHistory?.groups.some((group) => group.groupId === selectedExpense.groupId && group.isDirect)) {
+                  await loadFriendHistory(selectedFriend);
+                }
+                if (personalFriendId && selectedExpense.isDirect) await loadPersonalFriendExpenses(personalFriendId);
+                if (selectedExpense.isDirect) await refreshFriendActivity();
               }}
             />
           )}
@@ -3992,11 +4205,11 @@ function BalanceRow({ name, amount, tone }) {
     </div>
   );
 }
-function Modal({ title, onClose, children, className = '' }) {
+function Modal({ title, onClose, children, className = '', closeOnBackdrop = true }) {
   return (
     <div className={`modal-backdrop ${className}`} onMouseDown={(event) => {
       event.stopPropagation();
-      if (event.target === event.currentTarget) onClose();
+      if (closeOnBackdrop && event.target === event.currentTarget) onClose();
     }}>
       <section
         className="modal"

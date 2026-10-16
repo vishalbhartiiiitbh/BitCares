@@ -3124,6 +3124,26 @@ input::placeholder {
     cursor: pointer;
 }
 
+.friend-history-backdrop {
+    position: fixed;
+    z-index: 6;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 22px;
+    background: rgba(16, 23, 19, .58);
+}
+
+.friend-history-dialog {
+    position: relative;
+    width: min(1120px, 100%);
+    max-height: 92vh;
+    overflow: auto;
+    padding: 28px;
+    background: #f1eee5;
+    box-shadow: 0 24px 80px rgba(16, 23, 19, .25);
+}
+
 .friend-history-page {
     display: grid;
     gap: 18px;
@@ -3148,11 +3168,17 @@ input::placeholder {
 }
 
 .friend-history-back {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    place-items: center;
     padding: 8px 10px;
     border: 1px solid #e2dfd5;
     background: #fff;
     color: #556158;
-    font-size: 11px;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
 }
 
 .friend-history-person {
@@ -3231,6 +3257,10 @@ input::placeholder {
     gap: 18px;
 }
 
+.friend-history-layout:not(.settlement-open) {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .friend-history-groups,
 .friend-history-settlement,
 .friend-history-activity {
@@ -3238,6 +3268,21 @@ input::placeholder {
     padding: 16px;
     border: 1px solid #e2dfd5;
     background: #fff;
+}
+
+.friend-history-personal-spend {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid #dedbd0;
+}
+
+.friend-history-personal-spend .group-activity-list {
+    margin: 0 -16px -16px;
+    width: calc(100% + 32px);
+}
+
+.friend-history-personal-spend .group-activity-month {
+    min-width: 580px;
 }
 
 .friend-history-section-heading {
@@ -4205,6 +4250,26 @@ input::placeholder {
     font-size: 12px;
 }
 
+.personal-friend-filter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: fit-content;
+    margin-top: 16px;
+    color: #758076;
+    font-size: 11px;
+}
+
+.personal-friend-filter select {
+    min-height: 36px;
+    max-width: min(320px, 65vw);
+    padding: 7px 10px;
+    border: 1px solid #dfe5df;
+    background: #fff;
+    color: #46534a;
+    font: inherit;
+}
+
 .personal-expense-months {
     display: grid;
     gap: 18px;
@@ -4541,6 +4606,25 @@ input::placeholder {
 }
 
 @media (max-width: 560px) {
+    .friend-history-backdrop {
+        padding: 8px;
+    }
+
+    .friend-history-dialog {
+        max-height: 96vh;
+        padding: 16px;
+    }
+
+    .personal-friend-filter {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .personal-friend-filter select {
+        width: 100%;
+        max-width: none;
+    }
+
     .friend-history-heading {
         align-items: flex-start;
     }

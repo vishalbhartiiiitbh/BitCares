@@ -8,6 +8,7 @@ import {
   sendFriendRequest,
   createFriendExpense,
   deleteFriendExpense,
+  friendActivity,
   friendHistory,
   settleFriend,
   updateFriendExpense,
@@ -30,6 +31,7 @@ const upload = multer({
 });
 router.use(requireAuth);
 router.get('/', asyncHandler(listFriends));
+router.get('/activity', asyncHandler(friendActivity));
 router.get('/requests/sent', asyncHandler(listSentFriendRequests));
 router.get('/requests', asyncHandler(listFriendRequests));
 router.post('/requests', asyncHandler(sendFriendRequest));
