@@ -686,6 +686,18 @@ function Brand() {
 }
 
 function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpense, groupExpenses = false, userId }) {
+  const [search, setSearch] = useState('');
+  const searchTerms = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const visibleExpenses = expenses.filter((expense) => {
+    if (!searchTerms.length) return true;
+    const searchable = [
+      expense.description,
+      expense.currency,
+      expense.totalAmount,
+      Number(expense.totalAmount).toFixed(2),
+    ].filter(Boolean).join(' ').toLocaleLowerCase();
+    return searchTerms.every((term) => searchable.includes(term));
+  });
   const totalByCurrency = new Map();
   expenses.forEach((expense) => {
     totalByCurrency.set(expense.currency, (totalByCurrency.get(expense.currency) || 0) + Number(expense.totalAmount));
@@ -706,12 +718,28 @@ function ExpenseLedger({ expenses, title, description, onAddExpense, onOpenExpen
         <strong>{expenses.length} {expenses.length === 1 ? 'expense' : 'expenses'}</strong>
         <span>{[...totalByCurrency].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ') || 'No spending recorded'}</span>
       </div>
+      <div className="expense-ledger-tools">
+        <label className="group-activity-search">
+          <span className="visually-hidden">Search {groupExpenses ? 'all' : 'personal'} expenses by description or amount</span>
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search description or amount"
+          />
+        </label>
+        {search.trim() && <span>{visibleExpenses.length} of {expenses.length} expenses</span>}
+      </div>
       {expenses.length ? (
-        groupExpenses ? (
-          <GroupActivityList transactions={expenses} userId={userId} onOpenExpense={onOpenExpense} showGroupName />
-        ) : (
-          <GroupActivityList transactions={expenses} userId={userId} onOpenExpense={onOpenExpense} personalLedger />
-        )
+        visibleExpenses.length ? (
+          <GroupActivityList
+            transactions={visibleExpenses}
+            userId={userId}
+            onOpenExpense={onOpenExpense}
+            personalLedger={!groupExpenses}
+            showGroupName={groupExpenses}
+          />
+        ) : <p className="empty-state">No expenses match your search. Try a description or amount.</p>
       ) : (
         <div className="friends-empty-state">
           <span>▤</span>

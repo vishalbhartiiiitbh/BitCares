@@ -3882,6 +3882,26 @@ input::placeholder {
     color: #19231d;
 }
 
+.expense-ledger-tools {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 12px 0;
+    color: #758076;
+    font-size: 11px;
+}
+
+.expense-ledger-tools .group-activity-search {
+    width: min(320px, 100%);
+}
+
+.expense-ledger-tools .group-activity-search input {
+    width: 100%;
+    min-height: 38px;
+    font-size: 12px;
+}
+
 .personal-expense-months {
     display: grid;
     gap: 18px;
