@@ -711,6 +711,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [activityNotifications, setActivityNotifications] = useState([]);
   const [friends, setFriends] = useState([]);
   const [friendRequests, setFriendRequests] = useState([]);
+  const [sentFriendRequests, setSentFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
   const [activePage, setActivePage] = useState('overview');
   const [friendIdentifierType, setFriendIdentifierType] = useState('username');
@@ -848,12 +849,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   }, [accessToken]);
 
   const refreshFriendData = async () => {
-    const [friendData, requestData] = await Promise.all([
+    const [friendData, requestData, sentRequestData] = await Promise.all([
       apiRequest('/friends', { headers: authHeaders }),
       apiRequest('/friends/requests', { headers: authHeaders }),
+      apiRequest('/friends/requests/sent', { headers: authHeaders }),
     ]);
     setFriends(friendData);
     setFriendRequests(requestData);
+    setSentFriendRequests(sentRequestData);
   };
 
   useEffect(() => {
@@ -861,11 +864,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     const loadFriends = () => Promise.all([
       apiRequest('/friends', { headers: authHeaders }),
       apiRequest('/friends/requests', { headers: authHeaders }),
+      apiRequest('/friends/requests/sent', { headers: authHeaders }),
     ])
-      .then(([friendData, requestData]) => {
+      .then(([friendData, requestData, sentRequestData]) => {
         if (!active) return;
         setFriends(friendData);
         setFriendRequests(requestData);
+        setSentFriendRequests(sentRequestData);
       })
       .catch((error) => {
         if (active) setFormMessage(error.message);
@@ -879,6 +884,16 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
     };
   }, [accessToken]);
 
+  const sendGroupFriendRequest = async (memberId) => {
+    await apiRequest('/friends/requests', {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ userId: memberId }),
+    });
+    await refreshFriendData();
+    setFormMessage('Friend request sent.');
+  };
+
   const sendFriendRequest = async (event) => {
     event.preventDefault();
     setFriendBusy(true);
@@ -891,6 +906,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
           [friendIdentifierType]: friendIdentifier.trim(),
         }),
       });
+      await refreshFriendData();
       setFriendIdentifier('');
       setShowAddFriend(false);
       setFormMessage('Friend request sent.');
@@ -1324,6 +1340,17 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       body: settlement,
     });
     await openGroupDetails(selectedGroup);
+  };
+  const requestGroupPayment = async (groupId, paymentRequest) => {
+    const result = await apiRequest(`/groups/${groupId}/payment-requests`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify(paymentRequest),
+    });
+    setGroupTransactions((current) => [result.activity, ...current]);
+    setActivityNotifications((current) => [result.notification, ...current].slice(0, 50));
+    setFormMessage(`Payment request sent to ${result.recipientName}.`);
+    return result;
   };
   const saveGroupSettings = async (groupId, settings) => {
     setGroupSettingsBusy(true);
@@ -2333,6 +2360,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               settingsError={groupSettingsError}
               addMemberBusy={addMemberBusy}
               addMemberError={addMemberError}
+              friends={friends}
+              friendRequests={friendRequests}
+              sentFriendRequests={sentFriendRequests}
               user={user}
               onClose={() => setSelectedGroup(null)}
               onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
@@ -2346,6 +2376,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
               }}
               onSettle={() => loadGroupSettlements(selectedGroup._id)}
               onRecordSettlement={(settlement) => recordGroupSettlement(selectedGroup._id, settlement)}
+              onRequestPayment={(paymentRequest) => requestGroupPayment(selectedGroup._id, paymentRequest)}
+              onSendFriendRequest={sendGroupFriendRequest}
               onSaveSettings={(settings) => saveGroupSettings(selectedGroup._id, settings)}
               onAddMember={(identifier) => addMemberToGroup(selectedGroup._id, identifier)}
               onRemoveMember={(memberId) => removeMemberFromGroup(selectedGroup._id, memberId)}
@@ -2449,6 +2481,9 @@ function GroupDetails({
   settingsError,
   addMemberBusy,
   addMemberError,
+  friends,
+  friendRequests,
+  sentFriendRequests,
   user,
   onClose,
   onJoin,
@@ -2461,6 +2496,8 @@ function GroupDetails({
   onAddMember,
   onRemoveMember,
   onRecordSettlement,
+  onRequestPayment,
+  onSendFriendRequest,
   onDelete,
   onLeave,
 }) {
@@ -2479,14 +2516,31 @@ function GroupDetails({
   const [coverPreview, setCoverPreview] = useState('');
   const [settingsPlanVisible, setSettingsPlanVisible] = useState(false);
   const [memberIdentifierDraft, setMemberIdentifierDraft] = useState('');
+  const [friendRequestBusyId, setFriendRequestBusyId] = useState('');
+  const [friendRequestError, setFriendRequestError] = useState('');
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: 'INR', amount: '', note: '', paymentProof: null });
   const [settlementSaveError, setSettlementSaveError] = useState('');
   const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
+  const [paymentRequestOpen, setPaymentRequestOpen] = useState(false);
+  const [paymentRequestDraft, setPaymentRequestDraft] = useState({ memberId: '', amount: '', currency: 'INR', note: '' });
+  const [paymentRequestError, setPaymentRequestError] = useState('');
+  const [paymentRequestBusy, setPaymentRequestBusy] = useState(false);
   const isOwner = group.createdBy === user._id;
   const memberName = (id) => {
     const member = group.members?.find((item) => item._id === id);
     return member?.fullnamae || member?.username || 'Group member';
+  };
+  const sendFriendRequest = async (memberId) => {
+    setFriendRequestBusyId(memberId);
+    setFriendRequestError('');
+    try {
+      await onSendFriendRequest(memberId);
+    } catch (error) {
+      setFriendRequestError(error.message);
+    } finally {
+      setFriendRequestBusyId('');
+    }
   };
   const visibleTransactions = transactions.filter((transaction) => {
     if (hideUninvolved && transaction.type !== 'ACTIVITY'
@@ -2704,6 +2758,29 @@ function GroupDetails({
       setSettlementSaveBusy(false);
     }
   };
+  const openPaymentRequest = (balance) => {
+    setPaymentRequestDraft({
+      memberId: balance._id,
+      amount: Math.abs(Number(balance.netBalance)).toFixed(2),
+      currency: balance.currency || 'INR',
+      note: '',
+    });
+    setPaymentRequestError('');
+    setPaymentRequestOpen(true);
+  };
+  const submitPaymentRequest = async (event) => {
+    event.preventDefault();
+    setPaymentRequestBusy(true);
+    setPaymentRequestError('');
+    try {
+      await onRequestPayment(paymentRequestDraft);
+      setPaymentRequestOpen(false);
+    } catch (error) {
+      setPaymentRequestError(error.message);
+    } finally {
+      setPaymentRequestBusy(false);
+    }
+  };
 
   useEffect(() => {
     setNameDraft(group.name);
@@ -2869,6 +2946,7 @@ function GroupDetails({
                           </span>
                           <div><strong>{name}</strong><small>@{balance.username}</small></div>
                           <p className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? `${name} owes you` : `You owe ${name}`} <b>{balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</b></p>
+                          {amount > 0 && <button className="group-inline-action group-request-payment" type="button" onClick={() => openPaymentRequest(balance)}>Request payment</button>}
                         </article>
                       );
                     })}
@@ -3015,9 +3093,36 @@ function GroupDetails({
                       ? <img src={member.coverimage} alt="" />
                       : (member.fullnamae || member.username).slice(0, 1).toUpperCase()}
                   </span>
-                  <span>{member.fullnamae || member.username}</span>
+                  <span className="group-sidebar-member-name">{member.fullnamae || member.username}</span>
+                  {member._id !== user._id && (() => {
+                    const isFriend = friends.some((friend) => friend._id === member._id);
+                    const hasSentRequest = sentFriendRequests.some((request) => request.recipientId === member._id && request.status === 'pending');
+                    const hasReceivedRequest = friendRequests.some((request) => request.senderId === member._id && request.status === 'pending');
+                    const buttonLabel = isFriend
+                      ? 'Friends'
+                      : hasSentRequest
+                        ? 'Request sent'
+                        : hasReceivedRequest
+                          ? 'Request received'
+                          : friendRequestBusyId === member._id
+                            ? 'Sending…'
+                            : 'Add friend';
+                    return (
+                      <button
+                        type="button"
+                        className="group-member-friend-action"
+                        disabled={isFriend || hasSentRequest || hasReceivedRequest || Boolean(friendRequestBusyId)}
+                        onClick={() => void sendFriendRequest(member._id)}
+                        aria-label={`${buttonLabel}${buttonLabel === 'Add friend' ? `: ${member.fullnamae || member.username}` : ''}`}
+                        title={hasReceivedRequest ? 'This member has already sent you a request. Respond from Friends.' : undefined}
+                      >
+                        {buttonLabel}
+                      </button>
+                    );
+                  })()}
                 </div>
               ))}
+              {friendRequestError && <p className="error-message" role="alert">{friendRequestError}</p>}
               <form className="group-add-member-form" onSubmit={async (event) => {
                 event.preventDefault();
                 if (await onAddMember(memberIdentifierDraft.trim())) setMemberIdentifierDraft('');
@@ -3032,6 +3137,34 @@ function GroupDetails({
           </aside>
         </div>
       </section>
+      {paymentRequestOpen && (
+        <Modal title={`Request payment from ${memberName(paymentRequestDraft.memberId)}`} onClose={() => setPaymentRequestOpen(false)} className="settlement-modal">
+          <form className="group-settlement-form" onSubmit={submitPaymentRequest}>
+            <p className="modal-help">This sends a payment request to the selected member and records it in the group activity. It does not change the group balance.</p>
+            <div className="group-settlement-amount-fields">
+              <label>Currency
+                <input value={paymentRequestDraft.currency} readOnly />
+              </label>
+              <label>Amount
+                <input
+                  type="number"
+                  min="0.01"
+                  max={Math.abs(Number(balances.find((balance) => balance._id === paymentRequestDraft.memberId && balance.currency === paymentRequestDraft.currency)?.netBalance || 0)).toFixed(2)}
+                  step="0.01"
+                  value={paymentRequestDraft.amount}
+                  onChange={(event) => setPaymentRequestDraft((current) => ({ ...current, amount: event.target.value }))}
+                  required
+                />
+              </label>
+            </div>
+            <label>Message (optional)
+              <textarea value={paymentRequestDraft.note} onChange={(event) => setPaymentRequestDraft((current) => ({ ...current, note: event.target.value }))} maxLength="1000" rows="3" />
+            </label>
+            {paymentRequestError && <p className="error-message" role="alert">{paymentRequestError}</p>}
+            <button className="submit-button" disabled={paymentRequestBusy}>{paymentRequestBusy ? 'Sending request…' : 'Send payment request'}</button>
+          </form>
+        </Modal>
+      )}
       {settlementOpen && (
         <Modal title="Record a payment" onClose={() => setSettlementOpen(false)} className="settlement-modal">
           <form className="group-settlement-form" onSubmit={submitSettlement}>
@@ -3230,8 +3363,10 @@ function GroupActivityList({ transactions, userId, onOpenExpense }) {
                   ? '＋'
                   : transaction.activityType === 'EXPENSE_UPDATED'
                     ? '✎'
-                : transaction.activityType === 'COMMENT_ADDED'
-                  ? '💬'
+                  : transaction.activityType === 'PAYMENT_REQUESTED'
+                    ? '↗'
+                  : transaction.activityType === 'COMMENT_ADDED'
+                    ? '💬'
                   : transaction.activityType.startsWith('MEMBER_')
                     ? '👥'
                     : '↻';
@@ -3247,6 +3382,7 @@ function GroupActivityList({ transactions, userId, onOpenExpense }) {
                 MEMBER_LEFT: 'MEMBER LEFT',
                 GROUP_CREATED: 'GROUP CREATED',
                 GROUP_SETTINGS_UPDATED: 'SETTINGS UPDATED',
+                PAYMENT_REQUESTED: 'PAYMENT REQUESTED',
               })[transaction.activityType] || 'GROUP ACTIVITY';
               return (
                 <article className={`group-activity-row group-activity-audit ${transaction.groupName ? 'with-group-name' : ''}`} key={`ACTIVITY-${transaction._id}`}>

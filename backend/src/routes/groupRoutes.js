@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { addMember, balances, create, getWhiteboard, join, leave, list, remove, removeMember, saveWhiteboard, settle, simplify, update } from '../controllers/groupController.js';
+import { addMember, balances, create, getWhiteboard, join, leave, list, remove, removeMember, requestPayment, saveWhiteboard, settle, simplify, update } from '../controllers/groupController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 
@@ -26,6 +26,7 @@ router.get('/:groupId/balances', asyncHandler(balances));
 router.post('/:groupId/members', asyncHandler(addMember));
 router.delete('/:groupId/members/:memberId', asyncHandler(removeMember));
 router.post('/:groupId/settlements', uploadProof.single('paymentProof'), asyncHandler(settle));
+router.post('/:groupId/payment-requests', asyncHandler(requestPayment));
 router.patch('/:groupId', uploadProof.single('coverImage'), asyncHandler(update));
 router.delete('/:groupId', asyncHandler(remove));
 router.post('/:groupId/leave', asyncHandler(leave));

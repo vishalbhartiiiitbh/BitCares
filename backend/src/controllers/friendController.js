@@ -28,6 +28,21 @@ export const listFriendRequests = async (req, res) => {
   res.json({ data: result.rows   });
 };
 
+export const listSentFriendRequests = async (req, res) => {
+  const result = await query(
+    `SELECT r.id AS "_id", r.status, r.created_at AS "createdAt", r.updated_at AS "updatedAt",
+            u.id AS "recipientId", u.username AS "recipientUsername",
+            u.fullnamae AS "recipientName", u.coverimage AS "recipientPhoto"
+     FROM friend_requests r
+     JOIN users u ON u.id = r.receiver_id
+     WHERE r.sender_id = $1
+     ORDER BY r.created_at DESC
+     LIMIT 100`,
+    [req.user._id],
+  );
+  res.json({ data: result.rows });
+};
+
 export const sendFriendRequest = async (req, res) => {
   const { userId, username, email } = req.body || {};
   const hasUserId = typeof userId === 'string';

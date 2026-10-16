@@ -1,6 +1,7 @@
 import { addGroupMember, createGroup, deleteGroup, getGroupBalances, getGroupWhiteboard, joinGroupByCode, leaveGroup, listGroupsForUser, removeGroupMember, saveGroupWhiteboard, updateGroupSettings } from '../services/groupService.js';
 import { simplifyDebts } from '../services/debtSimplifier.js';
 import { recordSettlement } from '../services/settlementService.js';
+import { createPaymentRequest } from '../services/paymentRequestService.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 
 export const list = async (req, res) => {
@@ -186,6 +187,19 @@ export const settle = async (req, res) => {
       currency: req.body?.currency,
       note: req.body?.note || null,
       proofBuffer: req.file?.buffer || null,
+    }),
+  });
+};
+
+export const requestPayment = async (req, res) => {
+  res.status(201).json({
+    data: await createPaymentRequest({
+      groupId: req.params.groupId,
+      requesterId: req.user._id,
+      memberId: req.body?.memberId,
+      amount: req.body?.amount,
+      currency: req.body?.currency,
+      note: req.body?.note ?? null,
     }),
   });
 };
