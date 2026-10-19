@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { query, withTransaction } from '../db/index.js';
 import { addExpense, listExpenses } from './expenseService.js';
 import { getExchangeRate } from './exchangeRateService.js';
+import { queueEmailNotification } from './emailNotificationService.js';
 
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
@@ -442,6 +443,7 @@ export const settleFriendBalances = async ({
        VALUES ($1,$2,$3,'PAYMENT_RECEIVED')`,
       [payeeId, details, payerId],
     );
+    await queueEmailNotification(client, payeeId, 'paymentReceived', 'You received a SplitCare payment', details);
     return { ...settlement.rows[0], allocations };
   });
 };

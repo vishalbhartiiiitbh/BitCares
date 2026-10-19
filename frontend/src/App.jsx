@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from "react";
 
 const API_URL = `${import.meta.env.VITE_API_URL}/api` || "/api";
 const emptyForm = { username: "", email: "", fullnamae: "", password: "" };
+const defaultEmailNotificationPreferences = {
+  groupAdded: false,
+  friendAdded: false,
+  expenseAdded: false,
+  expenseChanged: false,
+  expenseComment: false,
+  expenseDue: false,
+  paymentReceived: false,
+  monthlySummary: false,
+  productUpdates: false,
+};
 
 async function apiRequest(path, options = {}) {
   const isFormData = options.body instanceof FormData;
@@ -1424,6 +1435,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [joinCode, setJoinCode] = useState('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [showEmailSettings, setShowEmailSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const notificationControlRef = useRef(null);
   const profileControlRef = useRef(null);
@@ -1446,6 +1458,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState('');
+  const [emailNotificationPreferences, setEmailNotificationPreferences] = useState(defaultEmailNotificationPreferences);
+  const [emailSettingsBusy, setEmailSettingsBusy] = useState(false);
+  const [emailSettingsError, setEmailSettingsError] = useState('');
+  const [emailSettingsMessage, setEmailSettingsMessage] = useState('');
   const [formMessage, setFormMessage] = useState("");
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
@@ -2334,6 +2350,37 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       setProfileBusy(false);
     }
   };
+  const loadEmailNotificationSettings = async () => {
+    setEmailSettingsBusy(true);
+    setEmailSettingsError('');
+    setEmailSettingsMessage('');
+    try {
+      const result = await apiRequest('/users/profile/email-notifications', { headers: authHeaders });
+      setEmailNotificationPreferences({ ...defaultEmailNotificationPreferences, ...result.preferences });
+    } catch (error) {
+      setEmailSettingsError(error.message);
+    } finally {
+      setEmailSettingsBusy(false);
+    }
+  };
+  const saveEmailNotificationSettings = async () => {
+    setEmailSettingsBusy(true);
+    setEmailSettingsError('');
+    setEmailSettingsMessage('');
+    try {
+      const result = await apiRequest('/users/profile/email-notifications', {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ preferences: emailNotificationPreferences }),
+      });
+      setEmailNotificationPreferences({ ...defaultEmailNotificationPreferences, ...result.preferences });
+      setEmailSettingsMessage('Email notification settings saved.');
+    } catch (error) {
+      setEmailSettingsError(error.message);
+    } finally {
+      setEmailSettingsBusy(false);
+    }
+  };
   const sendEmailChangeCodes = async () => {
     setEmailChangeBusy(true);
     setEmailChangeError('');
@@ -2631,6 +2678,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 }}
               >
                 Edit profile
+              </button>
+              <button
+                onClick={() => {
+                  setShowEmailSettings(true);
+                  setShowProfileMenu(false);
+                  void loadEmailNotificationSettings();
+                }}
+              >
+                Email notification settings
               </button>
               <button className="logout-menu-button" onClick={onLogout}>
                 Log out
@@ -3478,6 +3534,38 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 )}
                 {!deleteCodeSent && deleteAccountError && <p className="error-message" role="alert">{deleteAccountError}</p>}
               </section>
+            </Modal>
+          )}
+          {showEmailSettings && (
+            <Modal title="Email notification settings" onClose={() => setShowEmailSettings(false)}>
+              <div className="email-notification-settings">
+                <p>Choose which SplitCare activity updates you want delivered to {user.email}.</p>
+                {emailSettingsBusy && <p className="modal-help">Loading email settings…</p>}
+                <fieldset disabled={emailSettingsBusy}>
+                  <legend>Groups and friends</legend>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.groupAdded} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, groupAdded: event.target.checked }))} /> When someone adds me to a group</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.friendAdded} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, friendAdded: event.target.checked }))} /> When someone sends me a friend request</label>
+                </fieldset>
+                <fieldset disabled={emailSettingsBusy}>
+                  <legend>Expenses</legend>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.expenseAdded} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, expenseAdded: event.target.checked }))} /> When an expense is added</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.expenseChanged} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, expenseChanged: event.target.checked }))} /> When an expense is edited or deleted</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.expenseComment} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, expenseComment: event.target.checked }))} /> When someone comments on an expense</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.expenseDue} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, expenseDue: event.target.checked }))} /> When someone sends me a payment request</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.paymentReceived} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, paymentReceived: event.target.checked }))} /> When someone pays me</label>
+                </fieldset>
+                <fieldset disabled={emailSettingsBusy}>
+                  <legend>News and updates</legend>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.monthlySummary} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, monthlySummary: event.target.checked }))} /> Monthly summary of my activity</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.productUpdates} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, productUpdates: event.target.checked }))} /> Major SplitCare news and updates</label>
+                  <p>Product announcements are not currently published by the app.</p>
+                </fieldset>
+                {emailSettingsError && <p className="error-message" role="alert">{emailSettingsError}</p>}
+                {emailSettingsMessage && <p className="success-message" role="status">{emailSettingsMessage}</p>}
+                <button className="submit-button" type="button" onClick={saveEmailNotificationSettings} disabled={emailSettingsBusy}>
+                  {emailSettingsBusy ? 'Saving…' : 'Save email settings'}
+                </button>
+              </div>
             </Modal>
           )}
           {selectedGroup && (

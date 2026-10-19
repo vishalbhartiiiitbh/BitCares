@@ -49,6 +49,8 @@ const connectDB = async () => {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_failure_window_started_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notification_preferences JSONB NOT NULL DEFAULT
+      '{"groupAdded":false,"friendAdded":false,"expenseAdded":false,"expenseChanged":false,"expenseComment":false,"expenseDue":false,"paymentReceived":false,"monthlySummary":false,"productUpdates":false}'::jsonb;
 
     CREATE TABLE IF NOT EXISTS account_email_codes (
       email TEXT NOT NULL,
@@ -68,6 +70,27 @@ const connectDB = async () => {
       ADD CONSTRAINT account_email_codes_purpose_check
       CHECK (purpose IN ('signup', 'delete_account', 'email_change_old', 'email_change_new'));
     CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique ON users (LOWER(email));
+    CREATE TABLE IF NOT EXISTS email_notification_outbox (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_email TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      body TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      locked_at TIMESTAMPTZ,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS email_notification_outbox_pending_idx
+      ON email_notification_outbox (next_attempt_at, created_at)
+      WHERE sent_at IS NULL;
+    CREATE TABLE IF NOT EXISTS email_notification_monthly_summary (
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      month_start DATE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, month_start)
+    );
 
     CREATE TABLE IF NOT EXISTS friendships (
       user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { withTransaction } from '../db/index.js';
 import { simplifyDebts } from './debtSimplifier.js';
+import { queueEmailNotification } from './emailNotificationService.js';
 
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
@@ -86,6 +87,7 @@ export const createPaymentRequest = async ({
                  read_at AS "readAt"`,
       [memberId, groupId, details, requesterId],
     );
+    await queueEmailNotification(client, memberId, 'expenseDue', 'SplitCare payment reminder', details);
     const activity = activityResult.rows[0];
     activity.paidByName = requesterName;
     activity.paidByUsername = requester?.username;

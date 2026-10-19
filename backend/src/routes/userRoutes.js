@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { accessToken, changeEmail, checkUsernameAvailability, currentUser, deleteAccount, forgotPassword, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, sendAccountDeletionCode, sendEmailChangeCodes, sendRegistrationCode, updateProfile, verifyCurrentPassword, verifyRegistrationCode } from '../controllers/userController.js';
+import { accessToken, changeEmail, checkUsernameAvailability, currentUser, deleteAccount, forgotPassword, getEmailNotificationSettings, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, sendAccountDeletionCode, sendEmailChangeCodes, sendRegistrationCode, updateEmailNotificationSettings, updateProfile, verifyCurrentPassword, verifyRegistrationCode } from '../controllers/userController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import multer from 'multer';
@@ -20,6 +20,8 @@ router.get('/access-token', requireAuth, asyncHandler(accessToken));
 router.get('/me', requireAuth, asyncHandler(currentUser));
 router.get('/notifications', requireAuth, asyncHandler(listNotifications));
 router.patch('/notifications/read', requireAuth, asyncHandler(markNotificationsRead));
+router.get('/profile/email-notifications', requireAuth, asyncHandler(getEmailNotificationSettings));
+router.put('/profile/email-notifications', requireAuth, asyncHandler(updateEmailNotificationSettings));
 router.post('/profile/verify-password', requireAuth, asyncHandler(verifyCurrentPassword));
 router.post('/profile/email-change/send-codes', requireAuth, asyncHandler(sendEmailChangeCodes));
 router.post('/profile/email-change/verify', requireAuth, asyncHandler(changeEmail));

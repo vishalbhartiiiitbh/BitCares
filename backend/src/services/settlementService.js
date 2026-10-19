@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { withTransaction } from '../db/index.js';
 import { uploadImageBuffer } from '../config/cloudinary.js';
+import { queueEmailNotification } from './emailNotificationService.js';
 
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
@@ -122,6 +123,7 @@ export const recordSettlement = async ({
        VALUES ($1, $2, $3, $4, 'PAYMENT_RECEIVED')`,
       [payeeId, groupId, activityDetails, payerId],
     );
+    await queueEmailNotification(client, payeeId, 'paymentReceived', 'You received a SplitCare payment', activityDetails);
     return result.rows[0];
   });
 };

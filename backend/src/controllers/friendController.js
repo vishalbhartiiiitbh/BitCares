@@ -6,6 +6,7 @@ import {
   settleFriendBalances,
 } from '../services/friendLedgerService.js';
 import { deleteExpense, updateExpense } from '../services/expenseService.js';
+import { queueEmailNotification } from '../services/emailNotificationService.js';
 import { validateExpenseOptions } from './expenseController.js';
 
 const parseArray = (value, label) => {
@@ -197,6 +198,13 @@ export const sendFriendRequest = async (req, res) => {
          VALUES ($1, $2)
          RETURNING id AS "_id", status, created_at AS "createdAt"`,
         [req.user._id, recipient._id],
+      );
+      await queueEmailNotification(
+        client,
+        recipient._id,
+        'friendAdded',
+        'You received a SplitCare friend request',
+        `${req.user.fullnamae || req.user.username} sent you a friend request on SplitCare.`,
       );
       return { ...inserted.rows[0], recipientName: recipient.fullnamae || recipient.username };
     });

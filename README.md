@@ -116,6 +116,23 @@ The limit is enforced by the backend and shown in the profile. Username and
 email updates modify the existing user record; related groups, expenses, and
 balances remain attached by the user's stable ID.
 
+## Email Notifications
+
+Users can expand **Email notification settings** in their profile to enable or
+disable emails for group membership, friend requests, expense activity and
+comments, payment requests, payments received, and monthly activity summaries.
+All email categories are off by default. Settings are available through the
+authenticated `GET` and `PUT /api/users/profile/email-notifications` endpoints;
+the `PUT` body contains a boolean for every preference under `preferences`.
+
+Notifications are queued in PostgreSQL and delivered by the backend worker
+using the SMTP settings above. Delivery is attempted up to five times.
+Monthly summaries are queued on the first day of each month after 09:00 server
+time. Payment request email is sent when a member explicitly requests payment;
+the app does not currently schedule automatic due-date reminders. The
+product-update preference is saved, but the app does not currently publish
+product announcements.
+
 ## Frontend Setup
 
 ```bash

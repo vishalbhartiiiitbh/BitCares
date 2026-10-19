@@ -2996,6 +2996,53 @@ input::placeholder {
     line-height: 1.5;
 }
 
+.email-notification-settings {
+    display: grid;
+    gap: 18px;
+}
+
+.email-notification-settings > p {
+    margin: 0;
+    color: #778076;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.email-notification-settings fieldset {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.email-notification-settings legend {
+    margin-bottom: 10px;
+    color: #19231d;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.email-notification-settings label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #4d574e;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.4;
+}
+
+.email-notification-settings input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    margin: 0;
+    padding: 0;
+    accent-color: #405c36;
+}
+
 .profile-danger-zone {
     display: grid;
     gap: 12px;

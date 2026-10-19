@@ -25,6 +25,16 @@ export const sendPasswordResetEmail = async (email, resetUrl) => {
   });
 };
 
+export const sendNotificationEmail = async (email, subject, text) => {
+  const transporter = createTransporter();
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to: email,
+    subject,
+    text,
+  });
+};
+
 export const sendEmailVerificationCode = async (email, code, purpose) => {
   const transporter = createTransporter();
   const isDeletion = purpose === 'delete_account';

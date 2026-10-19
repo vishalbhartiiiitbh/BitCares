@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { query, withTransaction } from '../db/index.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 import { sendEmailVerificationCode, sendPasswordResetEmail } from '../services/emailService.js';
+import { EMAIL_NOTIFICATION_PREFERENCES } from '../services/emailNotificationService.js';
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' };
 const publicUser = (user) => { const value = { ...user }; delete value.password; delete value.refreshToken; return value; };
@@ -386,6 +387,12 @@ export const changeEmail = async (req, res) => {
         [newEmail, req.user._id],
       );
       await client.query(
+        `UPDATE email_notification_outbox
+            SET recipient_email = $1
+          WHERE user_id = $2 AND sent_at IS NULL`,
+        [newEmail, req.user._id],
+      );
+      await client.query(
         `DELETE FROM account_email_codes
           WHERE (email = $1 AND purpose = 'email_change_old')
              OR (email = $2 AND purpose = 'email_change_new')`,
@@ -494,6 +501,29 @@ export const markNotificationsRead = async (req, res) => {
     [req.user._id],
   );
   res.json({ data: { markedRead: result.rowCount } });
+};
+
+export const getEmailNotificationSettings = async (req, res) => {
+  const result = await query('SELECT email_notification_preferences AS preferences FROM users WHERE id = $1', [req.user._id]);
+  res.json({ data: { preferences: { ...EMAIL_NOTIFICATION_PREFERENCES, ...result.rows[0].preferences } } });
+};
+
+export const updateEmailNotificationSettings = async (req, res) => {
+  const preferences = req.body?.preferences;
+  if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
+    throw Object.assign(new Error('Email notification preferences are required'), { statusCode: 400 });
+  }
+  const unknown = Object.keys(preferences).filter((key) => !Object.hasOwn(EMAIL_NOTIFICATION_PREFERENCES, key));
+  const invalid = Object.keys(EMAIL_NOTIFICATION_PREFERENCES).filter((key) => typeof preferences[key] !== 'boolean');
+  if (unknown.length || invalid.length) {
+    throw Object.assign(new Error('Provide a true or false setting for every email notification type'), { statusCode: 400 });
+  }
+
+  const result = await query(
+    'UPDATE users SET email_notification_preferences = $1::jsonb WHERE id = $2 RETURNING email_notification_preferences AS preferences',
+    [JSON.stringify(preferences), req.user._id],
+  );
+  res.json({ data: { preferences: result.rows[0].preferences } });
 };
 
 const assertCurrentPassword = async (userId, currentPassword) => {
