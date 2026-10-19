@@ -1667,6 +1667,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [groupError, setGroupError] = useState('');
   const [groupBusy, setGroupBusy] = useState(false);
   const [joinCode, setJoinCode] = useState('');
+  const [showMobileNav, setShowMobileNav] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showEmailSettings, setShowEmailSettings] = useState(false);
@@ -2978,15 +2979,35 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
 
   return (
     <main className="dashboard-page">
-      <nav className="dashboard-nav">
+      <header className="dashboard-nav">
         <Brand />
-        <div className="nav-links">
-          <button className={`dashboard-nav-link ${activePage === 'overview' ? 'active' : ''}`} type="button" onClick={() => setActivePage('overview')}>Dashboard</button>
-          <button className={activePage === 'recent' ? 'active' : ''} type="button" onClick={() => setActivePage('recent')}>Recent activity</button>
-          <button className={activePage === 'all-expenses' ? 'active' : ''} type="button" onClick={() => setActivePage('all-expenses')}>All expenses</button>
-          <button className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => setActivePage('personal')}>Personal expenses</button>
-          <button className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => setActivePage('friends')}>Friends</button>
-        </div>
+        <button
+          className="mobile-nav-toggle"
+          type="button"
+          aria-label={showMobileNav ? "Close navigation menu" : "Open navigation menu"}
+          aria-expanded={showMobileNav}
+          aria-controls="dashboard-navigation-links"
+          onClick={() => {
+            setShowMobileNav((current) => !current);
+            setShowNotifications(false);
+            setShowProfileMenu(false);
+          }}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <nav
+          className={`nav-links ${showMobileNav ? 'mobile-nav-open' : ''}`}
+          id="dashboard-navigation-links"
+          aria-label="Dashboard navigation"
+        >
+          <button aria-label="Dashboard" className={`dashboard-nav-link ${activePage === 'overview' ? 'active' : ''}`} type="button" onClick={() => { setActivePage('overview'); setShowMobileNav(false); }}><span className="mobile-nav-label">Dashboard</span></button>
+          <button aria-label="Recent activity" className={activePage === 'recent' ? 'active' : ''} type="button" onClick={() => { setActivePage('recent'); setShowMobileNav(false); }}><span className="mobile-nav-label">Recent activity</span></button>
+          <button aria-label="All expenses" className={activePage === 'all-expenses' ? 'active' : ''} type="button" onClick={() => { setActivePage('all-expenses'); setShowMobileNav(false); }}><span className="mobile-nav-label">All expenses</span></button>
+          <button aria-label="Personal expenses" className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => { setActivePage('personal'); setShowMobileNav(false); }}><span className="mobile-nav-label">Personal expenses</span></button>
+          <button aria-label="Friends" className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => { setActivePage('friends'); setShowMobileNav(false); }}><span className="mobile-nav-label">Friends</span></button>
+        </nav>
         <div className="notification-control" ref={notificationControlRef}>
           <button
             className="notification-trigger"
@@ -3131,7 +3152,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             </div>
           )}
         </div>
-      </nav>
+      </header>
       <div className={`dashboard-shell ${activePage === 'friends' || activePage === 'friend-detail' ? 'friend-management-shell' : ''}`}>
         <aside className="dashboard-sidebar">
           <div className="side-links">

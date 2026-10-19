@@ -1327,6 +1327,10 @@ input::placeholder {
     display: inline-block;
 }
 
+.mobile-nav-toggle {
+    display: none;
+}
+
 .nav-links {
     display: flex;
     align-items: center;
@@ -5805,7 +5809,8 @@ input::placeholder {
 
 @media (max-width: 760px) {
     .dashboard-nav {
-        flex-wrap: wrap;
+        position: relative;
+        flex-wrap: nowrap;
         gap: 10px;
         padding: 12px 5vw;
     }
@@ -5814,25 +5819,112 @@ input::placeholder {
         order: 1;
     }
 
-    .dashboard-nav > .profile-control {
+    .dashboard-nav > .mobile-nav-toggle {
+        display: flex;
+        width: 42px;
+        height: 40px;
+        flex: 0 0 42px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
         order: 2;
+        margin-left: 0;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, .38);
+        border-radius: 5px;
+        background: transparent;
+        color: #fff;
+    }
+
+    .mobile-nav-toggle span {
+        display: block;
+        width: 19px;
+        height: 2px;
+        border-radius: 2px;
+        background: currentColor;
+    }
+
+    .dashboard-nav > .notification-control {
+        order: 3;
         margin-left: auto;
     }
 
+    .dashboard-nav > .profile-control {
+        order: 4;
+    }
+
     .dashboard-nav > .nav-links {
-        order: 3;
-        flex: 1 0 100%;
-        width: 100%;
-        gap: 18px;
-        margin: 5px 0 0;
-        overflow-x: auto;
-        padding-bottom: 4px;
-        scrollbar-width: thin;
-        white-space: nowrap;
+        position: absolute;
+        z-index: 10;
+        top: 100%;
+        left: 0;
+        display: none;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+        width: 30vw;
+        min-width: 150px;
+        max-width: 240px;
+        margin: 0;
+        padding: 8px 6px 12px;
+        border-top: 1px solid rgba(255, 255, 255, .2);
+        background: #50b99f;
+        box-shadow: 0 12px 22px rgba(25, 35, 29, .18);
+        color: #fff;
+    }
+
+    .dashboard-nav > .nav-links.mobile-nav-open {
+        display: flex;
     }
 
     .dashboard-nav .nav-links .dashboard-nav-link {
+        display: flex;
+        width: 100%;
+        min-height: 48px;
         flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 11px 8px;
+        border: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, .18);
+        color: rgba(255, 255, 255, .9);
+        font-weight: 700;
+        text-align: left;
+    }
+
+    .dashboard-nav .nav-links .dashboard-nav-link:last-child {
+        border-bottom: 0;
+    }
+
+    .dashboard-nav .nav-links .mobile-nav-label {
+        display: block;
+        min-width: 0;
+        font-family: Manrope, sans-serif;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.3;
+        white-space: normal;
+    }
+
+    .dashboard-nav .nav-links .dashboard-nav-link.active,
+    .dashboard-nav .nav-links .dashboard-nav-link:hover {
+        color: #fff;
+    }
+
+    .dashboard-nav .nav-links .dashboard-nav-link.active {
+        border-radius: 4px;
+        background: rgba(216, 238, 76, .24);
+        color: #fff;
+        font-weight: 800;
+    }
+
+    .dashboard-nav .nav-links .dashboard-nav-link:hover:not(.active) {
+        background: rgba(255, 255, 255, .1);
+    }
+
+    .dashboard-nav .nav-links .mobile-nav-label {
+        text-align: center;
     }
 
     .dashboard-content {
@@ -5843,9 +5935,26 @@ input::placeholder {
 }
 
 @media (max-width: 420px) {
-    .dashboard-nav > .nav-links {
-        gap: 14px;
-        font-size: 9px;
+    .dashboard-nav {
+        gap: 7px;
+        padding-right: 4vw;
+        padding-left: 4vw;
+    }
+
+    .dashboard-nav > .mobile-nav-toggle {
+        width: 38px;
+        flex-basis: 38px;
+    }
+
+    .dashboard-nav .profile-trigger {
+        gap: 5px;
+    }
+
+    .dashboard-nav .profile-trigger > span:not(.avatar) {
+        max-width: 72px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
     .landing-balance-total {
