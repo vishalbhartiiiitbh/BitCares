@@ -3140,6 +3140,80 @@ input::placeholder {
     white-space: nowrap;
 }
 
+.friend-qr-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.friend-qr-actions .quiet-button {
+    white-space: nowrap;
+}
+
+.friend-qr-modal {
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+}
+
+.friend-qr-modal > .modal-help,
+.friend-qr-modal > .friend-qr-expiry,
+.friend-qr-modal > .error-message {
+    justify-self: stretch;
+}
+
+.friend-qr-code {
+    display: grid;
+    place-items: center;
+    max-width: 100%;
+    padding: 12px;
+    background: #fff;
+}
+
+.friend-qr-code canvas {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+
+.friend-invite-link {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    color: #287764;
+    font-size: 12px;
+    text-align: center;
+}
+
+.friend-invite-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+.friend-code-change {
+    color: #a94d3e;
+}
+
+.friend-qr-expiry {
+    margin: 0;
+    color: #778076;
+    font-size: 12px;
+    line-height: 1.5;
+    text-align: center;
+}
+
+.friend-qr-reader {
+    width: 100%;
+    overflow: hidden;
+}
+
+.friend-qr-reader video {
+    max-width: 100%;
+    border-radius: 4px;
+}
+
 .friend-page-message {
     margin: 14px 0 0;
     color: #52623e;
@@ -3810,6 +3884,10 @@ input::placeholder {
     .friend-management-heading {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .friend-qr-actions {
+        justify-content: flex-start;
     }
 
     .friend-management-toolbar {

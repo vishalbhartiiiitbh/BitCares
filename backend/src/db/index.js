@@ -99,6 +99,11 @@ const connectDB = async () => {
       PRIMARY KEY (user_low, user_high),
       CHECK (user_low < user_high)
     );
+    CREATE TABLE IF NOT EXISTS friend_invite_codes (
+      user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      code VARCHAR(64) NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
 
     CREATE TABLE IF NOT EXISTS friend_requests (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

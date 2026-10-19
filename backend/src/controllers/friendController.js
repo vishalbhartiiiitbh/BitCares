@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../db/index.js';
+import { randomBytes } from 'node:crypto';
 import {
   createFriendExpense as addFriendExpense,
   getFriendHistory,
@@ -215,6 +216,75 @@ export const sendFriendRequest = async (req, res) => {
     }
     throw error;
   }
+};
+
+const newFriendInviteCode = () => randomBytes(24).toString('base64url');
+
+export const getFriendInviteCode = async (req, res) => {
+  const code = await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO friend_invite_codes (user_id, code)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [req.user._id, newFriendInviteCode()],
+    );
+    const result = await client.query(
+      'SELECT code FROM friend_invite_codes WHERE user_id = $1',
+      [req.user._id],
+    );
+    return result.rows[0].code;
+  });
+  res.json({ data: { code } });
+};
+
+export const rotateFriendInviteCode = async (req, res) => {
+  const result = await query(
+    `INSERT INTO friend_invite_codes (user_id, code)
+     VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET code = EXCLUDED.code, created_at = NOW()
+     RETURNING code`,
+    [req.user._id, newFriendInviteCode()],
+  );
+  res.json({ data: { code: result.rows[0].code } });
+};
+
+export const acceptFriendInviteCode = async (req, res) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code : '';
+  if (!/^[A-Za-z0-9_-]{32}$/.test(code)) {
+    throw Object.assign(new Error('Enter a valid SplitCare friend link or QR code'), { statusCode: 400 });
+  }
+
+  const friend = await withTransaction(async (client) => {
+    const person = await client.query(
+      `SELECT u.id AS "_id", u.username, u.fullnamae, u.coverimage
+         FROM friend_invite_codes c
+         JOIN users u ON u.id = c.user_id
+        WHERE c.code = $1`,
+      [code],
+    );
+    if (!person.rowCount) {
+      throw Object.assign(new Error('This friend code is invalid or has been changed by its owner'), { statusCode: 404 });
+    }
+    if (person.rows[0]._id === req.user._id) {
+      throw Object.assign(new Error('You cannot add yourself as a friend'), { statusCode: 400 });
+    }
+
+    const [userLow, userHigh] = friendKey(req.user._id, person.rows[0]._id);
+    await client.query(
+      'INSERT INTO friendships (user_low, user_high) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [userLow, userHigh],
+    );
+    await client.query(
+      `UPDATE friend_requests
+          SET status = 'accepted', updated_at = NOW()
+        WHERE status = 'pending'
+          AND LEAST(sender_id, receiver_id) = $1
+          AND GREATEST(sender_id, receiver_id) = $2`,
+      [userLow, userHigh],
+    );
+    return person.rows[0];
+  });
+  res.status(201).json({ data: friend });
 };
 
 export const respondToFriendRequest = async (req, res) => {

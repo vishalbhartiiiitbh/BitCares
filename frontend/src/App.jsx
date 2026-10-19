@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { QRCodeCanvas } from "qrcode.react";
 
 const API_URL = `${import.meta.env.VITE_API_URL}/api` || "/api";
 const emptyForm = { username: "", email: "", fullnamae: "", password: "" };
@@ -601,6 +602,7 @@ const expenseCategories = [
 
 function App() {
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken") || "");
+  const [friendInviteCode, setFriendInviteCode] = useState(() => new URLSearchParams(window.location.search).get("friendCode") || "");
   const [mode, setMode] = useState(() => resetToken ? "reset" : "login");
   const [form, setForm] = useState(emptyForm);
   const [user, setUser] = useState(null);
@@ -612,9 +614,18 @@ function App() {
   const [registrationCodeSent, setRegistrationCodeSent] = useState(false);
   const [verifiedEmailToken, setVerifiedEmailToken] = useState("");
 
+  const markFriendInviteHandled = () => {
+    setFriendInviteCode('');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('friendCode');
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
   useEffect(() => {
     if (mode === "reset") {
-      window.history.replaceState(null, "", window.location.pathname);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("resetToken");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
       return;
     }
     apiRequest("/users/refresh-token", { method: "POST" })
@@ -761,6 +772,8 @@ function App() {
         onLogout={signOut}
         onProfileUpdated={setUser}
         onAccountDeleted={accountDeleted}
+        friendInviteCode={friendInviteCode}
+        onFriendInviteHandled={markFriendInviteHandled}
       />
     );
 
@@ -802,6 +815,7 @@ function App() {
           <div className="mobile-brand">
             <Brand />
           </div>
+          {friendInviteCode && <p className="friend-page-message" role="status">Sign in or create an account to connect with the person who shared this friend link.</p>}
           {(mode === "login" || mode === "register") && <div className="mode-tabs" role="tablist">
             <button
               className={mode === "login" ? "selected" : ""}
@@ -995,6 +1009,52 @@ function Brand() {
       <span className="brand-mark">÷</span><span className="brand-name">splitcare</span>
     </div>
   );
+}
+
+function FriendQrScanner({ onScan, onError }) {
+  const onScanRef = useRef(onScan);
+  const onErrorRef = useRef(onError);
+  useEffect(() => {
+    onScanRef.current = onScan;
+    onErrorRef.current = onError;
+  }, [onScan, onError]);
+
+  useEffect(() => {
+    let scanner;
+    let cancelled = false;
+    let hasScanned = false;
+    const startScanner = async () => {
+      try {
+        const { Html5QrcodeScanner } = await import("html5-qrcode");
+        if (cancelled) return;
+        scanner = new Html5QrcodeScanner(
+          "friend-qr-reader",
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          false,
+        );
+        scanner.render((decodedText) => {
+          if (cancelled || hasScanned) return;
+          hasScanned = true;
+          onScanRef.current(decodedText);
+        });
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Could not start the friend QR scanner:", error);
+        onErrorRef.current("Could not start the QR scanner. Check camera permission and try again.");
+      }
+    };
+    void startScanner();
+    return () => {
+      cancelled = true;
+      if (scanner) {
+        void scanner.clear().catch((error) => {
+          console.error("Could not stop the friend QR scanner:", error);
+        });
+      }
+    };
+  }, []);
+
+  return <div id="friend-qr-reader" className="friend-qr-reader" />;
 }
 
 function ExpenseLedger({
@@ -1352,7 +1412,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   );
 }
 
-function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDeleted }) {
+function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDeleted, friendInviteCode, onFriendInviteHandled }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
   const [dashboardBalanceSummary, setDashboardBalanceSummary] = useState(null);
@@ -1382,6 +1442,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [friendIdentifier, setFriendIdentifier] = useState('');
   const [friendBusy, setFriendBusy] = useState(false);
   const [friendError, setFriendError] = useState('');
+  const [showFriendQr, setShowFriendQr] = useState(false);
+  const [showFriendQrScanner, setShowFriendQrScanner] = useState(false);
+  const [friendScannerKey, setFriendScannerKey] = useState(0);
+  const [friendInvite, setFriendInvite] = useState(null);
+  const [friendQrBusy, setFriendQrBusy] = useState(false);
+  const [friendQrError, setFriendQrError] = useState('');
+  const friendInviteHandledRef = useRef('');
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
@@ -1667,6 +1734,124 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       setFriendBusy(false);
     }
   };
+
+  const loadFriendInvite = async () => {
+    setFriendQrBusy(true);
+    setFriendQrError('');
+    setFriendInvite(null);
+    try {
+      const result = await apiRequest('/friends/invite-code', {
+        headers: authHeaders,
+      });
+      setFriendInvite({
+        code: result.code,
+        url: `${window.location.origin}/?friendCode=${encodeURIComponent(result.code)}`,
+      });
+    } catch (error) {
+      setFriendQrError(error.message);
+    } finally {
+      setFriendQrBusy(false);
+    }
+  };
+
+  const openFriendInvite = () => {
+    setShowFriendQr(true);
+    void loadFriendInvite();
+  };
+
+  const changeFriendInviteCode = async () => {
+    if (!window.confirm('Change your friend code? Your old QR code and links will stop working.')) return;
+    setFriendQrBusy(true);
+    setFriendQrError('');
+    try {
+      const result = await apiRequest('/friends/invite-code/change', {
+        method: 'POST',
+        headers: authHeaders,
+      });
+      setFriendInvite({
+        code: result.code,
+        url: `${window.location.origin}/?friendCode=${encodeURIComponent(result.code)}`,
+      });
+    } catch (error) {
+      setFriendQrError(error.message);
+    } finally {
+      setFriendQrBusy(false);
+    }
+  };
+
+  const acceptFriendInvite = async (code, fromLink = false) => {
+    setFriendQrBusy(true);
+    setFriendQrError('');
+    try {
+      const friend = await apiRequest('/friends/invite-code/accept', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ code }),
+      });
+      await refreshFriendData();
+      setShowFriendQrScanner(false);
+      setActivePage('friends');
+      setFormMessage(`You are now friends with ${friend.fullnamae || friend.username}.`);
+    } catch (error) {
+      if (fromLink) setFriendError(error.message);
+      else setFriendQrError(error.message);
+    } finally {
+      setFriendQrBusy(false);
+      if (fromLink) onFriendInviteHandled();
+    }
+  };
+
+  const handleFriendQrScan = (value) => {
+    let code = value.trim();
+    try {
+      code = new URL(value).searchParams.get('friendCode') || '';
+    } catch {
+      // A raw code is also accepted for scanners that return QR text directly.
+    }
+    if (!code) {
+      setFriendQrError('That QR code is not a SplitCare friend invite.');
+      return;
+    }
+    void acceptFriendInvite(code);
+  };
+
+  const copyFriendInvite = async () => {
+    if (!friendInvite?.url) return;
+    try {
+      await navigator.clipboard.writeText(friendInvite.url);
+      setFriendQrError('');
+      setFormMessage('Friend link copied to clipboard.');
+    } catch (error) {
+      setFriendQrError('Could not copy the link. Check your browser clipboard permissions.');
+      console.error('Could not copy the friend invite link:', error);
+    }
+  };
+
+  const shareFriendInvite = async () => {
+    if (!friendInvite?.url) return;
+    if (!navigator.share) {
+      await copyFriendInvite();
+      return;
+    }
+    try {
+      await navigator.share({
+        title: 'Connect with me on SplitCare',
+        text: 'Use my SplitCare friend link to connect directly.',
+        url: friendInvite.url,
+      });
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        setFriendQrError('Could not share the friend link.');
+        console.error('Could not share the friend invite link:', error);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!friendInviteCode || friendInviteHandledRef.current === friendInviteCode) return;
+    friendInviteHandledRef.current = friendInviteCode;
+    void acceptFriendInvite(friendInviteCode, true);
+  }, [friendInviteCode]);
 
   const respondToFriendRequest = async (requestId, action) => {
     setFriendBusy(true);
@@ -2688,6 +2873,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               >
                 Email notification settings
               </button>
+              <button
+                onClick={openFriendInvite}
+              >
+                My friend code
+              </button>
               <button className="logout-menu-button" onClick={onLogout}>
                 Log out
               </button>
@@ -2804,7 +2994,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   <h1>Friends</h1>
                   <p>Manage your friends, requests, and connections.</p>
                 </div>
-                <button className="primary-action" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>+ Add a friend</button>
+                <div className="friend-qr-actions">
+                  <button className="primary-action" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>+ Add a friend</button>
+                  <button className="quiet-button" type="button" onClick={openFriendInvite}>Show my QR</button>
+                  <button className="quiet-button" type="button" onClick={() => { setFriendQrError(''); setFriendScannerKey((key) => key + 1); setShowFriendQrScanner(true); }}>Scan QR</button>
+                </div>
               </div>
 
               {formMessage && <p className="friend-page-message">{formMessage}</p>}
@@ -2854,7 +3048,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 <div className="friends-empty-state">
                   <span>♟</span>
                   <h2>Your friend list is empty</h2>
-                  <p>Add a friend by their SplitCare username or registered email. They’ll appear here after accepting.</p>
+                  <p>Add a friend by username or email, or connect directly by scanning each other’s QR code.</p>
                   <button className="primary-action" type="button" onClick={() => { setFriendError(''); setShowAddFriend(true); }}>Add your first friend</button>
                 </div>
               )}
@@ -3149,6 +3343,51 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 {friendError && <p className="error-message">{friendError}</p>}
                 <button className="submit-button" disabled={friendBusy}>{friendBusy ? 'Sending…' : 'Send friend request'}</button>
               </form>
+            </Modal>
+          )}
+          {showFriendQr && (
+            <Modal title="My friend code" onClose={() => setShowFriendQr(false)}>
+              <div className="friend-qr-modal">
+                <p className="modal-help">Share this QR code or link. Anyone who uses it can connect with you directly without a friend request.</p>
+                {friendQrBusy && <p className="modal-help">Loading your friend code…</p>}
+                {friendInvite && (
+                  <>
+                    <div className="friend-qr-code">
+                      <QRCodeCanvas value={friendInvite.url} size={240} level="M" />
+                    </div>
+                    <a className="friend-invite-link" href={friendInvite.url}>{friendInvite.url}</a>
+                    <div className="friend-invite-actions">
+                      <button className="quiet-button" type="button" onClick={shareFriendInvite}>Share link</button>
+                      <button className="quiet-button" type="button" onClick={copyFriendInvite}>Copy link</button>
+                    </div>
+                    <p className="friend-qr-expiry">Your code stays the same until you change it. Changing the code disables this QR and any links you have already shared.</p>
+                  </>
+                )}
+                {friendQrError && <p className="error-message" role="alert">{friendQrError}</p>}
+                <button className="quiet-button friend-code-change" type="button" onClick={changeFriendInviteCode} disabled={friendQrBusy}>
+                  Change my code
+                </button>
+              </div>
+            </Modal>
+          )}
+          {showFriendQrScanner && (
+            <Modal title="Scan a friend QR code" onClose={() => {
+              if (!friendQrBusy) {
+                setShowFriendQrScanner(false);
+                setFriendQrError('');
+              }
+            }}>
+              <div className="friend-qr-modal">
+                <p className="modal-help">Allow camera access and scan another user’s active SplitCare QR code to connect directly.</p>
+                <FriendQrScanner key={friendScannerKey} onScan={handleFriendQrScan} onError={setFriendQrError} />
+                {friendQrBusy && <p className="modal-help">Connecting…</p>}
+                {friendQrError && <p className="error-message" role="alert">{friendQrError}</p>}
+                {friendQrError && !friendQrBusy && (
+                  <button className="quiet-button" type="button" onClick={() => setFriendScannerKey((key) => key + 1)}>
+                    Scan again
+                  </button>
+                )}
+              </div>
             </Modal>
           )}
           {friendToRemove && (

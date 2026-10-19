@@ -3,6 +3,9 @@ import {
   listFriendRequests,
   listFriends,
   listSentFriendRequests,
+  getFriendInviteCode,
+  rotateFriendInviteCode,
+  acceptFriendInviteCode,
   removeFriend,
   respondToFriendRequest,
   sendFriendRequest,
@@ -36,6 +39,9 @@ router.get('/requests/sent', asyncHandler(listSentFriendRequests));
 router.get('/requests', asyncHandler(listFriendRequests));
 router.post('/requests', asyncHandler(sendFriendRequest));
 router.post('/requests/:requestId/respond', asyncHandler(respondToFriendRequest));
+router.get('/invite-code', asyncHandler(getFriendInviteCode));
+router.post('/invite-code/change', asyncHandler(rotateFriendInviteCode));
+router.post('/invite-code/accept', asyncHandler(acceptFriendInviteCode));
 router.get('/:friendId/history', asyncHandler(friendHistory));
 router.post('/:friendId/expenses', upload.single('paymentProof'), asyncHandler(createFriendExpense));
 router.patch('/:friendId/expenses/:expenseId', upload.single('paymentProof'), asyncHandler(updateFriendExpense));

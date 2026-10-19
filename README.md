@@ -111,6 +111,16 @@ to authenticated `POST /api/users/profile/email-change/verify` with
 Both codes expire after 10 minutes, and the new email cannot already be linked
 to an account.
 
+Users can share a persistent friend QR code or link from the Friends section or
+the profile menu. The code remains the same until the owner explicitly changes
+it; changing it invalidates all previously shared QR codes and links. Anyone
+using the link must sign in or register before the friendship is created.
+Authenticated `GET /api/friends/invite-code` retrieves or creates the user's
+code, `POST /api/friends/invite-code/change` changes it, and
+`POST /api/friends/invite-code/accept` accepts a code with
+`{"code":"FRIEND_CODE"}`. Camera scanning requires browser camera permission
+and a secure context (HTTPS, or localhost).
+
 Users can change their username at most twice over the lifetime of the account.
 The limit is enforced by the backend and shown in the profile. Username and
 email updates modify the existing user record; related groups, expenses, and
