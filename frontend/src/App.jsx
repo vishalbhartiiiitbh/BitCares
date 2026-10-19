@@ -3337,7 +3337,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   </div>
                 </div>
                 <label className="profile-photo-picker">Profile photo<input name="coverimage" type="file" accept="image/*" onChange={updateProfileField} /></label>
-                <label>Username<input name="username" value={profileForm.username} onChange={updateProfileField} maxLength="40" required /></label>
+                <label>Username<input name="username" value={profileForm.username} onChange={updateProfileField} maxLength="40" disabled={Number(user.usernameChangeCount || 0) >= 2} required /></label>
+                <p className="username-change-limit" role="status">
+                  {Number(user.usernameChangeCount || 0) >= 2
+                    ? 'You have used both lifetime username changes.'
+                    : `You can change your username ${2 - Number(user.usernameChangeCount || 0)} more ${2 - Number(user.usernameChangeCount || 0) === 1 ? 'time' : 'times'}.`}
+                </p>
                 {profileForm.username.trim() && (
                   <p className={`username-status ${usernameAvailability.status}`} role="status" aria-live="polite">
                     {usernameAvailability.username !== profileForm.username.trim().toLowerCase() || usernameAvailability.status === 'checking'

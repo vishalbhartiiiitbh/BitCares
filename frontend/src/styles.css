@@ -2924,6 +2924,12 @@ input::placeholder {
     color: #ba4c3b;
 }
 
+.username-change-limit {
+    margin: -8px 0 0;
+    color: #778076;
+    font-size: 11px;
+}
+
 .password-update-toggle {
     width: fit-content;
     padding: 4px 0;

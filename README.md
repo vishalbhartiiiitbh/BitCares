@@ -111,6 +111,11 @@ to authenticated `POST /api/users/profile/email-change/verify` with
 Both codes expire after 10 minutes, and the new email cannot already be linked
 to an account.
 
+Users can change their username at most twice over the lifetime of the account.
+The limit is enforced by the backend and shown in the profile. Username and
+email updates modify the existing user record; related groups, expenses, and
+balances remain attached by the user's stable ID.
+
 ## Frontend Setup
 
 ```bash

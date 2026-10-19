@@ -48,6 +48,7 @@ const connectDB = async () => {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_failed_attempts INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_failure_window_started_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_count INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS account_email_codes (
       email TEXT NOT NULL,

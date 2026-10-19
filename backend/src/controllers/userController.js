@@ -142,7 +142,7 @@ export const register = async (req, res) => {
       if (existing.rowCount) return { error: 'Username or email already exists', statusCode: 409 };
 
       const inserted = await client.query(
-        'INSERT INTO users (username, email, fullnamae, password, phone, coverimage) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", created_at AS "createdAt"',
+        'INSERT INTO users (username, email, fullnamae, password, phone, coverimage) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", created_at AS "createdAt"',
         [username, email, fullnamae, hash, phone || null, coverimage || null],
       );
       await client.query('DELETE FROM account_email_codes WHERE email = $1 AND purpose = $2', [email, 'signup']);
@@ -166,7 +166,7 @@ export const login = async (req, res) => {
   const { email, username, password } = req.body;
   if ((!email && !username) || !password) throw Object.assign(new Error('Email or username and password are required'), { statusCode: 400 });
   const key = (email || username).toLowerCase();
-  const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", password, created_at AS "createdAt", login_locked_until > NOW() AS "isLoginLocked" FROM users WHERE email = $1 OR username = $1', [key]);
+  const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", password, created_at AS "createdAt", login_locked_until > NOW() AS "isLoginLocked" FROM users WHERE email = $1 OR username = $1', [key]);
   const user = result.rows[0];
   if (!user) throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
   if (user.isLoginLocked) {
@@ -468,7 +468,7 @@ export const deleteAccount = async (req, res) => {
 };
 
 export const logout = async (req, res) => { await query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user._id]); res.clearCookie('accessToken', cookieOptions); res.clearCookie('refreshToken', cookieOptions); res.json({ data: { message: 'Logged out successfully' } }); };
-export const refreshToken = async (req, res) => { const incoming = req.cookies?.refreshToken || req.body.refreshToken; if (!incoming) throw Object.assign(new Error('Refresh token is required'), { statusCode: 401 }); const decoded = jwt.verify(incoming, process.env.REFRESH_TOKEN_SECRET); const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", created_at AS "createdAt" FROM users WHERE id = $1 AND refresh_token = $2', [decoded._id, incoming]); if (!result.rowCount) throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 }); const data = tokenResponse(result.rows[0]); await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, decoded._id]); setCookies(res, data); res.json({ data: { accessToken: data.accessToken, refreshToken: data.refreshToken, tokenType: data.tokenType } }); };
+export const refreshToken = async (req, res) => { const incoming = req.cookies?.refreshToken || req.body.refreshToken; if (!incoming) throw Object.assign(new Error('Refresh token is required'), { statusCode: 401 }); const decoded = jwt.verify(incoming, process.env.REFRESH_TOKEN_SECRET); const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", created_at AS "createdAt" FROM users WHERE id = $1 AND refresh_token = $2', [decoded._id, incoming]); if (!result.rowCount) throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 }); const data = tokenResponse(result.rows[0]); await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, decoded._id]); setCookies(res, data); res.json({ data: { accessToken: data.accessToken, refreshToken: data.refreshToken, tokenType: data.tokenType } }); };
 export const accessToken = async (req, res) => res.json({ data: { accessToken: makeAccessToken(req.user), tokenType: 'Bearer' } });
 export const currentUser = async (req, res) => res.json({ data: { user: req.user } });
 
@@ -535,6 +535,10 @@ export const updateProfile = async (req, res) => {
   }
   const values = {};
   if (username?.trim()) values.username = username.trim().toLowerCase();
+  const usernameChanged = values.username && values.username !== req.user.username.toLowerCase();
+  if (usernameChanged && Number(req.user.usernameChangeCount || 0) >= 2) {
+    throw Object.assign(new Error('You have used both lifetime username changes'), { statusCode: 409 });
+  }
   if (fullnamae?.trim()) values.fullnamae = fullnamae.trim();
   if (phone !== undefined) values.phone = phone.trim();
   if (coverimage?.trim()) values.coverimage = coverimage.trim();
@@ -569,16 +573,22 @@ export const updateProfile = async (req, res) => {
   if (!Object.keys(values).length) throw Object.assign(new Error('At least one profile field is required'), { statusCode: 400 });
   const fields = Object.keys(values);
   const params = fields.map((field) => values[field]);
-  const assignments = fields.map((field, index) => `${field} = $${index + 1}`).join(', ');
+  const assignments = fields.map((field, index) => `${field} = $${index + 1}`);
+  if (usernameChanged) assignments.push('username_change_count = username_change_count + 1');
+  const setClause = assignments.join(', ');
   params.push(req.user._id);
+  const usernameChangeGuard = usernameChanged ? ' AND username_change_count < 2' : '';
   let result;
   try {
-    result = await query(`UPDATE users SET ${assignments} WHERE id = $${params.length} RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", created_at AS "createdAt"`, params);
+    result = await query(`UPDATE users SET ${setClause} WHERE id = $${params.length}${usernameChangeGuard} RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", created_at AS "createdAt"`, params);
   } catch (error) {
     if (error.code === '23505' && error.constraint === 'users_username_key') {
       throw Object.assign(new Error('That username is already taken. Please choose a different one.'), { statusCode: 409 });
     }
     throw error;
+  }
+  if (!result.rowCount) {
+    throw Object.assign(new Error('You have used both lifetime username changes'), { statusCode: 409 });
   }
 
   let cleanupWarning;
