@@ -2964,6 +2964,57 @@ input::placeholder {
     z-index: 8;
 }
 
+.settle-up-chooser-modal {
+    z-index: 8;
+}
+
+.settle-up-options {
+    display: grid;
+    max-height: min(420px, calc(100vh - 280px));
+    gap: 8px;
+    overflow-y: auto;
+}
+
+.settle-up-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #e0e5df;
+    border-radius: 5px;
+    background: #fff;
+    color: #354139;
+    text-align: left;
+}
+
+.settle-up-option:hover {
+    border-color: #5cc7ad;
+    background: #f5faf7;
+}
+
+.settle-up-option > span {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+}
+
+.settle-up-option strong,
+.settle-up-option b {
+    font-size: 12px;
+}
+
+.settle-up-option small {
+    color: #879087;
+    font-size: 10px;
+}
+
+.settle-up-option b {
+    flex: 0 0 auto;
+    color: #b44d3d;
+}
+
 .group-settlement-form {
     display: grid;
     gap: 14px;
@@ -4995,7 +5046,21 @@ input::placeholder {
 .action-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
+}
+
+.settle-up-dashboard-button {
+    padding: 12px 16px;
+    border: 1px solid #5cc7ad;
+    color: #287d6b;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.settle-up-dashboard-button:hover {
+    background: #eaf6f1;
 }
 
 .primary-action {

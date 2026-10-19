@@ -1354,8 +1354,8 @@ function RecentActivityPage({ transactions, notifications, friendRequests, group
   );
 }
 
-function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, onBack, onAddExpense, onRefresh, onOpenExpense }) {
-  const [settlementOpen, setSettlementOpen] = useState(false);
+function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, onBack, onAddExpense, onRefresh, onOpenExpense, openSettlementOnLoad = false }) {
+  const [settlementOpen, setSettlementOpen] = useState(openSettlementOnLoad);
   const [settlementMode, setSettlementMode] = useState('one');
   const [payerId, setPayerId] = useState(userId);
   const [selectedKeys, setSelectedKeys] = useState([]);
@@ -1600,6 +1600,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [friendRequests, setFriendRequests] = useState([]);
   const [sentFriendRequests, setSentFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
+  const [showSettleUpChooser, setShowSettleUpChooser] = useState(false);
+  const [friendSettlementAutoOpen, setFriendSettlementAutoOpen] = useState(false);
+  const [settleGroupAutoOpenId, setSettleGroupAutoOpenId] = useState('');
   const dashboardPageStorageKey = `splitcare-dashboard-page:${user._id}`;
   const [activePage, setActivePage] = useState(() => {
     const savedPage = window.sessionStorage.getItem(dashboardPageStorageKey);
@@ -2175,9 +2178,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     }
   };
 
-  const openFriendDetails = async (friend) => {
+  const openFriendDetails = async (friend, openSettlementOnLoad = false) => {
     setSelectedFriend(friend);
     setFriendHistory(null);
+    setFriendSettlementAutoOpen(openSettlementOnLoad);
     setActivePage('friend-detail');
     try {
       await loadFriendHistory(friend);
@@ -2989,6 +2993,26 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     ...friends,
     ...groups.flatMap((group) => group.members || []),
   ];
+  const settleUpOptions = (dashboardBalanceSummary?.outgoingBalances || []).map((balance) => {
+    if (balance.id.startsWith('direct:')) {
+      const friendId = balance.id.split(':').at(-1);
+      return { ...balance, type: 'friend', target: friends.find((friend) => friend._id === friendId) || null };
+    }
+    return { ...balance, type: 'group', target: groups.find((group) => group._id === balance.id) || null };
+  });
+  const openSettleUpOption = (option) => {
+    setShowSettleUpChooser(false);
+    if (!option.target) {
+      setFormMessage(`Could not find ${option.type === 'friend' ? 'the friend' : 'the group'} for this balance. Refresh and try again.`);
+      return;
+    }
+    if (option.type === 'friend') {
+      void openFriendDetails(option.target, true);
+      return;
+    }
+    setSettleGroupAutoOpenId(option.target._id);
+    void openGroupDetails(option.target);
+  };
 
   return (
     <main className="dashboard-page">
@@ -3264,6 +3288,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   onAddExpense={() => openFriendExpenseForm()}
                   onRefresh={refreshFriendHistory}
                   onOpenExpense={setSelectedExpense}
+                  openSettlementOnLoad={friendSettlementAutoOpen}
                 />
               </section>
             </div>
@@ -3447,6 +3472,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               >
                 Add an expense
               </button>
+              <button
+                className="quiet-button settle-up-dashboard-button"
+                type="button"
+                onClick={() => setShowSettleUpChooser(true)}
+              >
+                Settle up
+              </button>
             </div>
           </div>
           {formMessage && (
@@ -3540,6 +3572,37 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             scopeLabel="ALL YOUR SPENDING"
           />
           </>
+          )}
+          {showSettleUpChooser && (
+            <Modal title="Settle up" onClose={() => setShowSettleUpChooser(false)} className="settle-up-chooser-modal">
+              <p className="modal-help">Choose someone you owe to open the payment form for their group or friend balance.</p>
+              {dashboardBalancesBusy ? (
+                <p className="empty-state">Loading your balances…</p>
+              ) : settleUpOptions.length ? (
+                <div className="settle-up-options">
+                  {settleUpOptions.map((option) => (
+                    <button
+                      className="settle-up-option"
+                      key={option.id}
+                      type="button"
+                      onClick={() => openSettleUpOption(option)}
+                    >
+                      <span>
+                        <strong>{option.target
+                          ? option.type === 'friend'
+                            ? option.target.fullnamae || option.target.username
+                            : option.target.name
+                          : option.name}</strong>
+                        <small>{option.type === 'friend' ? 'Friend balance' : 'Group balance'}</small>
+                      </span>
+                      <b>{dashboardBalanceSummary.currency} {Number(option.youOwe).toFixed(2)}</b>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-state">You don’t have any outstanding balances to settle.</p>
+              )}
+            </Modal>
           )}
           {showGroupForm && (
             <Modal
@@ -4134,6 +4197,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               detailsError={groupDetailsError}
               settlementError={groupSettlementError}
               settlementsBusy={settlementsBusy}
+              openSettlementOnLoad={settleGroupAutoOpenId === selectedGroup._id}
               settingsBusy={groupSettingsBusy}
               settingsError={groupSettingsError}
               addMemberBusy={addMemberBusy}
@@ -4142,7 +4206,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               friendRequests={friendRequests}
               sentFriendRequests={sentFriendRequests}
               user={user}
-              onClose={() => setSelectedGroup(null)}
+              onClose={() => {
+                setSelectedGroup(null);
+                setSettleGroupAutoOpenId('');
+              }}
               onJoin={() => { setSelectedGroup(null); setShowJoinForm(true); }}
               onAddExpense={() => openExpenseForm(selectedGroup._id)}
               onOpenExpense={setSelectedExpense}
@@ -4192,12 +4259,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           )}
         </section>
         {activePage === 'overview' && <aside className="dashboard-right-rail">
-          <p className="eyebrow">SPLITCARE PLUS</p>
+          <p className="eyebrow">EARLY MEMBER OFFER</p>
           <div className="plus-mark">✦</div>
-          <h2>Make every split feel effortless.</h2>
+          <h2>Get 1–2 years of membership.</h2>
           <p>
-            Invite your people, settle faster, and keep every shared expense in
-            one calm place.
+            The first 1,000 early registrants can get 1–2 years of SplitCare
+            membership when paid plans launch. Refer friends to earn points
+            toward claiming a membership.
           </p>
           <button onClick={() => setShowGroupForm(true)}>Create a group</button>
           <button onClick={() => setShowJoinForm(true)}>Join with code</button>
@@ -4262,6 +4330,7 @@ function GroupDetails({
   detailsError,
   settlementError,
   settlementsBusy,
+  openSettlementOnLoad = false,
   settingsBusy,
   settingsError,
   addMemberBusy,
@@ -4307,6 +4376,7 @@ function GroupDetails({
   const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: 'INR', amount: '', note: '', paymentProof: null });
   const [settlementSaveError, setSettlementSaveError] = useState('');
   const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
+  const autoSettlementOpenedRef = useRef(false);
   const [paymentRequestOpen, setPaymentRequestOpen] = useState(false);
   const [paymentRequestDraft, setPaymentRequestDraft] = useState({ memberId: '', amount: '', currency: 'INR', note: '' });
   const [paymentRequestError, setPaymentRequestError] = useState('');
@@ -4524,6 +4594,13 @@ function GroupDetails({
     setSettlementSaveError('');
     setSettlementOpen(true);
   };
+  useEffect(() => {
+    if (!openSettlementOnLoad || transactionsBusy || balancesBusy || settlementsBusy || autoSettlementOpenedRef.current) return;
+    autoSettlementOpenedRef.current = true;
+    setActiveTab('balances');
+    onSettle();
+    openSettlementForm();
+  }, [openSettlementOnLoad, transactionsBusy, balancesBusy, settlementsBusy]);
   const submitSettlement = async (event) => {
     event.preventDefault();
     setSettlementSaveBusy(true);
