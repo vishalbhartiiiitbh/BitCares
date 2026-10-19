@@ -65,6 +65,7 @@ const connectDB = async () => {
       ON friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id))
       WHERE status = 'pending';
 
+      
     CREATE TABLE IF NOT EXISTS groups (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name VARCHAR(120) NOT NULL,
