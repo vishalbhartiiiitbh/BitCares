@@ -1,9 +1,9 @@
 import bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { query, withTransaction } from '../db/index.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
-import { sendPasswordResetEmail } from '../services/emailService.js';
+import { sendEmailVerificationCode, sendPasswordResetEmail } from '../services/emailService.js';
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' };
 const publicUser = (user) => { const value = { ...user }; delete value.password; delete value.refreshToken; return value; };
@@ -11,15 +11,152 @@ const makeAccessToken = (user) => jwt.sign({ _id: user._id, email: user.email, u
 const makeRefreshToken = (user) => jwt.sign({ _id: user._id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || '10d' });
 const setCookies = (res, tokens) => { res.cookie('accessToken', tokens.accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 }); res.cookie('refreshToken', tokens.refreshToken, { ...cookieOptions, maxAge: 10 * 24 * 60 * 60 * 1000 }); };
 const tokenResponse = (user) => { const tokens = { accessToken: makeAccessToken(user), refreshToken: makeRefreshToken(user), tokenType: 'Bearer' }; return { ...tokens, user: publicUser(user) }; };
+const hashVerificationCode = (email, purpose, salt, code) =>
+  createHmac('sha256', process.env.ACCESS_TOKEN_SECRET).update(`${email}:${purpose}:${salt}:${code}`).digest('hex');
+
+const sendEmailCode = async (email, purpose) => {
+  const salt = randomBytes(16).toString('hex');
+  const code = String(randomInt(100000, 1000000));
+  const codeHash = hashVerificationCode(email, purpose, salt, code);
+  const result = await query(
+    `INSERT INTO account_email_codes
+       (email, purpose, code_hash, code_salt, code_expires_at, failed_attempts, sent_count, send_window_started_at, verified_token_hash, verified_expires_at)
+     VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes', 0, 1, NOW(), NULL, NULL)
+     ON CONFLICT (email, purpose) DO UPDATE
+       SET code_hash = EXCLUDED.code_hash,
+           code_salt = EXCLUDED.code_salt,
+           code_expires_at = EXCLUDED.code_expires_at,
+           failed_attempts = 0,
+           sent_count = CASE
+             WHEN account_email_codes.send_window_started_at <= NOW() - INTERVAL '10 minutes' THEN 1
+             ELSE account_email_codes.sent_count + 1
+           END,
+           send_window_started_at = CASE
+             WHEN account_email_codes.send_window_started_at <= NOW() - INTERVAL '10 minutes' THEN NOW()
+             ELSE account_email_codes.send_window_started_at
+           END,
+           verified_token_hash = NULL,
+           verified_expires_at = NULL
+       WHERE account_email_codes.send_window_started_at IS NULL
+          OR account_email_codes.send_window_started_at <= NOW() - INTERVAL '10 minutes'
+          OR account_email_codes.sent_count < 5
+     RETURNING email`,
+    [email, purpose, codeHash, salt],
+  );
+  if (!result.rowCount) {
+    throw Object.assign(new Error('Too many verification emails requested. Please try again in 10 minutes.'), { statusCode: 429 });
+  }
+
+  try {
+    await sendEmailVerificationCode(email, code, purpose);
+  } catch (error) {
+    await query(
+      'UPDATE account_email_codes SET code_hash = NULL, code_salt = NULL, code_expires_at = NULL WHERE email = $1 AND purpose = $2 AND code_hash = $3',
+      [email, purpose, codeHash],
+    );
+    throw error;
+  }
+};
+
+const matchingCode = (row, code) => {
+  const actual = Buffer.from(hashVerificationCode(row.email, row.purpose, row.code_salt, code), 'hex');
+  const expected = Buffer.from(row.code_hash || '', 'hex');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+};
+
+export const sendRegistrationCode = async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!email) throw Object.assign(new Error('Email is required'), { statusCode: 400 });
+  const existing = await query('SELECT id FROM users WHERE LOWER(email) = $1', [email]);
+  if (existing.rowCount) throw Object.assign(new Error('An account already exists for this email'), { statusCode: 409 });
+  await sendEmailCode(email, 'signup');
+  res.json({ data: { message: 'A verification code has been sent to your email. It expires in 10 minutes.' } });
+};
+
+export const verifyRegistrationCode = async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!email || !/^\d{6}$/.test(code)) {
+    throw Object.assign(new Error('Enter your email and the 6-digit verification code'), { statusCode: 400 });
+  }
+
+  const verificationToken = randomBytes(32).toString('hex');
+  const tokenHash = createHash('sha256').update(verificationToken).digest('hex');
+  const outcome = await withTransaction(async (client) => {
+    const result = await client.query(
+      'SELECT email, purpose, code_hash, code_salt, code_expires_at, failed_attempts FROM account_email_codes WHERE email = $1 AND purpose = $2 FOR UPDATE',
+      [email, 'signup'],
+    );
+    const row = result.rows[0];
+    if (!row || !row.code_hash || new Date(row.code_expires_at) <= new Date() || row.failed_attempts >= 5) {
+      return { error: 'This verification code is invalid or has expired. Request a new code.' };
+    }
+    if (!matchingCode(row, code)) {
+      await client.query(
+        'UPDATE account_email_codes SET failed_attempts = failed_attempts + 1 WHERE email = $1 AND purpose = $2',
+        [email, 'signup'],
+      );
+      return { error: 'Incorrect verification code' };
+    }
+    await client.query(
+      `UPDATE account_email_codes
+          SET code_hash = NULL, code_salt = NULL, code_expires_at = NULL,
+              verified_token_hash = $1, verified_expires_at = NOW() + INTERVAL '10 minutes'
+        WHERE email = $2 AND purpose = $3`,
+      [tokenHash, email, 'signup'],
+    );
+    return { verified: true };
+  });
+
+  if (outcome.error) throw Object.assign(new Error(outcome.error), { statusCode: 400 });
+  res.json({ data: { verified: true, verificationToken } });
+};
 
 export const register = async (req, res) => {
-  const { username, email, fullnamae, password, phone, coverimage } = req.body;
-  if (!username || !email || !fullnamae || !password) throw Object.assign(new Error('username, email, fullnamae, and password are required'), { statusCode: 400 });
-  const existing = await query('SELECT id FROM users WHERE username = $1 OR email = $2', [username.toLowerCase(), email.toLowerCase()]);
-  if (existing.rowCount) throw Object.assign(new Error('Username or email already exists'), { statusCode: 409 });
+  const { username, fullnamae, password, phone, coverimage, verificationToken } = req.body || {};
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!username || !email || !fullnamae || !password || typeof verificationToken !== 'string') {
+    throw Object.assign(new Error('username, email, fullnamae, password, and verified email are required'), { statusCode: 400 });
+  }
+  if (password.length < 8) throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400 });
   const hash = await bcrypt.hash(password, 12);
-  const result = await query('INSERT INTO users (username, email, fullnamae, password, phone, coverimage) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", created_at AS "createdAt"', [username, email, fullnamae, hash, phone || null, coverimage || null]);
-  const data = tokenResponse(result.rows[0]);
+  const verificationHash = createHash('sha256').update(verificationToken).digest('hex');
+  let result;
+  try {
+    result = await withTransaction(async (client) => {
+      const verification = await client.query(
+        `SELECT email FROM account_email_codes
+          WHERE email = $1 AND purpose = 'signup'
+            AND verified_token_hash = $2 AND verified_expires_at > NOW()
+          FOR UPDATE`,
+        [email, verificationHash],
+      );
+      if (!verification.rowCount) {
+        return { error: 'Verify your email before creating an account. The verification may have expired.' };
+      }
+
+      const existing = await client.query(
+        'SELECT id FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = $2',
+        [username, email],
+      );
+      if (existing.rowCount) return { error: 'Username or email already exists', statusCode: 409 };
+
+      const inserted = await client.query(
+        'INSERT INTO users (username, email, fullnamae, password, phone, coverimage) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", created_at AS "createdAt"',
+        [username, email, fullnamae, hash, phone || null, coverimage || null],
+      );
+      await client.query('DELETE FROM account_email_codes WHERE email = $1 AND purpose = $2', [email, 'signup']);
+      return { user: inserted.rows[0] };
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      throw Object.assign(new Error('Username or email already exists'), { statusCode: 409 });
+    }
+    throw error;
+  }
+  if (result.error) throw Object.assign(new Error(result.error), { statusCode: result.statusCode || 400 });
+  const user = result.user;
+  const data = tokenResponse(user);
   await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, data.user._id]);
   setCookies(res, data);
   res.status(201).json({ data });
@@ -169,6 +306,74 @@ export const resetPassword = async (req, res) => {
   });
 
   res.json({ data: { message: 'Password reset successfully. You can now sign in.' } });
+};
+
+export const sendAccountDeletionCode = async (req, res) => {
+  await sendEmailCode(req.user.email.toLowerCase(), 'delete_account');
+  res.json({ data: { message: 'A deletion confirmation code has been sent to your email. It expires in 10 minutes.' } });
+};
+
+export const deleteAccount = async (req, res) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!/^\d{6}$/.test(code)) {
+    throw Object.assign(new Error('Enter the 6-digit confirmation code sent to your email'), { statusCode: 400 });
+  }
+
+  const outcome = await withTransaction(async (client) => {
+    const result = await client.query(
+      `SELECT email, purpose, code_hash, code_salt, code_expires_at, failed_attempts
+         FROM account_email_codes
+        WHERE email = $1 AND purpose = $2
+        FOR UPDATE`,
+      [req.user.email.toLowerCase(), 'delete_account'],
+    );
+    const row = result.rows[0];
+    if (!row || !row.code_hash || new Date(row.code_expires_at) <= new Date() || row.failed_attempts >= 5) {
+      return { error: 'This confirmation code is invalid or has expired. Request a new code.' };
+    }
+    if (!matchingCode(row, code)) {
+      await client.query(
+        'UPDATE account_email_codes SET failed_attempts = failed_attempts + 1 WHERE email = $1 AND purpose = $2',
+        [row.email, 'delete_account'],
+      );
+      return { error: 'Incorrect confirmation code' };
+    }
+
+    const userId = req.user._id;
+    await client.query(
+      `DELETE FROM groups
+        WHERE created_by = $1
+           OR id IN (
+             SELECT group_id FROM friend_ledgers
+              WHERE user_low = $1 OR user_high = $1
+           )`,
+      [userId],
+    );
+    await client.query(
+      `DELETE FROM expenses e
+        WHERE e.paid_by = $1
+           OR EXISTS (SELECT 1 FROM expense_splits s WHERE s.expense_id = e.id AND s.user_id = $1)
+           OR EXISTS (
+             SELECT 1 FROM expense_items i
+             JOIN expense_item_splits s ON s.item_id = i.id
+              WHERE i.expense_id = e.id AND s.user_id = $1
+           )`,
+      [userId],
+    );
+    await client.query('DELETE FROM group_activity WHERE actor_id = $1', [userId]);
+    await client.query('DELETE FROM group_whiteboards WHERE updated_by = $1', [userId]);
+    await client.query('DELETE FROM balances WHERE user1 = $1 OR user2 = $1', [userId]);
+    await client.query('DELETE FROM group_settlements WHERE paid_by = $1 OR paid_to = $1', [userId]);
+    await client.query('DELETE FROM friend_settlements WHERE paid_by = $1 OR paid_to = $1', [userId]);
+    await client.query('DELETE FROM account_email_codes WHERE email = $1', [row.email]);
+    await client.query('DELETE FROM users WHERE id = $1', [userId]);
+    return { deleted: true };
+  });
+
+  if (outcome.error) throw Object.assign(new Error(outcome.error), { statusCode: 400 });
+  res.clearCookie('accessToken', cookieOptions);
+  res.clearCookie('refreshToken', cookieOptions);
+  res.json({ data: { message: 'Your account and associated data have been permanently deleted.' } });
 };
 
 export const logout = async (req, res) => { await query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user._id]); res.clearCookie('accessToken', cookieOptions); res.clearCookie('refreshToken', cookieOptions); res.json({ data: { message: 'Logged out successfully' } }); };

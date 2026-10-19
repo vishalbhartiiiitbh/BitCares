@@ -597,6 +597,9 @@ function App() {
   const [message, setMessage] = useState("");
   const [messageIsSuccess, setMessageIsSuccess] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [registrationCode, setRegistrationCode] = useState("");
+  const [registrationCodeSent, setRegistrationCodeSent] = useState(false);
+  const [verifiedEmailToken, setVerifiedEmailToken] = useState("");
 
   useEffect(() => {
     if (mode === "reset") {
@@ -619,8 +622,42 @@ function App() {
       ...current,
       [event.target.name]: event.target.value,
     }));
+    if (event.target.name === "email" && mode === "register") {
+      setRegistrationCode("");
+      setRegistrationCodeSent(false);
+      setVerifiedEmailToken("");
+    }
     setMessage("");
     setMessageIsSuccess(false);
+  };
+
+  const verifyRegistrationEmail = async () => {
+    setBusy(true);
+    setMessage("");
+    setMessageIsSuccess(false);
+    try {
+      if (!registrationCodeSent) {
+        const data = await apiRequest("/users/register/send-code", {
+          method: "POST",
+          body: JSON.stringify({ email: form.email }),
+        });
+        setRegistrationCodeSent(true);
+        setMessage(data.message);
+        setMessageIsSuccess(true);
+        return;
+      }
+      const data = await apiRequest("/users/register/verify-code", {
+        method: "POST",
+        body: JSON.stringify({ email: form.email, code: registrationCode }),
+      });
+      setVerifiedEmailToken(data.verificationToken);
+      setMessage("Email verified. You can create your account now.");
+      setMessageIsSuccess(true);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async (event) => {
@@ -651,8 +688,16 @@ function App() {
         setMessageIsSuccess(true);
         return;
       }
+      if (mode === "register" && !verifiedEmailToken) {
+        setMessage(registrationCodeSent
+          ? "Enter the code from your email and select Verify email code."
+          : "Send an email verification code before creating your account.");
+        return;
+      }
 
-      const body = mode === "register" ? form : { email: form.email, password: form.password };
+      const body = mode === "register"
+        ? { ...form, verificationToken: verifiedEmailToken }
+        : { email: form.email, password: form.password };
       const data = await apiRequest(`/users/${mode}`, {
         method: "POST",
         body: JSON.stringify(body),
@@ -660,8 +705,16 @@ function App() {
       setUser(data.user);
       setAccessToken(data.accessToken);
       setForm(emptyForm);
+      setRegistrationCode("");
+      setRegistrationCodeSent(false);
+      setVerifiedEmailToken("");
     } catch (error) {
       setMessage(error.message);
+      if (mode === "register" && error.message.includes("Verify your email")) {
+        setVerifiedEmailToken("");
+        setRegistrationCodeSent(false);
+        setRegistrationCode("");
+      }
     } finally {
       setBusy(false);
     }
@@ -680,6 +733,15 @@ function App() {
     setAccessToken("");
   };
 
+  const accountDeleted = () => {
+    setUser(null);
+    setAccessToken("");
+    setForm(emptyForm);
+    setMode("login");
+    setMessage("Your account and associated data have been permanently deleted.");
+    setMessageIsSuccess(true);
+  };
+
   if (user)
     return (
       <Dashboard
@@ -687,6 +749,7 @@ function App() {
         accessToken={accessToken}
         onLogout={signOut}
         onProfileUpdated={setUser}
+        onAccountDeleted={accountDeleted}
       />
     );
 
@@ -734,6 +797,9 @@ function App() {
               onClick={() => {
                 setMode("login");
                 setMessage("");
+                setRegistrationCode("");
+                setRegistrationCodeSent(false);
+                setVerifiedEmailToken("");
               }}
             >
               Sign in
@@ -743,6 +809,9 @@ function App() {
               onClick={() => {
                 setMode("register");
                 setMessage("");
+                setRegistrationCode("");
+                setRegistrationCodeSent(false);
+                setVerifiedEmailToken("");
               }}
             >
               Create account
@@ -812,6 +881,60 @@ function App() {
                 required
               />
             </label>}
+            {mode === "register" && (
+              <>
+                {registrationCodeSent && !verifiedEmailToken && (
+                  <label>
+                    Email verification code
+                    <input
+                      name="registrationCode"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={registrationCode}
+                      onChange={(event) => setRegistrationCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="6-digit code"
+                      minLength="6"
+                      maxLength="6"
+                      required
+                    />
+                  </label>
+                )}
+                {!verifiedEmailToken && (
+                  <button className="text-button" type="button" onClick={verifyRegistrationEmail} disabled={busy || (registrationCodeSent && registrationCode.length !== 6)}>
+                    {busy ? "Please wait…" : registrationCodeSent ? "Verify email code" : "Send email verification code"}
+                  </button>
+                )}
+                {registrationCodeSent && !verifiedEmailToken && (
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={async () => {
+                      setBusy(true);
+                      setMessage("");
+                      try {
+                        const data = await apiRequest("/users/register/send-code", {
+                          method: "POST",
+                          body: JSON.stringify({ email: form.email }),
+                        });
+                        setRegistrationCode("");
+                        setMessage(data.message);
+                        setMessageIsSuccess(true);
+                      } catch (error) {
+                        setMessage(error.message);
+                        setMessageIsSuccess(false);
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    disabled={busy}
+                  >
+                    Resend code
+                  </button>
+                )}
+                {verifiedEmailToken && <p className="success-message">Email verified.</p>}
+              </>
+            )}
             {message && <p className={messageIsSuccess ? "success-message" : "error-message"}>{message}</p>}
             {mode === "login" && (
               <button className="text-button" type="button" onClick={() => { setMode("forgot"); setMessage(""); }}>
@@ -831,17 +954,19 @@ function App() {
                 Back to sign in
               </button>
             )}
-            <button className="submit-button" disabled={busy}>
-              {busy
-                ? "Please wait…"
-                : mode === "login"
-                  ? "Enter SplitCare →"
-                  : mode === "register"
-                    ? "Create my account →"
-                    : mode === "forgot"
-                      ? "Send reset link →"
-                      : "Update password →"}
-            </button>
+            {(mode !== "register" || verifiedEmailToken) && (
+              <button className="submit-button" disabled={busy}>
+                {busy
+                  ? "Please wait…"
+                  : mode === "login"
+                    ? "Enter SplitCare →"
+                    : mode === "register"
+                      ? "Create my account →"
+                      : mode === "forgot"
+                        ? "Send reset link →"
+                        : "Update password →"}
+              </button>
+            )}
           </form>
           <p className="legal-copy">
             By continuing, you agree to keep shared expenses kind, clear, and
@@ -1216,7 +1341,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   );
 }
 
-function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
+function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDeleted }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
   const [dashboardBalanceSummary, setDashboardBalanceSummary] = useState(null);
@@ -1309,6 +1434,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
   const [photoPreview, setPhotoPreview] = useState('');
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [deleteCodeSent, setDeleteCodeSent] = useState(false);
+  const [deleteCode, setDeleteCode] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState('');
   const [formMessage, setFormMessage] = useState("");
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
@@ -2195,6 +2325,46 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
       setProfileError(error.message);
     } finally {
       setProfileBusy(false);
+    }
+  };
+  const sendAccountDeletionCode = async () => {
+    setDeleteAccountBusy(true);
+    setDeleteAccountError('');
+    try {
+      const result = await apiRequest('/users/profile/delete-account/send-code', {
+        method: 'POST',
+        headers: authHeaders,
+      });
+      setDeleteCodeSent(true);
+      setFormMessage(result.message);
+    } catch (error) {
+      setDeleteAccountError(error.message);
+    } finally {
+      setDeleteAccountBusy(false);
+    }
+  };
+  const resendAccountDeletionCode = async () => {
+    await sendAccountDeletionCode();
+    setDeleteCode('');
+  };
+  const deleteAccount = async () => {
+    if (deleteConfirmation !== 'DELETE') {
+      setDeleteAccountError('Type DELETE to confirm permanent account deletion.');
+      return;
+    }
+    setDeleteAccountBusy(true);
+    setDeleteAccountError('');
+    try {
+      await apiRequest('/users/profile/account', {
+        method: 'DELETE',
+        headers: authHeaders,
+        body: JSON.stringify({ code: deleteCode }),
+      });
+      onAccountDeleted();
+    } catch (error) {
+      setDeleteAccountError(error.message);
+    } finally {
+      setDeleteAccountBusy(false);
     }
   };
   const updateProfile = async (event) => {
@@ -3166,7 +3336,49 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated }) {
                 {profileError && <p className="error-message">{profileError}</p>}
                 <button className="submit-button" disabled={profileBusy}>{profileBusy ? 'Saving…' : 'Save profile'}</button>
               </form>
-              <button className="submit-button profile-logout" onClick={onLogout}>Log out</button>
+              <button className="submit-button profile-logout" type="button" onClick={onLogout}>Log out</button>
+              <section className="profile-danger-zone" aria-labelledby="delete-account-heading">
+                <h3 id="delete-account-heading">Delete account permanently</h3>
+                <p>This permanently deletes your account and associated data, including groups you created and shared expenses you participated in. This cannot be undone.</p>
+                {!deleteCodeSent ? (
+                  <button className="danger-button" type="button" onClick={sendAccountDeletionCode} disabled={deleteAccountBusy}>
+                    {deleteAccountBusy ? 'Sending code…' : 'Email me a confirmation code'}
+                  </button>
+                ) : (
+                  <>
+                    <p className="modal-help">Enter the code sent to {user.email}, then type DELETE to confirm.</p>
+                    <button className="text-button" type="button" onClick={resendAccountDeletionCode} disabled={deleteAccountBusy}>
+                      Resend confirmation code
+                    </button>
+                    <label>
+                      Email confirmation code
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        value={deleteCode}
+                        onChange={(event) => setDeleteCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="6-digit code"
+                        maxLength="6"
+                      />
+                    </label>
+                    <label>
+                      Type DELETE to confirm
+                      <input
+                        type="text"
+                        value={deleteConfirmation}
+                        onChange={(event) => setDeleteConfirmation(event.target.value)}
+                        autoComplete="off"
+                      />
+                    </label>
+                    {deleteAccountError && <p className="error-message" role="alert">{deleteAccountError}</p>}
+                    <button className="danger-button" type="button" onClick={deleteAccount} disabled={deleteAccountBusy || deleteCode.length !== 6 || deleteConfirmation !== 'DELETE'}>
+                      {deleteAccountBusy ? 'Deleting account…' : 'Delete my account permanently'}
+                    </button>
+                  </>
+                )}
+                {!deleteCodeSent && deleteAccountError && <p className="error-message" role="alert">{deleteAccountError}</p>}
+              </section>
             </Modal>
           )}
           {selectedGroup && (

@@ -49,6 +49,20 @@ const connectDB = async () => {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_failure_window_started_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ;
 
+    CREATE TABLE IF NOT EXISTS account_email_codes (
+      email TEXT NOT NULL,
+      purpose VARCHAR(20) NOT NULL CHECK (purpose IN ('signup', 'delete_account')),
+      code_hash TEXT,
+      code_salt TEXT,
+      code_expires_at TIMESTAMPTZ,
+      failed_attempts INTEGER NOT NULL DEFAULT 0,
+      sent_count INTEGER NOT NULL DEFAULT 0,
+      send_window_started_at TIMESTAMPTZ,
+      verified_token_hash TEXT,
+      verified_expires_at TIMESTAMPTZ,
+      PRIMARY KEY (email, purpose)
+    );
+
     CREATE TABLE IF NOT EXISTS friendships (
       user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       user_high UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

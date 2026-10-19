@@ -24,3 +24,17 @@ export const sendPasswordResetEmail = async (email, resetUrl) => {
     html: `<p>Use the link below to reset your SplitCare password. It expires in 10 minutes and can only be used once.</p><p><a href="${resetUrl}">Reset your password</a></p><p>If you did not request a password reset, you can ignore this email.</p>`,
   });
 };
+
+export const sendEmailVerificationCode = async (email, code, purpose) => {
+  const transporter = createTransporter();
+  const isDeletion = purpose === 'delete_account';
+  const subject = isDeletion ? 'Confirm your SplitCare account deletion' : 'Verify your SplitCare email';
+  const action = isDeletion ? 'confirm your account deletion' : 'verify your email address';
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to: email,
+    subject,
+    text: `Use this code to ${action}: ${code}\n\nThis code expires in 10 minutes and can only be used once.`,
+    html: `<p>Use this code to ${action}:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p><p>This code expires in 10 minutes and can only be used once.</p>`,
+  });
+};

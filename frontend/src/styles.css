@@ -2967,6 +2967,46 @@ input::placeholder {
     font-weight: 700;
 }
 
+.profile-danger-zone {
+    display: grid;
+    gap: 12px;
+    margin-top: 28px;
+    padding: 18px;
+    border: 1px solid #d9a49d;
+    background: #fbefec;
+}
+
+.profile-danger-zone h3,
+.profile-danger-zone p {
+    margin: 0;
+}
+
+.profile-danger-zone h3 {
+    color: #9f362a;
+    font-size: 15px;
+}
+
+.profile-danger-zone p {
+    color: #76534e;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.danger-button {
+    width: 100%;
+    padding: 12px;
+    border: 0;
+    background: #a63e32;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.danger-button:disabled {
+    cursor: wait;
+    opacity: .6;
+}
+
 .dashboard-shell {
     display: grid;
     grid-template-columns: 190px minmax(0, 1fr) 230px;

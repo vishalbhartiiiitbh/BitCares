@@ -46,6 +46,23 @@ curl http://localhost:5000/api/health
 
 Register a user:
 
+First request a 6-digit code, then verify it. Verification codes expire after
+10 minutes, allow at most five attempts, and are limited to five emails per
+10-minute window:
+
+```bash
+curl -X POST http://localhost:5000/api/users/register/send-code \
+	-H 'Content-Type: application/json' \
+	-d '{"email":"john@example.com"}'
+
+curl -X POST http://localhost:5000/api/users/register/verify-code \
+	-H 'Content-Type: application/json' \
+	-d '{"email":"john@example.com","code":"123456"}'
+```
+
+Use the `verificationToken` returned by the verification request to create the
+account:
+
 ```bash
 curl -X POST http://localhost:5000/api/users/register \
 	-H 'Content-Type: application/json' \
@@ -53,7 +70,8 @@ curl -X POST http://localhost:5000/api/users/register \
 		"username": "john",
 		"email": "john@example.com",
 		"fullnamae": "John Doe",
-		"password": "password123"
+		"password": "password123",
+		"verificationToken": "TOKEN_FROM_EMAIL_VERIFICATION"
 	}'
 ```
 
@@ -77,6 +95,13 @@ curl -X POST http://localhost:5000/api/users/refresh-token \
 ```
 
 The API also sets HTTP-only `accessToken` and `refreshToken` cookies on registration and login. Refresh tokens are stored in PostgreSQL and excluded from normal user queries.
+
+From the profile, users can request a one-time email code and confirm permanent
+account deletion. The deletion removes groups created by the account, friend
+ledgers involving it, and shared expenses in which the user participated, as
+well as other records that reference the account. `POST
+`/api/users/profile/delete-account/send-code` sends the code; authenticated
+`DELETE /api/users/profile/account` accepts `{"code":"123456"}`.
 
 ## Frontend Setup
 
