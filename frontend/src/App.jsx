@@ -1600,7 +1600,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [friendRequests, setFriendRequests] = useState([]);
   const [sentFriendRequests, setSentFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
-  const [activePage, setActivePage] = useState('overview');
+  const dashboardPageStorageKey = `splitcare-dashboard-page:${user._id}`;
+  const [activePage, setActivePage] = useState(() => {
+    const savedPage = window.sessionStorage.getItem(dashboardPageStorageKey);
+    return ['overview', 'recent', 'all-expenses', 'personal', 'friends'].includes(savedPage)
+      ? savedPage
+      : 'overview';
+  });
   const [friendIdentifierType, setFriendIdentifierType] = useState('username');
   const [friendIdentifier, setFriendIdentifier] = useState('');
   const [friendBusy, setFriendBusy] = useState(false);
@@ -1699,6 +1705,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [emailSettingsMessage, setEmailSettingsMessage] = useState('');
   const [formMessage, setFormMessage] = useState(referralMessage || "");
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  useEffect(() => {
+    window.sessionStorage.setItem(
+      dashboardPageStorageKey,
+      activePage === 'friend-detail' ? 'friends' : activePage,
+    );
+  }, [activePage, dashboardPageStorageKey]);
 
   useEffect(() => {
     if (!showNotifications) return undefined;
