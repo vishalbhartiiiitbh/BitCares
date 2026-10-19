@@ -23,6 +23,10 @@ The recovery endpoints are `POST /api/users/forgot-password` with
 `{"email":"person@example.com"}` and `POST /api/users/reset-password` with
 `{"token":"token-from-email","password":"new-password"}`. Reset requests
 return a generic message whether or not the email belongs to an account.
+For each account, password reset emails are limited to five per 10-minute
+window. Five incorrect passwords within a 5-minute window temporarily lock
+login for 30 minutes. Completing a password reset clears the lock immediately;
+otherwise, the user can sign in after the lock expires.
 
 Start the development server:
 

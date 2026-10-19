@@ -29,11 +29,58 @@ export const login = async (req, res) => {
   const { email, username, password } = req.body;
   if ((!email && !username) || !password) throw Object.assign(new Error('Email or username and password are required'), { statusCode: 400 });
   const key = (email || username).toLowerCase();
-  const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", password, created_at AS "createdAt" FROM users WHERE email = $1 OR username = $1', [key]);
+  const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", password, created_at AS "createdAt", login_locked_until > NOW() AS "isLoginLocked" FROM users WHERE email = $1 OR username = $1', [key]);
   const user = result.rows[0];
-  if (!user || !(await bcrypt.compare(password, user.password))) throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+  if (!user) throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+  if (user.isLoginLocked) {
+    throw Object.assign(new Error('Account temporarily locked after too many failed attempts. Reset your password or try again in 30 minutes.'), { statusCode: 423 });
+  }
+  if (!(await bcrypt.compare(password, user.password))) {
+    const failure = await query(
+      `UPDATE users
+          SET login_failed_attempts = CASE
+                WHEN login_failure_window_started_at IS NULL
+                  OR login_failure_window_started_at <= NOW() - INTERVAL '5 minutes'
+                THEN 1 ELSE login_failed_attempts + 1
+              END,
+              login_failure_window_started_at = CASE
+                WHEN login_failure_window_started_at IS NULL
+                  OR login_failure_window_started_at <= NOW() - INTERVAL '5 minutes'
+                THEN NOW() ELSE login_failure_window_started_at
+              END,
+              login_locked_until = CASE
+                WHEN (CASE
+                  WHEN login_failure_window_started_at IS NULL
+                    OR login_failure_window_started_at <= NOW() - INTERVAL '5 minutes'
+                  THEN 1 ELSE login_failed_attempts + 1
+                END) >= 5
+                THEN NOW() + INTERVAL '30 minutes'
+                ELSE login_locked_until
+              END
+        WHERE id = $1
+        RETURNING login_locked_until > NOW() AS "isLoginLocked"`,
+      [user._id],
+    );
+    if (failure.rows[0].isLoginLocked) {
+      throw Object.assign(new Error('Account temporarily locked after too many failed attempts. Reset your password or try again in 30 minutes.'), { statusCode: 423 });
+    }
+    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+  }
   const data = tokenResponse(user);
-  await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, user._id]);
+  const unlocked = await query(
+    `UPDATE users
+        SET refresh_token = $1,
+            login_failed_attempts = 0,
+            login_failure_window_started_at = NULL,
+            login_locked_until = NULL
+      WHERE id = $2
+        AND (login_locked_until IS NULL OR login_locked_until <= NOW())
+      RETURNING id`,
+    [data.refreshToken, user._id],
+  );
+  if (!unlocked.rowCount) {
+    throw Object.assign(new Error('Account temporarily locked after too many failed attempts. Reset your password or try again in 30 minutes.'), { statusCode: 423 });
+  }
   setCookies(res, data);
   res.json({ data });
 };
@@ -47,21 +94,40 @@ export const forgotPassword = async (req, res) => {
     const user = result.rows[0];
     const token = randomBytes(32).toString('hex');
     const tokenHash = createHash('sha256').update(token).digest('hex');
-    await query(
-      "UPDATE users SET password_reset_token_hash = $1, password_reset_expires_at = NOW() + INTERVAL '10 minutes' WHERE id = $2",
+    const allowed = await query(
+      `UPDATE users
+          SET password_reset_email_count = CASE
+                WHEN password_reset_email_window_started_at IS NULL
+                  OR password_reset_email_window_started_at <= NOW() - INTERVAL '10 minutes'
+                THEN 1 ELSE password_reset_email_count + 1
+              END,
+              password_reset_email_window_started_at = CASE
+                WHEN password_reset_email_window_started_at IS NULL
+                  OR password_reset_email_window_started_at <= NOW() - INTERVAL '10 minutes'
+                THEN NOW() ELSE password_reset_email_window_started_at
+              END,
+              password_reset_token_hash = $1,
+              password_reset_expires_at = NOW() + INTERVAL '10 minutes'
+        WHERE id = $2
+          AND (password_reset_email_window_started_at IS NULL
+            OR password_reset_email_window_started_at <= NOW() - INTERVAL '10 minutes'
+            OR password_reset_email_count < 5)
+        RETURNING id`,
       [tokenHash, user.id],
     );
 
-    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
-    const resetUrl = `${frontendUrl}/?resetToken=${encodeURIComponent(token)}`;
-    try {
-      await sendPasswordResetEmail(user.email, resetUrl);
-    } catch (error) {
-      await query(
-        'UPDATE users SET password_reset_token_hash = NULL, password_reset_expires_at = NULL WHERE id = $1 AND password_reset_token_hash = $2',
-        [user.id, tokenHash],
-      );
-      throw error;
+    if (allowed.rowCount) {
+      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+      const resetUrl = `${frontendUrl}/?resetToken=${encodeURIComponent(token)}`;
+      try {
+        await sendPasswordResetEmail(user.email, resetUrl);
+      } catch (error) {
+        await query(
+          'UPDATE users SET password_reset_token_hash = NULL, password_reset_expires_at = NULL WHERE id = $1 AND password_reset_token_hash = $2',
+          [user.id, tokenHash],
+        );
+        throw error;
+      }
     }
   }
 
@@ -89,7 +155,15 @@ export const resetPassword = async (req, res) => {
     }
 
     await client.query(
-      'UPDATE users SET password = $1, password_reset_token_hash = NULL, password_reset_expires_at = NULL, refresh_token = NULL WHERE id = $2',
+      `UPDATE users
+          SET password = $1,
+              password_reset_token_hash = NULL,
+              password_reset_expires_at = NULL,
+              refresh_token = NULL,
+              login_failed_attempts = 0,
+              login_failure_window_started_at = NULL,
+              login_locked_until = NULL
+        WHERE id = $2`,
       [passwordHash, result.rows[0].id],
     );
   });
