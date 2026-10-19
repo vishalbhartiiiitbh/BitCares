@@ -393,6 +393,16 @@ export const changeEmail = async (req, res) => {
         [newEmail, req.user._id],
       );
       await client.query(
+        `INSERT INTO email_notification_outbox (user_id, recipient_email, subject, body)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          req.user._id,
+          newEmail,
+          'Your SplitCare email address was updated',
+          `Your SplitCare account email address was successfully changed from ${oldEmail} to ${newEmail}.\n\nIf you did not make this change, please contact SplitCare support immediately.`,
+        ],
+      );
+      await client.query(
         `DELETE FROM account_email_codes
           WHERE (email = $1 AND purpose = 'email_change_old')
              OR (email = $2 AND purpose = 'email_change_new')`,

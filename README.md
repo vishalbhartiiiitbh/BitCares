@@ -109,7 +109,8 @@ To change the account email in the profile, request codes with authenticated
 to authenticated `POST /api/users/profile/email-change/verify` with
 `{"newEmail":"new-address@example.com","oldCode":"123456","newCode":"654321"}`.
 Both codes expire after 10 minutes, and the new email cannot already be linked
-to an account.
+to an account. After a successful change, a confirmation email is queued to the
+new address with both the previous and updated email addresses.
 
 Users can share a persistent friend QR code or link from the Friends section or
 the profile menu. The code remains the same until the owner explicitly changes
