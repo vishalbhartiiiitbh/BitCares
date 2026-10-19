@@ -104,6 +104,30 @@ const connectDB = async () => {
       code VARCHAR(64) NOT NULL UNIQUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS referral_codes (
+      user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      code VARCHAR(64) NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS referrals (
+      referred_user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      referrer_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      points_awarded INTEGER NOT NULL DEFAULT 10 CHECK (points_awarded = 10),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (referred_user_id <> referrer_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS referrals_referrer_idx
+      ON referrals (referrer_user_id, created_at);
+    CREATE TABLE IF NOT EXISTS referral_points (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referred_user_id UUID NOT NULL,
+      points_awarded INTEGER NOT NULL DEFAULT 10 CHECK (points_awarded = 10),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (user_id, referred_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS referral_points_user_idx
+      ON referral_points (user_id, created_at);
 
     CREATE TABLE IF NOT EXISTS friend_requests (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

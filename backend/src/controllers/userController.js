@@ -115,6 +115,8 @@ export const verifyRegistrationCode = async (req, res) => {
 
 export const register = async (req, res) => {
   const { username, fullnamae, password, phone, coverimage, verificationToken } = req.body || {};
+  const referralCode = typeof req.body?.referralCode === 'string' ? req.body.referralCode.trim() : '';
+  const referrerUsername = typeof req.body?.referrerUsername === 'string' ? req.body.referrerUsername.trim() : '';
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   if (!username || !email || !fullnamae || !password || typeof verificationToken !== 'string') {
     throw Object.assign(new Error('username, email, fullnamae, password, and verified email are required'), { statusCode: 400 });
@@ -142,12 +144,43 @@ export const register = async (req, res) => {
       );
       if (existing.rowCount) return { error: 'Username or email already exists', statusCode: 409 };
 
+      let referrerId = null;
+      if (referralCode || referrerUsername) {
+        if (!/^[A-Za-z0-9_-]{32}$/.test(referralCode)) {
+          return { error: 'The referral link is incomplete. Ask your friend to share a new link.' };
+        }
+        const referrer = await client.query(
+          'SELECT user_id AS "userId" FROM referral_codes WHERE code = $1',
+          [referralCode],
+        );
+        if (!referrer.rowCount) {
+          return { error: 'This referral link is invalid. Ask your friend to share a new link.' };
+        }
+        referrerId = referrer.rows[0].userId;
+      }
+
       const inserted = await client.query(
         'INSERT INTO users (username, email, fullnamae, password, phone, coverimage) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", created_at AS "createdAt"',
         [username, email, fullnamae, hash, phone || null, coverimage || null],
       );
+      if (referrerId) {
+        const [userLow, userHigh] = [referrerId, inserted.rows[0]._id].sort();
+        await client.query(
+          'INSERT INTO friendships (user_low, user_high) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [userLow, userHigh],
+        );
+        await client.query(
+          'INSERT INTO referrals (referrer_user_id, referred_user_id) VALUES ($1, $2)',
+          [referrerId, inserted.rows[0]._id],
+        );
+        await client.query(
+          `INSERT INTO referral_points (user_id, referred_user_id)
+           VALUES ($1, $2), ($2, $2)`,
+          [referrerId, inserted.rows[0]._id],
+        );
+      }
       await client.query('DELETE FROM account_email_codes WHERE email = $1 AND purpose = $2', [email, 'signup']);
-      return { user: inserted.rows[0] };
+      return { user: inserted.rows[0], referred: Boolean(referrerId) };
     });
   } catch (error) {
     if (error.code === '23505') {
@@ -160,6 +193,7 @@ export const register = async (req, res) => {
   const data = tokenResponse(user);
   await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, data.user._id]);
   setCookies(res, data);
+  if (result.referred) data.referralMessage = 'Referral confirmed! You and your friend each earned 10 points.';
   res.status(201).json({ data });
 };
 

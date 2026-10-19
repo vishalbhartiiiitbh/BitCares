@@ -3147,8 +3147,53 @@ input::placeholder {
     gap: 8px;
 }
 
+.referral-points-balance {
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    margin: 0;
+}
+
+.referral-points-balance strong {
+    color: #19231d;
+    font-size: 32px;
+}
+
+.referral-points-balance span {
+    color: #778076;
+    font-size: 12px;
+}
+
 .friend-qr-actions .quiet-button {
     white-space: nowrap;
+}
+
+.friend-referral-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin: 24px 0;
+    padding: 22px 24px;
+    border: 1px solid #d9dfc7;
+    background: #f5f7ed;
+}
+
+.friend-referral-card h2 {
+    margin: 4px 0 6px;
+    color: #19231d;
+    font-size: 20px;
+}
+
+.friend-referral-card p:not(.eyebrow) {
+    margin: 0;
+    color: #64715f;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.friend-referral-card .primary-action {
+    flex: 0 0 auto;
 }
 
 .friend-qr-modal {
@@ -3888,6 +3933,11 @@ input::placeholder {
 
     .friend-qr-actions {
         justify-content: flex-start;
+    }
+
+    .friend-referral-card {
+        align-items: flex-start;
+        flex-direction: column;
     }
 
     .friend-management-toolbar {

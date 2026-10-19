@@ -122,6 +122,13 @@ code, `POST /api/friends/invite-code/change` changes it, and
 `{"code":"FRIEND_CODE"}`. Camera scanning requires browser camera permission
 and a secure context (HTTPS, or localhost).
 
+The Friends section also provides a referral link containing the referrer's
+username and referral code. When a new user signs up through that link and
+verifies their email, both the referrer and new user receive 10 points and are
+connected as friends. Each account can receive the signup referral reward only
+once. Points are tracked for future membership rewards; membership redemption
+is not available yet.
+
 Users can change their username at most twice over the lifetime of the account.
 The limit is enforced by the backend and shown in the profile. Username and
 email updates modify the existing user record; related groups, expenses, and

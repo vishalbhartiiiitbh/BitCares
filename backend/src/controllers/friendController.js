@@ -220,6 +220,29 @@ export const sendFriendRequest = async (req, res) => {
 
 const newFriendInviteCode = () => randomBytes(24).toString('base64url');
 
+export const getReferralDetails = async (req, res) => {
+  const referral = await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO referral_codes (user_id, code)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [req.user._id, randomBytes(24).toString('base64url')],
+    );
+    const details = await client.query(
+      `SELECT c.code, u.username,
+              COALESCE(SUM(p.points_awarded), 0) AS "pointsEarned"
+         FROM referral_codes c
+         JOIN users u ON u.id = c.user_id
+         LEFT JOIN referral_points p ON p.user_id = u.id
+        WHERE u.id = $1
+        GROUP BY c.code, u.username`,
+      [req.user._id],
+    );
+    return details.rows[0];
+  });
+  res.json({ data: referral });
+};
+
 export const getFriendInviteCode = async (req, res) => {
   const code = await withTransaction(async (client) => {
     await client.query(

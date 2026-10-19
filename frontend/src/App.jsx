@@ -603,6 +603,8 @@ const expenseCategories = [
 function App() {
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken") || "");
   const [friendInviteCode, setFriendInviteCode] = useState(() => new URLSearchParams(window.location.search).get("friendCode") || "");
+  const [referralCode, setReferralCode] = useState(() => new URLSearchParams(window.location.search).get("referralCode") || "");
+  const [referrerUsername, setReferrerUsername] = useState(() => new URLSearchParams(window.location.search).get("referrerUsername") || "");
   const [mode, setMode] = useState(() => resetToken ? "reset" : "login");
   const [form, setForm] = useState(emptyForm);
   const [user, setUser] = useState(null);
@@ -613,11 +615,16 @@ function App() {
   const [registrationCode, setRegistrationCode] = useState("");
   const [registrationCodeSent, setRegistrationCodeSent] = useState(false);
   const [verifiedEmailToken, setVerifiedEmailToken] = useState("");
+  const [registrationReferralMessage, setRegistrationReferralMessage] = useState("");
 
   const markFriendInviteHandled = () => {
     setFriendInviteCode('');
     const url = new URL(window.location.href);
     url.searchParams.delete('friendCode');
+    url.searchParams.delete('referralCode');
+    url.searchParams.delete('referrerUsername');
+    setReferralCode('');
+    setReferrerUsername('');
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   };
 
@@ -718,7 +725,11 @@ function App() {
       }
 
       const body = mode === "register"
-        ? { ...form, verificationToken: verifiedEmailToken }
+        ? {
+          ...form,
+          verificationToken: verifiedEmailToken,
+          ...(referralCode ? { referralCode, referrerUsername } : {}),
+        }
         : { email: form.email, password: form.password };
       const data = await apiRequest(`/users/${mode}`, {
         method: "POST",
@@ -726,6 +737,10 @@ function App() {
       });
       setUser(data.user);
       setAccessToken(data.accessToken);
+      if (mode === "register" && data.referralMessage) {
+        setRegistrationReferralMessage(data.referralMessage);
+      }
+      if (mode === "register" && (referralCode || referrerUsername)) markFriendInviteHandled();
       setForm(emptyForm);
       setRegistrationCode("");
       setRegistrationCodeSent(false);
@@ -774,6 +789,8 @@ function App() {
         onAccountDeleted={accountDeleted}
         friendInviteCode={friendInviteCode}
         onFriendInviteHandled={markFriendInviteHandled}
+        referralMessage={registrationReferralMessage}
+        referralCode={referralCode}
       />
     );
 
@@ -815,7 +832,11 @@ function App() {
           <div className="mobile-brand">
             <Brand />
           </div>
-          {friendInviteCode && <p className="friend-page-message" role="status">Sign in or create an account to connect with the person who shared this friend link.</p>}
+          {(friendInviteCode || referralCode) && <p className="friend-page-message" role="status">
+            {referralCode
+              ? `You were invited by ${referrerUsername || 'a SplitCare user'}. Create an account to receive 10 referral points and add them as a friend.`
+              : 'Sign in or create an account to connect with the person who shared this friend link.'}
+          </p>}
           {(mode === "login" || mode === "register") && <div className="mode-tabs" role="tablist">
             <button
               className={mode === "login" ? "selected" : ""}
@@ -1412,7 +1433,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   );
 }
 
-function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDeleted, friendInviteCode, onFriendInviteHandled }) {
+function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDeleted, friendInviteCode, onFriendInviteHandled, referralMessage, referralCode }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const [groups, setGroups] = useState([]);
   const [dashboardBalanceSummary, setDashboardBalanceSummary] = useState(null);
@@ -1449,6 +1470,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [friendQrBusy, setFriendQrBusy] = useState(false);
   const [friendQrError, setFriendQrError] = useState('');
   const friendInviteHandledRef = useRef('');
+  const [showReferralModal, setShowReferralModal] = useState(false);
+  const [referralDetails, setReferralDetails] = useState(null);
+  const [referralBusy, setReferralBusy] = useState(false);
+  const [referralError, setReferralError] = useState('');
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
@@ -1529,7 +1554,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [emailSettingsBusy, setEmailSettingsBusy] = useState(false);
   const [emailSettingsError, setEmailSettingsError] = useState('');
   const [emailSettingsMessage, setEmailSettingsMessage] = useState('');
-  const [formMessage, setFormMessage] = useState("");
+  const [formMessage, setFormMessage] = useState(referralMessage || "");
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
   useEffect(() => {
@@ -1754,6 +1779,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     }
   };
 
+  const loadReferralDetails = async () => {
+    setReferralBusy(true);
+    setReferralError('');
+    try {
+      const details = await apiRequest('/friends/referral', { headers: authHeaders });
+      setReferralDetails({
+        ...details,
+        url: `${window.location.origin}/?referralCode=${encodeURIComponent(details.code)}&referrerUsername=${encodeURIComponent(details.username)}`,
+      });
+    } catch (error) {
+      setReferralError(error.message);
+    } finally {
+      setReferralBusy(false);
+    }
+  };
+
+  const openReferralModal = () => {
+    setShowReferralModal(true);
+    void loadReferralDetails();
+  };
+
   const openFriendInvite = () => {
     setShowFriendQr(true);
     void loadFriendInvite();
@@ -1827,6 +1873,38 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     }
   };
 
+  const copyReferralLink = async () => {
+    if (!referralDetails?.url) return;
+    try {
+      await navigator.clipboard.writeText(referralDetails.url);
+      setReferralError('');
+      setFormMessage('Referral link copied to clipboard.');
+    } catch (error) {
+      setReferralError('Could not copy the link. Check your browser clipboard permissions.');
+      console.error('Could not copy the referral link:', error);
+    }
+  };
+
+  const shareReferralLink = async () => {
+    if (!referralDetails?.url) return;
+    if (!navigator.share) {
+      await copyReferralLink();
+      return;
+    }
+    try {
+      await navigator.share({
+        title: 'Join me on SplitCare',
+        text: 'Create a SplitCare account using my referral link. We both earn 10 points.',
+        url: referralDetails.url,
+      });
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        setReferralError('Could not share the referral link.');
+        console.error('Could not share the referral link:', error);
+      }
+    }
+  };
+
   const shareFriendInvite = async () => {
     if (!friendInvite?.url) return;
     if (!navigator.share) {
@@ -1852,6 +1930,17 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     friendInviteHandledRef.current = friendInviteCode;
     void acceptFriendInvite(friendInviteCode, true);
   }, [friendInviteCode]);
+
+  useEffect(() => {
+    if (!referralMessage) return;
+    setFormMessage(referralMessage);
+  }, [referralMessage]);
+
+  useEffect(() => {
+    if (!referralCode) return;
+    setFormMessage('Referral links award points only when a new account completes registration.');
+    onFriendInviteHandled();
+  }, [referralCode, onFriendInviteHandled]);
 
   const respondToFriendRequest = async (requestId, action) => {
     setFriendBusy(true);
@@ -2874,6 +2963,22 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 Email notification settings
               </button>
               <button
+                onClick={() => {
+                  openReferralModal();
+                  setShowProfileMenu(false);
+                }}
+              >
+                Refer a friend · earn points
+              </button>
+              <button
+                onClick={() => {
+                  setActivePage('friends');
+                  setShowProfileMenu(false);
+                }}
+              >
+                Friends
+              </button>
+              <button
                 onClick={openFriendInvite}
               >
                 My friend code
@@ -3000,6 +3105,17 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   <button className="quiet-button" type="button" onClick={() => { setFriendQrError(''); setFriendScannerKey((key) => key + 1); setShowFriendQrScanner(true); }}>Scan QR</button>
                 </div>
               </div>
+
+              <section className="friend-referral-card" aria-labelledby="friend-referral-heading">
+                <div>
+                  <p className="eyebrow">INVITE & EARN</p>
+                  <h2 id="friend-referral-heading">Refer a friend</h2>
+                  <p>You and your friend each get 10 points when they join and verify their email.</p>
+                </div>
+                <button className="primary-action" type="button" onClick={openReferralModal}>
+                  Get your referral link
+                </button>
+              </section>
 
               {formMessage && <p className="friend-page-message">{formMessage}</p>}
               {friendError && <p className="error-message">{friendError}</p>}
@@ -3367,6 +3483,29 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 <button className="quiet-button friend-code-change" type="button" onClick={changeFriendInviteCode} disabled={friendQrBusy}>
                   Change my code
                 </button>
+              </div>
+            </Modal>
+          )}
+          {showReferralModal && (
+            <Modal title="Refer a friend" onClose={() => setShowReferralModal(false)}>
+              <div className="friend-qr-modal">
+                <p className="modal-help">Invite a friend to create a SplitCare account. You both earn 10 points after they finish signup and verify their email.</p>
+                {referralBusy && <p className="modal-help">Loading your referral link…</p>}
+                {referralDetails && (
+                  <>
+                    <p className="referral-points-balance">
+                      <strong>{referralDetails.pointsEarned}</strong>
+                      <span>points earned</span>
+                    </p>
+                    <a className="friend-invite-link" href={referralDetails.url}>{referralDetails.url}</a>
+                    <div className="friend-invite-actions">
+                      <button className="quiet-button" type="button" onClick={shareReferralLink}>Share referral link</button>
+                      <button className="quiet-button" type="button" onClick={copyReferralLink}>Copy link</button>
+                    </div>
+                    <p className="friend-qr-expiry">Points are tracked for future membership rewards. Membership redemption is not available yet.</p>
+                  </>
+                )}
+                {referralError && <p className="error-message" role="alert">{referralError}</p>}
               </div>
             </Modal>
           )}

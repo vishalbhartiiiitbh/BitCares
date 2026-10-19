@@ -6,6 +6,7 @@ import {
   getFriendInviteCode,
   rotateFriendInviteCode,
   acceptFriendInviteCode,
+  getReferralDetails,
   removeFriend,
   respondToFriendRequest,
   sendFriendRequest,
@@ -42,6 +43,7 @@ router.post('/requests/:requestId/respond', asyncHandler(respondToFriendRequest)
 router.get('/invite-code', asyncHandler(getFriendInviteCode));
 router.post('/invite-code/change', asyncHandler(rotateFriendInviteCode));
 router.post('/invite-code/accept', asyncHandler(acceptFriendInviteCode));
+router.get('/referral', asyncHandler(getReferralDetails));
 router.get('/:friendId/history', asyncHandler(friendHistory));
 router.post('/:friendId/expenses', upload.single('paymentProof'), asyncHandler(createFriendExpense));
 router.patch('/:friendId/expenses/:expenseId', upload.single('paymentProof'), asyncHandler(updateFriendExpense));
