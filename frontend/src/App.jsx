@@ -606,6 +606,7 @@ function App() {
   const [referralCode, setReferralCode] = useState(() => new URLSearchParams(window.location.search).get("referralCode") || "");
   const [referrerUsername, setReferrerUsername] = useState(() => new URLSearchParams(window.location.search).get("referrerUsername") || "");
   const [mode, setMode] = useState(() => resetToken ? "reset" : "login");
+  const [showAuth, setShowAuth] = useState(() => Boolean(resetToken));
   const [form, setForm] = useState(emptyForm);
   const [user, setUser] = useState(null);
   const [accessToken, setAccessToken] = useState("");
@@ -617,6 +618,19 @@ function App() {
   const [verifiedEmailToken, setVerifiedEmailToken] = useState("");
   const [registrationReferralMessage, setRegistrationReferralMessage] = useState("");
 
+  useEffect(() => {
+    const isPrivateView = Boolean(user || showAuth);
+    document.title = user
+      ? "SplitCare | Shared expenses"
+      : showAuth
+        ? `${mode === "reset" ? "Reset your password" : mode === "register" ? "Create an account" : "Sign in"} | SplitCare`
+        : "SplitCare | Shared expenses, handled";
+    document.querySelector('meta[name="robots"]')?.setAttribute(
+      "content",
+      isPrivateView ? "noindex, nofollow" : "index, follow, max-image-preview:large",
+    );
+  }, [mode, showAuth, user]);
+
   const markFriendInviteHandled = () => {
     setFriendInviteCode('');
     const url = new URL(window.location.href);
@@ -626,6 +640,13 @@ function App() {
     setReferralCode('');
     setReferrerUsername('');
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const openAuth = (nextMode) => {
+    setMode(nextMode);
+    setMessage("");
+    setShowAuth(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   useEffect(() => {
@@ -794,6 +815,126 @@ function App() {
       />
     );
 
+  if (!showAuth) {
+    return (
+      <main className="public-landing">
+        <header className="landing-nav">
+          <Brand />
+          <nav aria-label="Main navigation">
+            <a href="#how-it-works">How it works</a>
+            <a href="#features">Why SplitCare</a>
+          </nav>
+          <div className="landing-nav-actions">
+            <button className="landing-login" type="button" onClick={() => openAuth("login")}>Log in</button>
+            <button className="landing-signup" type="button" onClick={() => openAuth("register")}>Get started <span aria-hidden="true">↗</span></button>
+          </div>
+        </header>
+
+        {(friendInviteCode || referralCode) && (
+          <div className="landing-invite-banner" role="status">
+            {referralCode
+              ? `You’ve been invited by ${referrerUsername || "a SplitCare user"}. Sign up to connect and earn 10 points.`
+              : "You’ve been invited to connect on SplitCare. Sign in or create an account to continue."}
+          </div>
+        )}
+
+        <section className="landing-hero">
+          <div className="landing-hero-copy">
+            <p className="landing-eyebrow"><span /> Shared expenses, handled</p>
+            <h1>Good times.<br /><span>Clear splits.</span></h1>
+            <p className="landing-hero-lede">Split group expenses, keep tabs on balances, and settle up without the awkward back-and-forth.</p>
+            <div className="landing-hero-actions">
+              <button className="landing-signup landing-primary-cta" type="button" onClick={() => openAuth("register")}>
+                Create your free account <span aria-hidden="true">↗</span>
+              </button>
+              <button className="landing-secondary-cta" type="button" onClick={() => openAuth("login")}>I already have an account</button>
+            </div>
+            <div className="landing-trust-note"><span aria-hidden="true">✓</span> Keep shared spending clear, simple, and in one place.</div>
+          </div>
+
+          <div className="landing-hero-art" aria-label="Example SplitCare group balance overview">
+            <div className="landing-orbit landing-orbit-one" />
+            <div className="landing-orbit landing-orbit-two" />
+            <div className="landing-balance-card">
+              <div className="landing-card-topline">
+                <span className="landing-card-icon">÷</span>
+                <span>WEEKEND IN LISBON <i>·</i> 4 MEMBERS</span>
+                <span className="landing-menu-dots">•••</span>
+              </div>
+              <div className="landing-trip-heading">
+                <div>
+                  <span className="landing-card-caption">GROUP BALANCE</span>
+                  <h2>Everyone, even.</h2>
+                </div>
+                <span className="landing-settled-badge"><i /> On track</span>
+              </div>
+              <div className="landing-balance-total">
+                <span>Shared spending</span>
+                <strong>$1,248.50</strong>
+              </div>
+              <div className="landing-balance-rule"><span /></div>
+              <div className="landing-person-row">
+                <span className="landing-person-avatar landing-avatar-lime">A</span>
+                <span className="landing-person-name">Alex Morgan<small>Paid for dinner</small></span>
+                <span className="landing-person-amount">+$86.40</span>
+              </div>
+              <div className="landing-person-row">
+                <span className="landing-person-avatar landing-avatar-peach">J</span>
+                <span className="landing-person-name">Jamie Lee<small>Settled up</small></span>
+                <span className="landing-person-amount landing-paid">✓ Paid</span>
+              </div>
+              <div className="landing-person-row">
+                <span className="landing-person-avatar landing-avatar-blue">S</span>
+                <span className="landing-person-name">Sam Rivera<small>Added a taxi</small></span>
+                <span className="landing-person-amount">−$24.10</span>
+              </div>
+              <div className="landing-card-footer"><span>Everything adds up.</span><span>JUST NOW <i>↗</i></span></div>
+            </div>
+            <div className="landing-float-note"><span>✳</span><div><strong>All settled.</strong><small>Friendships intact.</small></div></div>
+            <div className="landing-art-stamp">LESS MATHS<br />MORE MOMENTS</div>
+          </div>
+          <div className="landing-hero-index"><span>01</span><i /> SPLIT SMARTER, LIVE LIGHTER</div>
+        </section>
+
+        <section className="landing-how" id="how-it-works">
+          <div className="landing-section-heading">
+            <p className="landing-eyebrow">A LITTLE LESS “WHO OWES WHAT?”</p>
+            <h2>Shared plans.<br /><span>Sorted simply.</span></h2>
+          </div>
+          <div className="landing-how-steps">
+            <article><span>01</span><h3>Bring your people</h3><p>Create a group for a trip, a home, or anything you share.</p></article>
+            <article><span>02</span><h3>Add what you spend</h3><p>Log expenses and split them fairly between the right people.</p></article>
+            <article><span>03</span><h3>Settle with clarity</h3><p>See who owes what and keep every payment easy to follow.</p></article>
+          </div>
+        </section>
+
+        <section className="landing-features" id="features">
+          <div>
+            <p className="landing-eyebrow">MADE FOR REAL LIFE</p>
+            <h2>Money stuff,<br />without the <span>mess.</span></h2>
+          </div>
+          <div className="landing-feature-grid">
+            <article><span>↗</span><h3>Groups that make sense</h3><p>Keep trips, households, and shared plans organized together.</p></article>
+            <article><span>◎</span><h3>Balances at a glance</h3><p>Know where everyone stands, without chasing receipts.</p></article>
+            <article><span>↔</span><h3>Flexible fair splits</h3><p>Split evenly or record the exact amounts each person owes.</p></article>
+            <article><span>✓</span><h3>Clearer settling up</h3><p>Track payments and keep a shared history everyone can see.</p></article>
+          </div>
+        </section>
+
+        <section className="landing-bottom-cta">
+          <div><p className="landing-eyebrow">THE NEXT ROUND’S ON YOU (OR NOT)</p><h2>Make shared spending<br />the easy part.</h2></div>
+          <button className="landing-signup landing-primary-cta" type="button" onClick={() => openAuth("register")}>Get started for free <span aria-hidden="true">↗</span></button>
+        </section>
+
+        <footer className="landing-footer">
+          <Brand />
+          <span>Shared money, less friction.</span>
+          <button type="button" onClick={() => openAuth("login")}>Log in to SplitCare <span aria-hidden="true">↗</span></button>
+        </footer>
+      </main>
+    );
+  }
+
   return (
     <main className="auth-page">
       <section className="story-panel">
@@ -832,6 +973,7 @@ function App() {
           <div className="mobile-brand">
             <Brand />
           </div>
+          {mode !== "reset" && <button className="auth-back-home" type="button" onClick={() => setShowAuth(false)}>← Back to home</button>}
           {(friendInviteCode || referralCode) && <p className="friend-page-message" role="status">
             {referralCode
               ? `You were invited by ${referrerUsername || 'a SplitCare user'}. Create an account to receive 10 referral points and add them as a friend.`
