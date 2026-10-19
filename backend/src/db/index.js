@@ -51,7 +51,7 @@ const connectDB = async () => {
 
     CREATE TABLE IF NOT EXISTS account_email_codes (
       email TEXT NOT NULL,
-      purpose VARCHAR(20) NOT NULL CHECK (purpose IN ('signup', 'delete_account')),
+      purpose VARCHAR(20) NOT NULL,
       code_hash TEXT,
       code_salt TEXT,
       code_expires_at TIMESTAMPTZ,
@@ -62,6 +62,11 @@ const connectDB = async () => {
       verified_expires_at TIMESTAMPTZ,
       PRIMARY KEY (email, purpose)
     );
+    ALTER TABLE account_email_codes DROP CONSTRAINT IF EXISTS account_email_codes_purpose_check;
+    ALTER TABLE account_email_codes
+      ADD CONSTRAINT account_email_codes_purpose_check
+      CHECK (purpose IN ('signup', 'delete_account', 'email_change_old', 'email_change_new'));
+    CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique ON users (LOWER(email));
 
     CREATE TABLE IF NOT EXISTS friendships (
       user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -2967,6 +2967,29 @@ input::placeholder {
     font-weight: 700;
 }
 
+.profile-email-change {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid #d8dbd1;
+}
+
+.profile-email-change h3,
+.profile-email-change p {
+    margin: 0;
+}
+
+.profile-email-change h3 {
+    color: #19231d;
+    font-size: 14px;
+}
+
+.profile-email-change p {
+    color: #778076;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 .profile-danger-zone {
     display: grid;
     gap: 12px;

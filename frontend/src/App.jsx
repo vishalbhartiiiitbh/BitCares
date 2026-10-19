@@ -1434,6 +1434,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [photoPreview, setPhotoPreview] = useState('');
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [emailChangeEnabled, setEmailChangeEnabled] = useState(false);
+  const [emailChangeCodesSent, setEmailChangeCodesSent] = useState(false);
+  const [oldEmailCode, setOldEmailCode] = useState('');
+  const [newEmailCode, setNewEmailCode] = useState('');
+  const [emailChangeBusy, setEmailChangeBusy] = useState(false);
+  const [emailChangeError, setEmailChangeError] = useState('');
   const [deleteCodeSent, setDeleteCodeSent] = useState(false);
   const [deleteCode, setDeleteCode] = useState('');
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
@@ -2327,6 +2334,48 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       setProfileBusy(false);
     }
   };
+  const sendEmailChangeCodes = async () => {
+    setEmailChangeBusy(true);
+    setEmailChangeError('');
+    try {
+      const result = await apiRequest('/users/profile/email-change/send-codes', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ newEmail }),
+      });
+      setEmailChangeCodesSent(true);
+      setOldEmailCode('');
+      setNewEmailCode('');
+      setFormMessage(result.message);
+    } catch (error) {
+      setEmailChangeError(error.message);
+    } finally {
+      setEmailChangeBusy(false);
+    }
+  };
+  const verifyAndChangeEmail = async () => {
+    setEmailChangeBusy(true);
+    setEmailChangeError('');
+    try {
+      const result = await apiRequest('/users/profile/email-change/verify', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ newEmail, oldCode: oldEmailCode, newCode: newEmailCode }),
+      });
+      onProfileUpdated(result.user);
+      setProfileForm((current) => ({ ...current, email: result.user.email }));
+      setNewEmail('');
+      setEmailChangeEnabled(false);
+      setEmailChangeCodesSent(false);
+      setOldEmailCode('');
+      setNewEmailCode('');
+      setFormMessage(result.message);
+    } catch (error) {
+      setEmailChangeError(error.message);
+    } finally {
+      setEmailChangeBusy(false);
+    }
+  };
   const sendAccountDeletionCode = async () => {
     setDeleteAccountBusy(true);
     setDeleteAccountError('');
@@ -2386,7 +2435,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     setProfileError('');
     let historyWarning = '';
     const body = new FormData();
-    ['username', 'email', 'fullnamae', 'phone', 'defaultCurrency'].forEach((key) => body.append(key, profileForm[key]));
+    ['username', 'fullnamae', 'phone', 'defaultCurrency'].forEach((key) => body.append(key, profileForm[key]));
     if (profileForm.coverimage) body.append('coverimage', profileForm.coverimage);
     if (passwordUpdateEnabled) {
       body.append('currentPassword', profileForm.currentPassword);
@@ -3302,7 +3351,52 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                             : 'Enter a username of 1 to 40 characters.'}
                   </p>
                 )}
-                <label>Email<input name="email" type="email" value={profileForm.email} onChange={updateProfileField} required /></label>
+                <label>Current email<input type="email" value={profileForm.email} readOnly /></label>
+                <button
+                  className="password-update-toggle"
+                  type="button"
+                  aria-expanded={emailChangeEnabled}
+                  aria-controls="profile-email-change"
+                  onClick={() => {
+                    setEmailChangeEnabled((enabled) => !enabled);
+                    setEmailChangeCodesSent(false);
+                    setOldEmailCode('');
+                    setNewEmailCode('');
+                    setEmailChangeError('');
+                  }}
+                >
+                  {emailChangeEnabled ? 'Cancel email update' : 'Update email'}
+                </button>
+                {emailChangeEnabled && (
+                  <section className="profile-email-change" id="profile-email-change" aria-labelledby="email-change-heading">
+                    <h3 id="email-change-heading">Change email address</h3>
+                    <p>Verification codes will be sent to your current email and the new email. The new address must not already belong to another account.</p>
+                    <label>New email<input type="email" value={newEmail} onChange={(event) => {
+                      setNewEmail(event.target.value);
+                      setEmailChangeCodesSent(false);
+                      setOldEmailCode('');
+                      setNewEmailCode('');
+                      setEmailChangeError('');
+                    }} placeholder="new-address@example.com" required={emailChangeCodesSent} /></label>
+                    {!emailChangeCodesSent ? (
+                      <button className="verify-password-button" type="button" onClick={sendEmailChangeCodes} disabled={emailChangeBusy || !newEmail.trim()}>
+                        {emailChangeBusy ? 'Sending codes…' : 'Send verification codes'}
+                      </button>
+                    ) : (
+                      <>
+                        <label>Code sent to current email<input type="text" inputMode="numeric" autoComplete="one-time-code" value={oldEmailCode} onChange={(event) => setOldEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" placeholder="6-digit code" /></label>
+                        <label>Code sent to new email<input type="text" inputMode="numeric" autoComplete="one-time-code" value={newEmailCode} onChange={(event) => setNewEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))} maxLength="6" placeholder="6-digit code" /></label>
+                        <button className="verify-password-button" type="button" onClick={sendEmailChangeCodes} disabled={emailChangeBusy}>
+                          Resend both codes
+                        </button>
+                        <button className="submit-button" type="button" onClick={verifyAndChangeEmail} disabled={emailChangeBusy || oldEmailCode.length !== 6 || newEmailCode.length !== 6}>
+                          {emailChangeBusy ? 'Verifying…' : 'Verify both and change email'}
+                        </button>
+                      </>
+                    )}
+                    {emailChangeError && <p className="error-message" role="alert">{emailChangeError}</p>}
+                  </section>
+                )}
                 <label>Full name<input name="fullnamae" value={profileForm.fullnamae} onChange={updateProfileField} required /></label>
                 <label>Phone<input name="phone" value={profileForm.phone} onChange={updateProfileField} placeholder="Optional" /></label>
                 <label>Default currency

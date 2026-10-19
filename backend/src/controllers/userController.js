@@ -313,6 +313,97 @@ export const sendAccountDeletionCode = async (req, res) => {
   res.json({ data: { message: 'A deletion confirmation code has been sent to your email. It expires in 10 minutes.' } });
 };
 
+export const sendEmailChangeCodes = async (req, res) => {
+  const newEmail = typeof req.body?.newEmail === 'string' ? req.body.newEmail.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+    throw Object.assign(new Error('Enter a valid new email address'), { statusCode: 400 });
+  }
+  if (newEmail === req.user.email.toLowerCase()) {
+    throw Object.assign(new Error('The new email must be different from your current email'), { statusCode: 400 });
+  }
+  const existing = await query('SELECT id FROM users WHERE LOWER(email) = $1', [newEmail]);
+  if (existing.rowCount) {
+    throw Object.assign(new Error('This email address is already linked to an account'), { statusCode: 409 });
+  }
+
+  await sendEmailCode(req.user.email.toLowerCase(), 'email_change_old');
+  await sendEmailCode(newEmail, 'email_change_new');
+  res.json({ data: { message: `Verification codes have been sent to ${req.user.email} and ${newEmail}. Both codes expire in 10 minutes.` } });
+};
+
+export const changeEmail = async (req, res) => {
+  const newEmail = typeof req.body?.newEmail === 'string' ? req.body.newEmail.trim().toLowerCase() : '';
+  const oldCode = typeof req.body?.oldCode === 'string' ? req.body.oldCode.trim() : '';
+  const newCode = typeof req.body?.newCode === 'string' ? req.body.newCode.trim() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail) || !/^\d{6}$/.test(oldCode) || !/^\d{6}$/.test(newCode)) {
+    throw Object.assign(new Error('Enter a valid new email and both 6-digit verification codes'), { statusCode: 400 });
+  }
+
+  const oldEmail = req.user.email.toLowerCase();
+  if (newEmail === oldEmail) {
+    throw Object.assign(new Error('The new email must be different from your current email'), { statusCode: 400 });
+  }
+
+  let outcome;
+  try {
+    outcome = await withTransaction(async (client) => {
+      const available = await client.query(
+        'SELECT id FROM users WHERE LOWER(email) = $1 AND id <> $2',
+        [newEmail, req.user._id],
+      );
+      if (available.rowCount) return { error: 'This email address is already linked to an account', statusCode: 409 };
+
+      const codes = await client.query(
+        `SELECT email, purpose, code_hash, code_salt, code_expires_at, failed_attempts
+           FROM account_email_codes
+          WHERE (email = $1 AND purpose = 'email_change_old')
+             OR (email = $2 AND purpose = 'email_change_new')
+          ORDER BY email, purpose
+          FOR UPDATE`,
+        [oldEmail, newEmail],
+      );
+      const oldVerification = codes.rows.find((row) => row.purpose === 'email_change_old');
+      const newVerification = codes.rows.find((row) => row.purpose === 'email_change_new');
+      for (const [row, code] of [[oldVerification, oldCode], [newVerification, newCode]]) {
+        if (!row || !row.code_hash || new Date(row.code_expires_at) <= new Date() || row.failed_attempts >= 5) {
+          return { error: 'A verification code is invalid or has expired. Request new codes.' };
+        }
+        if (!matchingCode(row, code)) {
+          await client.query(
+            'UPDATE account_email_codes SET failed_attempts = failed_attempts + 1 WHERE email = $1 AND purpose = $2',
+            [row.email, row.purpose],
+          );
+          return { error: 'One of the verification codes is incorrect' };
+        }
+      }
+
+      const updated = await client.query(
+        `UPDATE users
+            SET email = $1
+          WHERE id = $2
+          RETURNING id AS "_id", username, email, fullnamae, phone, coverimage,
+                    default_currency AS "defaultCurrency", created_at AS "createdAt"`,
+        [newEmail, req.user._id],
+      );
+      await client.query(
+        `DELETE FROM account_email_codes
+          WHERE (email = $1 AND purpose = 'email_change_old')
+             OR (email = $2 AND purpose = 'email_change_new')`,
+        [oldEmail, newEmail],
+      );
+      return { user: updated.rows[0] };
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      throw Object.assign(new Error('This email address is already linked to an account'), { statusCode: 409 });
+    }
+    throw error;
+  }
+
+  if (outcome.error) throw Object.assign(new Error(outcome.error), { statusCode: outcome.statusCode || 400 });
+  res.json({ data: { user: outcome.user, message: 'Email address updated successfully.' } });
+};
+
 export const deleteAccount = async (req, res) => {
   const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
   if (!/^\d{6}$/.test(code)) {
@@ -439,9 +530,11 @@ export const updateProfile = async (req, res) => {
   if (req.params.userId !== req.user._id) throw Object.assign(new Error('You can only update your own profile'), { statusCode: 403 });
 
   const { username, email, fullnamae, currentPassword, newPassword, phone, coverimage, defaultCurrency } = req.body || {};
+  if (email !== undefined) {
+    throw Object.assign(new Error('Email changes require verification codes sent to both email addresses'), { statusCode: 400 });
+  }
   const values = {};
   if (username?.trim()) values.username = username.trim().toLowerCase();
-  if (email?.trim()) values.email = email.trim().toLowerCase();
   if (fullnamae?.trim()) values.fullnamae = fullnamae.trim();
   if (phone !== undefined) values.phone = phone.trim();
   if (coverimage?.trim()) values.coverimage = coverimage.trim();

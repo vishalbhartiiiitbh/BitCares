@@ -99,9 +99,17 @@ The API also sets HTTP-only `accessToken` and `refreshToken` cookies on registra
 From the profile, users can request a one-time email code and confirm permanent
 account deletion. The deletion removes groups created by the account, friend
 ledgers involving it, and shared expenses in which the user participated, as
-well as other records that reference the account. `POST
-`/api/users/profile/delete-account/send-code` sends the code; authenticated
+well as other records that reference the account. `POST /api/users/profile/delete-account/send-code`
+sends the code; authenticated
 `DELETE /api/users/profile/account` accepts `{"code":"123456"}`.
+
+To change the account email in the profile, request codes with authenticated
+`POST /api/users/profile/email-change/send-codes` using
+`{"newEmail":"new-address@example.com"}`. The user must then submit both codes
+to authenticated `POST /api/users/profile/email-change/verify` with
+`{"newEmail":"new-address@example.com","oldCode":"123456","newCode":"654321"}`.
+Both codes expire after 10 minutes, and the new email cannot already be linked
+to an account.
 
 ## Frontend Setup
 

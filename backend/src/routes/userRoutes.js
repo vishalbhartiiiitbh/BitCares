@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { accessToken, checkUsernameAvailability, currentUser, deleteAccount, forgotPassword, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, sendAccountDeletionCode, sendRegistrationCode, updateProfile, verifyCurrentPassword, verifyRegistrationCode } from '../controllers/userController.js';
+import { accessToken, changeEmail, checkUsernameAvailability, currentUser, deleteAccount, forgotPassword, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, sendAccountDeletionCode, sendEmailChangeCodes, sendRegistrationCode, updateProfile, verifyCurrentPassword, verifyRegistrationCode } from '../controllers/userController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import multer from 'multer';
@@ -21,6 +21,8 @@ router.get('/me', requireAuth, asyncHandler(currentUser));
 router.get('/notifications', requireAuth, asyncHandler(listNotifications));
 router.patch('/notifications/read', requireAuth, asyncHandler(markNotificationsRead));
 router.post('/profile/verify-password', requireAuth, asyncHandler(verifyCurrentPassword));
+router.post('/profile/email-change/send-codes', requireAuth, asyncHandler(sendEmailChangeCodes));
+router.post('/profile/email-change/verify', requireAuth, asyncHandler(changeEmail));
 router.post('/profile/delete-account/send-code', requireAuth, asyncHandler(sendAccountDeletionCode));
 router.delete('/profile/account', requireAuth, asyncHandler(deleteAccount));
 router.get('/profile/username-availability', requireAuth, asyncHandler(checkUsernameAvailability));

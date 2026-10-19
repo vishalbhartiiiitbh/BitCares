@@ -28,8 +28,17 @@ export const sendPasswordResetEmail = async (email, resetUrl) => {
 export const sendEmailVerificationCode = async (email, code, purpose) => {
   const transporter = createTransporter();
   const isDeletion = purpose === 'delete_account';
-  const subject = isDeletion ? 'Confirm your SplitCare account deletion' : 'Verify your SplitCare email';
-  const action = isDeletion ? 'confirm your account deletion' : 'verify your email address';
+  const isEmailChange = purpose.startsWith('email_change');
+  const subject = isDeletion
+    ? 'Confirm your SplitCare account deletion'
+    : isEmailChange
+      ? 'Verify your SplitCare email change'
+      : 'Verify your SplitCare email';
+  const action = isDeletion
+    ? 'confirm your account deletion'
+    : isEmailChange
+      ? 'verify your email change'
+      : 'verify your email address';
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     to: email,
