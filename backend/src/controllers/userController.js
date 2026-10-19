@@ -1,7 +1,9 @@
 import bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { query } from '../db/index.js';
+import { query, withTransaction } from '../db/index.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
+import { sendPasswordResetEmail } from '../services/emailService.js';
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' };
 const publicUser = (user) => { const value = { ...user }; delete value.password; delete value.refreshToken; return value; };
@@ -34,6 +36,65 @@ export const login = async (req, res) => {
   await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, user._id]);
   setCookies(res, data);
   res.json({ data });
+};
+
+export const forgotPassword = async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  if (!email) throw Object.assign(new Error('Email is required'), { statusCode: 400 });
+
+  const result = await query('SELECT id, email FROM users WHERE LOWER(email) = $1', [email]);
+  if (result.rowCount) {
+    const user = result.rows[0];
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    await query(
+      "UPDATE users SET password_reset_token_hash = $1, password_reset_expires_at = NOW() + INTERVAL '10 minutes' WHERE id = $2",
+      [tokenHash, user.id],
+    );
+
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const resetUrl = `${frontendUrl}/?resetToken=${encodeURIComponent(token)}`;
+    try {
+      await sendPasswordResetEmail(user.email, resetUrl);
+    } catch (error) {
+      await query(
+        'UPDATE users SET password_reset_token_hash = NULL, password_reset_expires_at = NULL WHERE id = $1 AND password_reset_token_hash = $2',
+        [user.id, tokenHash],
+      );
+      throw error;
+    }
+  }
+
+  res.json({ data: { message: 'If an account exists for that email, a password reset link has been sent.' } });
+};
+
+export const resetPassword = async (req, res) => {
+  const { token, password } = req.body || {};
+  if (typeof token !== 'string' || !token) {
+    throw Object.assign(new Error('A password reset token is required'), { statusCode: 400 });
+  }
+  if (typeof password !== 'string' || password.length < 8) {
+    throw Object.assign(new Error('Password must be at least 8 characters'), { statusCode: 400 });
+  }
+
+  const tokenHash = createHash('sha256').update(token).digest('hex');
+  const passwordHash = await bcrypt.hash(password, 12);
+  await withTransaction(async (client) => {
+    const result = await client.query(
+      'SELECT id FROM users WHERE password_reset_token_hash = $1 AND password_reset_expires_at > NOW() FOR UPDATE',
+      [tokenHash],
+    );
+    if (!result.rowCount) {
+      throw Object.assign(new Error('This password reset link is invalid or has expired'), { statusCode: 400 });
+    }
+
+    await client.query(
+      'UPDATE users SET password = $1, password_reset_token_hash = NULL, password_reset_expires_at = NULL, refresh_token = NULL WHERE id = $2',
+      [passwordHash, result.rows[0].id],
+    );
+  });
+
+  res.json({ data: { message: 'Password reset successfully. You can now sign in.' } });
 };
 
 export const logout = async (req, res) => { await query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user._id]); res.clearCookie('accessToken', cookieOptions); res.clearCookie('refreshToken', cookieOptions); res.json({ data: { message: 'Logged out successfully' } }); };

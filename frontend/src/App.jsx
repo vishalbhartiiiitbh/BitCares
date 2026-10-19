@@ -589,14 +589,20 @@ const expenseCategories = [
 ];
 
 function App() {
-  const [mode, setMode] = useState("login");
+  const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken") || "");
+  const [mode, setMode] = useState(() => resetToken ? "reset" : "login");
   const [form, setForm] = useState(emptyForm);
   const [user, setUser] = useState(null);
   const [accessToken, setAccessToken] = useState("");
   const [message, setMessage] = useState("");
+  const [messageIsSuccess, setMessageIsSuccess] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (mode === "reset") {
+      window.history.replaceState(null, "", window.location.pathname);
+      return;
+    }
     apiRequest("/users/refresh-token", { method: "POST" })
       .then(async (data) => {
         setAccessToken(data.accessToken);
@@ -614,17 +620,39 @@ function App() {
       [event.target.name]: event.target.value,
     }));
     setMessage("");
+    setMessageIsSuccess(false);
   };
 
   const submit = async (event) => {
     event.preventDefault();
     setBusy(true);
     setMessage("");
+    setMessageIsSuccess(false);
     try {
-      const body =
-        mode === "register"
-          ? form
-          : { email: form.email, password: form.password };
+      if (mode === "forgot") {
+        const data = await apiRequest("/users/forgot-password", {
+          method: "POST",
+          body: JSON.stringify({ email: form.email }),
+        });
+        setMessage(data.message);
+        setMessageIsSuccess(true);
+        return;
+      }
+      if (mode === "reset") {
+        const data = await apiRequest("/users/reset-password", {
+          method: "POST",
+          body: JSON.stringify({ token: resetToken, password: form.password }),
+        });
+        setResetToken("");
+        window.history.replaceState(null, "", window.location.pathname);
+        setMode("login");
+        setForm(emptyForm);
+        setMessage(data.message);
+        setMessageIsSuccess(true);
+        return;
+      }
+
+      const body = mode === "register" ? form : { email: form.email, password: form.password };
       const data = await apiRequest(`/users/${mode}`, {
         method: "POST",
         body: JSON.stringify(body),
@@ -700,7 +728,7 @@ function App() {
           <div className="mobile-brand">
             <Brand />
           </div>
-          <div className="mode-tabs" role="tablist">
+          {(mode === "login" || mode === "register") && <div className="mode-tabs" role="tablist">
             <button
               className={mode === "login" ? "selected" : ""}
               onClick={() => {
@@ -719,17 +747,21 @@ function App() {
             >
               Create account
             </button>
-          </div>
+          </div>}
           <p className="eyebrow">
-            {mode === "login" ? "Welcome back" : "Start a group"}
+            {mode === "login" ? "Welcome back" : mode === "register" ? "Start a group" : mode === "forgot" ? "Account recovery" : "Choose a new password"}
           </p>
           <h2>
-            {mode === "login" ? "Good to see you." : "Let’s split smarter."}
+            {mode === "login" ? "Good to see you." : mode === "register" ? "Let’s split smarter." : mode === "forgot" ? "Forgot your password?" : "Reset your password."}
           </h2>
           <p className="form-intro">
             {mode === "login"
               ? "Pick up where your shared plans left off."
-              : "Set up your account and bring your people together."}
+              : mode === "register"
+                ? "Set up your account and bring your people together."
+                : mode === "forgot"
+                  ? "Enter your email and we’ll send a password reset link if an account is registered."
+                  : "Choose a new password. This link can only be used once and expires after 10 minutes."}
           </p>
           <form onSubmit={submit}>
             {mode === "register" && (
@@ -757,7 +789,7 @@ function App() {
                 </label>
               </>
             )}
-            <label>
+            {mode !== "reset" && <label>
               Email
               <input
                 name="email"
@@ -767,9 +799,9 @@ function App() {
                 placeholder="alex@example.com"
                 required
               />
-            </label>
-            <label>
-              Password
+            </label>}
+            {mode !== "forgot" && <label>
+              {mode === "reset" ? "New password" : "Password"}
               <input
                 name="password"
                 type="password"
@@ -779,14 +811,36 @@ function App() {
                 minLength="8"
                 required
               />
-            </label>
-            {message && <p className="error-message">{message}</p>}
+            </label>}
+            {message && <p className={messageIsSuccess ? "success-message" : "error-message"}>{message}</p>}
+            {mode === "login" && (
+              <button className="text-button" type="button" onClick={() => { setMode("forgot"); setMessage(""); }}>
+                Forgot password?
+              </button>
+            )}
+            {(mode === "forgot" || mode === "reset") && (
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => {
+                  setMode("login");
+                  setResetToken("");
+                  setMessage("");
+                }}
+              >
+                Back to sign in
+              </button>
+            )}
             <button className="submit-button" disabled={busy}>
               {busy
-                ? "Connecting…"
+                ? "Please wait…"
                 : mode === "login"
                   ? "Enter SplitCare →"
-                  : "Create my account →"}
+                  : mode === "register"
+                    ? "Create my account →"
+                    : mode === "forgot"
+                      ? "Send reset link →"
+                      : "Update password →"}
             </button>
           </form>
           <p className="legal-copy">

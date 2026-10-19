@@ -12,6 +12,18 @@ cp .env.example .env
 
 Update `backend/.env` with your PostgreSQL `DATABASE_URL` and private JWT, Cloudinary, and other credentials. Do not commit `.env`.
 
+Password reset email uses Nodemailer and SMTP. Configure `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASS` in `backend/.env`. For Gmail, use
+an app password (with 2-Step Verification enabled), not your regular Gmail
+password. Set `EMAIL_FROM` to the sender address and `FRONTEND_URL` to the
+frontend origin used in reset links. Reset links expire after 10 minutes and
+are invalidated after a successful password change.
+
+The recovery endpoints are `POST /api/users/forgot-password` with
+`{"email":"person@example.com"}` and `POST /api/users/reset-password` with
+`{"token":"token-from-email","password":"new-password"}`. Reset requests
+return a generic message whether or not the email belongs to an account.
+
 Start the development server:
 
 ```bash
@@ -60,7 +72,7 @@ curl -X POST http://localhost:5000/api/users/refresh-token \
 	-d '{"refreshToken": "YOUR_REFRESH_TOKEN"}'
 ```
 
-The API also sets HTTP-only `accessToken` and `refreshToken` cookies on registration and login. Refresh tokens are stored in MongoDB but excluded from normal user queries.
+The API also sets HTTP-only `accessToken` and `refreshToken` cookies on registration and login. Refresh tokens are stored in PostgreSQL and excluded from normal user queries.
 
 ## Frontend Setup
 

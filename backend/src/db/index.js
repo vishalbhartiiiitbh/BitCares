@@ -41,6 +41,8 @@ const connectDB = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS default_currency VARCHAR(3) NOT NULL DEFAULT 'INR';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ;
 
     CREATE TABLE IF NOT EXISTS friendships (
       user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

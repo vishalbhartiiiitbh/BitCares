@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { accessToken, checkUsernameAvailability, currentUser, listNotifications, login, logout, markNotificationsRead, refreshToken, register, updateProfile, verifyCurrentPassword } from '../controllers/userController.js';
+import { accessToken, checkUsernameAvailability, currentUser, forgotPassword, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, updateProfile, verifyCurrentPassword } from '../controllers/userController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import multer from 'multer';
@@ -10,6 +10,8 @@ const router = Router();
 
 router.post('/register', asyncHandler(register));
 router.post('/login', asyncHandler(login));
+router.post('/forgot-password', asyncHandler(forgotPassword));
+router.post('/reset-password', asyncHandler(resetPassword));
 router.post('/refresh-token', asyncHandler(refreshToken));
 router.post('/logout', requireAuth, asyncHandler(logout));
 router.get('/access-token', requireAuth, asyncHandler(accessToken));

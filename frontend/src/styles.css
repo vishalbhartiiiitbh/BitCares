@@ -652,6 +652,22 @@ input::placeholder {
     font-size: 12px;
 }
 
+.success-message {
+    margin: 0;
+    color: #405c36;
+    font-size: 12px;
+}
+
+.text-button {
+    justify-self: start;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #405c36;
+    font-size: 12px;
+    text-decoration: underline;
+}
+
 .legal-copy {
     margin-top: 25px;
     color: #9b9d93;
