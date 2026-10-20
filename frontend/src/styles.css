@@ -4263,34 +4263,76 @@ input::placeholder {
 
 .friend-history-balance {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 10px;
     padding: 15px;
     border: 1px solid #e2dfd5;
     background: #fff;
 }
 
-.friend-history-balance > div {
+.friend-history-net-balance {
     display: grid;
     gap: 4px;
 }
 
-.friend-history-balance > div span {
+.friend-history-net-balance span {
     color: #7b857c;
     font-size: 11px;
 }
 
-.friend-history-balance > div strong {
-    color: #3ca88f;
+.friend-history-net-balance strong {
     font-size: 21px;
 }
 
-.friend-history-balance > div:nth-child(2) strong {
+.friend-history-net-balance strong.balance-positive {
+    color: #3ca88f;
+}
+
+.friend-history-net-balance strong.balance-negative {
     color: #e7624e;
 }
 
+.friend-history-balance-breakdown {
+    margin-left: 2px;
+    padding-left: 12px;
+    border-left: 2px solid #e2dfd5;
+}
+
+.friend-history-balance-breakdown summary {
+    color: #627168;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.friend-history-balance-breakdown ul {
+    display: grid;
+    gap: 5px;
+    margin: 7px 0 0;
+    padding-left: 15px;
+    color: #526057;
+    font-size: 11px;
+}
+
+.friend-history-balance-breakdown li::marker {
+    color: #8a938a;
+}
+
+.friend-history-balance-breakdown li.balance-breakdown-you-owe {
+    color: #e7624e;
+}
+
+.friend-history-balance-breakdown li.balance-breakdown-friend-owes {
+    color: #2785c5;
+}
+
+.friend-history-balance-breakdown li.balance-breakdown-you-owe::marker {
+    color: #e7624e;
+}
+
+.friend-history-balance-breakdown li.balance-breakdown-friend-owes::marker {
+    color: #2785c5;
+}
+
 .friend-history-balance > small {
-    grid-column: 1 / -1;
     color: #92998f;
     font-size: 10px;
 }
@@ -4385,12 +4427,16 @@ input::placeholder {
 
 .friend-balance-row {
     display: grid;
-    grid-template-columns: 18px minmax(90px, 1fr) auto auto;
+    grid-template-columns: minmax(90px, 1fr) auto auto;
     align-items: center;
     gap: 8px;
     padding: 7px 0;
     color: #737d74;
     font-size: 10px;
+}
+
+.friend-balance-row-selectable {
+    grid-template-columns: 18px minmax(90px, 1fr) auto auto;
 }
 
 .friend-balance-row input {
@@ -5891,6 +5937,10 @@ input::placeholder {
     }
 
     .friend-balance-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .friend-balance-row-selectable {
         grid-template-columns: 18px minmax(0, 1fr) auto;
     }
 

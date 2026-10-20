@@ -1425,6 +1425,25 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
     ? Math.abs(netBalance)
     : eligibleItems.reduce((sum, balance) => sum + Math.abs(Number(balance.convertedBalance)), 0);
   const hasOpposingBalances = friendOwes > 0 && userOwes > 0;
+  const balanceBreakdown = (history?.groups || []).flatMap((group) => {
+    const owedToYou = (group.balances || [])
+      .reduce((total, balance) => total + Math.max(0, Number(balance.convertedBalance)), 0);
+    const youOwe = (group.balances || [])
+      .reduce((total, balance) => total + Math.max(0, -Number(balance.convertedBalance)), 0);
+    const sourceName = group.isDirect ? 'non-group expenses' : group.groupName;
+    return [
+      youOwe > 0 && {
+        id: `${group.groupId}:you-owe`,
+        direction: 'you-owe',
+        text: `You owe ${friend.fullnamae || friend.username} ${defaultCurrency} ${youOwe.toFixed(2)} in ${sourceName}`,
+      },
+      owedToYou > 0 && {
+        id: `${group.groupId}:friend-owes`,
+        direction: 'friend-owes',
+        text: `${friend.fullnamae || friend.username} owes you ${defaultCurrency} ${owedToYou.toFixed(2)} in ${sourceName}`,
+      },
+    ].filter(Boolean);
+  });
   const personalTransactions = (history?.transactions || []).filter((transaction) => (
     (transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type))
     || transaction.type === 'FRIEND_SETTLEMENT'
@@ -1481,6 +1500,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
         }),
       });
       setSettlementNote('');
+      setSettlementOpen(true);
       await onRefresh();
     } catch (requestError) {
       setSettlementError(requestError.message);
@@ -1514,12 +1534,34 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
       </header>
       {error && <p className="error-message" role="alert">{error}</p>}
       <section className="friend-history-balance">
-        <div><span>{friend.fullnamae || friend.username} owes you</span><strong>{defaultCurrency} {friendOwes.toFixed(2)}</strong></div>
-        <div><span>You owe {friend.fullnamae || friend.username}</span><strong>{defaultCurrency} {userOwes.toFixed(2)}</strong></div>
+        <div className="friend-history-net-balance">
+          <span>
+            {netBalance > 0
+              ? `You are owed ${friend.fullnamae || friend.username} overall`
+              : netBalance < 0
+                ? `You owe ${friend.fullnamae || friend.username} overall`
+                : `You and ${friend.fullnamae || friend.username} are settled overall`}
+          </span>
+          <strong className={netBalance < 0 ? 'balance-negative' : 'balance-positive'}>
+            {defaultCurrency} {Math.abs(netBalance).toFixed(2)}
+          </strong>
+        </div>
+        {balanceBreakdown.length > 0 && (
+          <details className="friend-history-balance-breakdown" open>
+            <summary>Balance breakdown</summary>
+            <ul>
+              {balanceBreakdown.map((item) => (
+                <li className={`balance-breakdown-${item.direction}`} key={item.id}>{item.text}</li>
+              ))}
+            </ul>
+          </details>
+        )}
         <small>Converted using daily reference exchange rates.</small>
       </section>
       <div className={`friend-history-layout ${settlementOpen ? 'settlement-open' : ''}`}>
         <section className="friend-history-groups">
+          {settlementOpen && (
+            <>
           <div className="friend-history-section-heading">
             <div><p className="eyebrow">YOUR BALANCES</p><h2>By group</h2></div>
             <span>{history?.groups?.length || 0} ledgers</span>
@@ -1554,8 +1596,17 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
               {group.balances.length ? group.balances.map((balance) => {
                 const key = `${group.groupId}:${balance.currency}`;
                 const selected = selectedKeys.includes(key);
-                return (
-                  <label className="friend-balance-row" key={key}>
+                const balanceDetails = (
+                  <>
+                    <span className={Number(balance.convertedBalance) >= 0 ? 'balance-positive' : 'balance-negative'}>
+                      {Number(balance.netBalance) >= 0 ? `${friend.fullnamae || friend.username} owes you` : `You owe ${friend.fullnamae || friend.username}`}
+                    </span>
+                    <strong>{balance.currency} {Math.abs(Number(balance.netBalance)).toFixed(2)}</strong>
+                    <small>≈ {defaultCurrency} {Math.abs(Number(balance.convertedBalance)).toFixed(2)}</small>
+                  </>
+                );
+                return settlementOpen ? (
+                  <label className="friend-balance-row friend-balance-row-selectable" key={key}>
                     <input
                       type="checkbox"
                       checked={selected}
@@ -1565,16 +1616,16 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
                       onChange={() => toggleBalance(key)}
                       aria-label={`Select ${group.groupName} balance in ${balance.currency}`}
                     />
-                    <span className={Number(balance.convertedBalance) >= 0 ? 'balance-positive' : 'balance-negative'}>
-                      {Number(balance.netBalance) >= 0 ? `${friend.fullnamae || friend.username} owes you` : `You owe ${friend.fullnamae || friend.username}`}
-                    </span>
-                    <strong>{balance.currency} {Math.abs(Number(balance.netBalance)).toFixed(2)}</strong>
-                    <small>≈ {defaultCurrency} {Math.abs(Number(balance.convertedBalance)).toFixed(2)}</small>
+                    {balanceDetails}
                   </label>
+                ) : (
+                  <div className="friend-balance-row" key={key}>{balanceDetails}</div>
                 );
               }) : <p className="friend-ledger-settled">Settled up</p>}
             </article>
           )) : <p className="empty-state">You have no shared group or direct friend balances yet.</p>}
+            </>
+          )}
           <section className="friend-history-personal-spend">
             <div className="friend-history-section-heading">
               <div><p className="eyebrow">ONE-TO-ONE LEDGER</p><h2>Personal spend with {friend.fullnamae || friend.username}</h2></div>
