@@ -3,7 +3,7 @@ import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 
 import jwt from 'jsonwebtoken';
 import { query, withTransaction } from '../db/index.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
-import { sendEmailVerificationCode, sendPasswordResetEmail } from '../services/emailService.js';
+import { sendEmailVerificationCode, sendPasswordResetEmail, sendWelcomeEmail } from '../services/emailService.js';
 import { EMAIL_NOTIFICATION_PREFERENCES } from '../services/emailNotificationService.js';
 import { getAvailableCurrencies } from '../services/exchangeRateService.js';
 
@@ -198,6 +198,11 @@ export const register = async (req, res) => {
   await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, data.user._id]);
   setCookies(res, data);
   if (result.referred) data.referralMessage = 'Referral confirmed! You and your friend each earned 10 points.';
+  try {
+    await sendWelcomeEmail(user.email, user.fullnamae);
+  } catch (error) {
+    console.error(`Account was created, but the welcome email could not be sent to ${user.email}:`, error);
+  }
   res.status(201).json({ data });
 };
 

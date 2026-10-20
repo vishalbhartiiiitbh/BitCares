@@ -31,6 +31,19 @@ export const sendPasswordResetEmail = async (email, resetUrl) => {
   });
 };
 
+export const sendWelcomeEmail = async (email, fullName) => {
+  const transporter = createTransporter();
+  const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const name = fullName || 'there';
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to: email,
+    subject: 'Welcome to SplitCare',
+    text: `Hi ${name},\n\nWelcome to SplitCare! Your account is ready. You can now organize shared expenses, track balances, and settle up with friends.\n\nGet started: ${frontendUrl}\n\nThe SplitCare team`,
+    html: `<p>Hi ${name},</p><p>Welcome to SplitCare! Your account is ready. You can now organize shared expenses, track balances, and settle up with friends.</p><p><a href="${frontendUrl}">Get started with SplitCare</a></p><p>The SplitCare team</p>`,
+  });
+};
+
 export const sendNotificationEmail = async (email, subject, text) => {
   const transporter = createTransporter();
   await transporter.sendMail({
