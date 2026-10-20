@@ -1331,6 +1331,27 @@ input::placeholder {
     display: inline-block;
 }
 
+.theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    margin-left: 16px;
+    padding: 8px 11px;
+    border: 1px solid rgba(247, 255, 249, .42);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .12);
+    color: #fff;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.theme-toggle:hover {
+    background: rgba(255, 255, 255, .22);
+}
+
 .mobile-nav-toggle {
     display: none;
 }
@@ -3336,6 +3357,179 @@ input::placeholder {
     .group-workspace-body {
         grid-template-columns: 1fr;
     }
+}
+
+.dashboard-page[data-theme="dark"] {
+    --clay-surface: #222c27;
+    --clay-raised: #2b3630;
+    --clay-shadow: rgba(0, 0, 0, .28);
+    --clay-highlight: rgba(255, 255, 255, .035);
+    color: #e6ede7;
+    background:
+        radial-gradient(ellipse at 12% 4%, rgba(78, 117, 98, .14), transparent 32%),
+        #151c18;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-nav {
+    border-bottom-color: #34463d;
+    background: #275a4d;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-shell,
+.dashboard-page[data-theme="dark"] .dashboard-content {
+    color: #e6ede7;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-sidebar,
+.dashboard-page[data-theme="dark"] .dashboard-right-rail {
+    border-color: #34443b;
+    background: #202923;
+}
+
+.dashboard-page[data-theme="dark"] .stat-card:not(.highlight),
+.dashboard-page[data-theme="dark"] .panel,
+.dashboard-page[data-theme="dark"] .friend-referral-card,
+.dashboard-page[data-theme="dark"] .friend-profile-card,
+.dashboard-page[data-theme="dark"] .friend-requests-section,
+.dashboard-page[data-theme="dark"] .recent-group-activity,
+.dashboard-page[data-theme="dark"] .personal-expenses-summary,
+.dashboard-page[data-theme="dark"] .personal-expense-month,
+.dashboard-page[data-theme="dark"] .friend-history-balance,
+.dashboard-page[data-theme="dark"] .friend-balance-group,
+.dashboard-page[data-theme="dark"] .friend-history-settlement,
+.dashboard-page[data-theme="dark"] .group-workspace-sidebar,
+.dashboard-page[data-theme="dark"] .group-workspace-content,
+.dashboard-page[data-theme="dark"] .group-simplify-plan,
+.dashboard-page[data-theme="dark"] .settle-up-option-section,
+.dashboard-page[data-theme="dark"] .group-workspace,
+.dashboard-page[data-theme="dark"] .group-details,
+.dashboard-page[data-theme="dark"] .friend-history-dialog,
+.dashboard-page[data-theme="dark"] .modal {
+    border-color: #36463d;
+    background-color: var(--clay-surface);
+    color: #e6ede7;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-sidebar,
+.dashboard-page[data-theme="dark"] .dashboard-right-rail,
+.dashboard-page[data-theme="dark"] .stat-card:not(.highlight),
+.dashboard-page[data-theme="dark"] .panel,
+.dashboard-page[data-theme="dark"] .friend-referral-card,
+.dashboard-page[data-theme="dark"] .friend-profile-card,
+.dashboard-page[data-theme="dark"] .friend-requests-section,
+.dashboard-page[data-theme="dark"] .recent-group-activity,
+.dashboard-page[data-theme="dark"] .personal-expenses-summary,
+.dashboard-page[data-theme="dark"] .personal-expense-month,
+.dashboard-page[data-theme="dark"] .friend-history-balance,
+.dashboard-page[data-theme="dark"] .friend-balance-group,
+.dashboard-page[data-theme="dark"] .friend-history-settlement,
+.dashboard-page[data-theme="dark"] .group-workspace-sidebar,
+.dashboard-page[data-theme="dark"] .group-workspace-content,
+.dashboard-page[data-theme="dark"] .group-simplify-plan,
+.dashboard-page[data-theme="dark"] .settle-up-option-section,
+.dashboard-page[data-theme="dark"] .group-workspace,
+.dashboard-page[data-theme="dark"] .group-details,
+.dashboard-page[data-theme="dark"] .friend-history-dialog,
+.dashboard-page[data-theme="dark"] .modal {
+    box-shadow: 8px 8px 18px rgba(0, 0, 0, .24), -5px -5px 15px rgba(255, 255, 255, .025);
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content h1,
+.dashboard-page[data-theme="dark"] .dashboard-content h2,
+.dashboard-page[data-theme="dark"] .dashboard-content h3,
+.dashboard-page[data-theme="dark"] .dashboard-content h4,
+.dashboard-page[data-theme="dark"] .dashboard-content p,
+.dashboard-page[data-theme="dark"] .dashboard-content label,
+.dashboard-page[data-theme="dark"] .dashboard-content legend,
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-history-section-heading,
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-balance-group-title,
+.dashboard-page[data-theme="dark"] .dashboard-content .group-workspace-identity,
+.dashboard-page[data-theme="dark"] .dashboard-content .panel-heading,
+.dashboard-page[data-theme="dark"] .dashboard-content .profile-summary strong,
+.dashboard-page[data-theme="dark"] .dashboard-content .side-link,
+.dashboard-page[data-theme="dark"] .dashboard-content .side-friend-name,
+.dashboard-page[data-theme="dark"] .dashboard-content .settle-up-option {
+    color: #e6ede7;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content small,
+.dashboard-page[data-theme="dark"] .dashboard-content .lede,
+.dashboard-page[data-theme="dark"] .dashboard-content .eyebrow,
+.dashboard-page[data-theme="dark"] .dashboard-content .empty-state,
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-history-section-heading > span,
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-balance-group-title small {
+    color: #aab8ae;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content .side-link.active,
+.dashboard-page[data-theme="dark"] .dashboard-content .side-friend.active,
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-balance-row,
+.dashboard-page[data-theme="dark"] .dashboard-content .group-id-card,
+.dashboard-page[data-theme="dark"] .dashboard-content .settle-up-option,
+.dashboard-page[data-theme="dark"] .dashboard-content .group-activity-row,
+.dashboard-page[data-theme="dark"] .dashboard-content .transaction-row,
+.dashboard-page[data-theme="dark"] .dashboard-content .expense-category-trigger,
+.dashboard-page[data-theme="dark"] .dashboard-content .expense-category-options,
+.dashboard-page[data-theme="dark"] .dashboard-content .expense-comment,
+.dashboard-page[data-theme="dark"] .dashboard-content .profile-menu,
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-balance-group-title,
+.dashboard-page[data-theme="dark"] .dashboard-content .group-setting-button,
+.dashboard-page[data-theme="dark"] .dashboard-content .group-inline-action {
+    border-color: #3a4a40;
+    background-color: var(--clay-raised);
+    color: #e2eae3;
+    box-shadow: 3px 3px 9px rgba(0, 0, 0, .18), -3px -3px 8px rgba(255, 255, 255, .025);
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content .group-activity-description,
+.dashboard-page[data-theme="dark"] .dashboard-content .personal-expense-month > header,
+.dashboard-page[data-theme="dark"] .dashboard-content .profile-summary,
+.dashboard-page[data-theme="dark"] .dashboard-content .group-workspace-tabs {
+    border-color: #3a4a40;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.dashboard-page[data-theme="dark"] .dashboard-content select,
+.dashboard-page[data-theme="dark"] .dashboard-content textarea,
+.dashboard-page[data-theme="dark"] .dashboard-content .expense-entry-form select,
+.dashboard-page[data-theme="dark"] .dashboard-content .expense-entry-form textarea {
+    border-color: #45574c;
+    background: #1a221d;
+    color: #e6ede7;
+    box-shadow: inset 3px 3px 7px rgba(0, 0, 0, .2), inset -2px -2px 6px rgba(255, 255, 255, .02);
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content input::placeholder,
+.dashboard-page[data-theme="dark"] .dashboard-content textarea::placeholder {
+    color: #93a197;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content .profile-menu,
+.dashboard-page[data-theme="dark"] .dashboard-content .notification-panel {
+    border-color: #3a4a40;
+    background: #222c27;
+    color: #e6ede7;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content .profile-summary span,
+.dashboard-page[data-theme="dark"] .dashboard-content .notification-item,
+.dashboard-page[data-theme="dark"] .dashboard-content .notification-copy span,
+.dashboard-page[data-theme="dark"] .dashboard-content .notification-copy small {
+    color: #b4c0b7;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-history-balance-breakdown li.balance-breakdown-you-owe,
+.dashboard-page[data-theme="dark"] .dashboard-content .balance-negative {
+    color: #ff806d;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content .friend-history-balance-breakdown li.balance-breakdown-friend-owes,
+.dashboard-page[data-theme="dark"] .dashboard-content .balance-positive {
+    color: #58c5e8;
+}
+
+.dashboard-page[data-theme="dark"] .dashboard-content .stat-card.highlight {
+    color: #19231d;
 }
 
 @media (max-width: 520px) {
@@ -6046,7 +6240,13 @@ input::placeholder {
     }
 
     .dashboard-nav > .profile-control {
+        order: 5;
+    }
+
+    .dashboard-nav > .theme-toggle {
         order: 4;
+        margin-left: 0;
+        padding: 8px 9px;
     }
 
     .dashboard-nav > .nav-links {

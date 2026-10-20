@@ -1699,6 +1699,10 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
 
 function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDeleted, friendInviteCode, onFriendInviteHandled, referralMessage, referralCode }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
+  const themeStorageKey = `splitcare-theme:${user._id}`;
+  const [theme, setTheme] = useState(() => (
+    window.localStorage.getItem(themeStorageKey) === 'dark' ? 'dark' : 'light'
+  ));
   const [groups, setGroups] = useState([]);
   const [dashboardBalanceSummary, setDashboardBalanceSummary] = useState(null);
   const [dashboardBalancesBusy, setDashboardBalancesBusy] = useState(true);
@@ -1810,6 +1814,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [showProfile, setShowProfile] = useState(false);
   const [showEmailSettings, setShowEmailSettings] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  useEffect(() => {
+    window.localStorage.setItem(themeStorageKey, theme);
+  }, [themeStorageKey, theme]);
   const notificationControlRef = useRef(null);
   const profileControlRef = useRef(null);
   const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', defaultCurrency: user.defaultCurrency || 'INR', currentPassword: '', newPassword: '', coverimage: null });
@@ -3247,7 +3254,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   };
 
   return (
-    <main className="dashboard-page">
+    <main className="dashboard-page" data-theme={theme}>
       <header className="dashboard-nav">
         <Brand />
         <button
@@ -3279,6 +3286,16 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           <button aria-label="Personal expenses" className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => { setActivePage('personal'); setShowMobileNav(false); }}><span className="mobile-nav-label">Personal expenses</span></button>
           <button aria-label="Friends" className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => { setActivePage('friends'); setShowMobileNav(false); }}><span className="mobile-nav-label">Friends</span></button>
         </nav>
+        <button
+          className="theme-toggle"
+          type="button"
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          aria-pressed={theme === 'dark'}
+          onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+        >
+          <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+          <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+        </button>
         <div className="notification-control" ref={notificationControlRef}>
           <button
             className="notification-trigger"
