@@ -168,8 +168,8 @@ export const sendFriendRequest = async (req, res) => {
       const recipient = recipientResult.rows[0];
       if (!recipient) {
         const message = hasEmail
-          ? 'No SplitCare account is registered with that email address'
-          : 'No SplitCare user found with that username';
+          ? 'No Splitpayerly account is registered with that email address'
+          : 'No Splitpayerly user found with that username';
         throw Object.assign(new Error(message), { statusCode: 404 });
       }
       if (recipient._id === req.user._id) {
@@ -204,8 +204,8 @@ export const sendFriendRequest = async (req, res) => {
         client,
         recipient._id,
         'friendAdded',
-        'You received a SplitCare friend request',
-        `${req.user.fullnamae || req.user.username} sent you a friend request on SplitCare.`,
+        'You received a Splitpayerly friend request',
+        `${req.user.fullnamae || req.user.username} sent you a friend request on Splitpayerly.`,
       );
       return { ...inserted.rows[0], recipientName: recipient.fullnamae || recipient.username };
     });
@@ -274,7 +274,7 @@ export const rotateFriendInviteCode = async (req, res) => {
 export const acceptFriendInviteCode = async (req, res) => {
   const code = typeof req.body?.code === 'string' ? req.body.code : '';
   if (!/^[A-Za-z0-9_-]{32}$/.test(code)) {
-    throw Object.assign(new Error('Enter a valid SplitCare friend link or QR code'), { statusCode: 400 });
+    throw Object.assign(new Error('Enter a valid Splitpayerly friend link or QR code'), { statusCode: 400 });
   }
 
   const friend = await withTransaction(async (client) => {

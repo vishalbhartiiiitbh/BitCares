@@ -255,7 +255,7 @@ export const importSplitwise = async (req, res) => {
   try {
     memberMappings = JSON.parse(req.body?.memberMappings || '');
   } catch {
-    throw Object.assign(new Error('Choose a SplitCare account for every Splitwise member.'), { statusCode: 400 });
+    throw Object.assign(new Error('Choose a Splitpayerly account for every Splitwise member.'), { statusCode: 400 });
   }
   res.status(201).json({
     data: await importSplitwiseCsv({

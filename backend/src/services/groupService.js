@@ -45,7 +45,7 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 			[identifier],
 		);
 		if (!result.rowCount) {
-			throw Object.assign(new Error(`No SplitCare user found with username or email "${identifier}"`), { statusCode: 404 });
+			throw Object.assign(new Error(`No Splitpayerly user found with username or email "${identifier}"`), { statusCode: 404 });
 		}
 		if (result.rowCount > 1) {
 			throw Object.assign(new Error(`The username or email "${identifier}" matches more than one user`), { statusCode: 409 });
@@ -107,7 +107,7 @@ export const addGroupMember = async ({ groupId, requesterId, identifier }) => wi
 		[normalizedIdentifier],
 	);
 	if (!targetResult.rowCount) {
-		throw Object.assign(new Error('No SplitCare account was found with that username or email'), { statusCode: 404 });
+		throw Object.assign(new Error('No Splitpayerly account was found with that username or email'), { statusCode: 404 });
 	}
 	const targetId = targetResult.rows[0]._id;
 	if (targetId === requesterId) {

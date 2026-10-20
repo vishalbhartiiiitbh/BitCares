@@ -92,7 +92,7 @@ test('applies payment balance deltas in the direction that reduces the payer deb
   assert.equal(splitwisePaymentBalanceDelta('z-member', 'a-member', 32600), -32600);
 });
 
-test('requires a distinct valid SplitCare account for each CSV member', () => {
+test('requires a distinct valid Splitpayerly account for each CSV member', () => {
   const memberNames = ['Alice', 'Bob'];
   const aliceId = '33f3c393-1ca0-4a9c-9429-744831920e31';
   const bobId = 'cb4be5f4-1d61-46f1-a112-fca5dc790d27';
@@ -103,11 +103,11 @@ test('requires a distinct valid SplitCare account for each CSV member', () => {
   );
   assert.throws(
     () => validateSplitwiseMemberMappings(memberNames, { Alice: aliceId, Bob: aliceId }),
-    /Each Splitwise member must map to a different SplitCare group member/,
+    /Each Splitwise member must map to a different Splitpayerly group member/,
   );
   assert.throws(
     () => validateSplitwiseMemberMappings(memberNames, { Alice: aliceId }),
-    /Choose a SplitCare group member for "Bob"/,
+    /Choose a Splitpayerly group member for "Bob"/,
   );
 });
 

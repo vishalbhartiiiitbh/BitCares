@@ -11,7 +11,7 @@ import {
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 
-const categoryForSplitCare = (category) => {
+const categoryForSplitpayerly = (category) => {
   const normalized = category.trim().toLocaleLowerCase();
   if (['groceries', 'dining out', 'food', 'liquor'].includes(normalized)) return 'Food and drink';
   if (['rent', 'household supplies', 'home'].includes(normalized)) return 'Home';
@@ -96,7 +96,7 @@ export const previewSplitwiseImport = async ({ groupId, userId, csvText }) => {
 
 /**
  * Import a validated Splitwise export as dated group expenses and payment records.
- * Mappings associate each Splitwise member column with a current member's SplitCare user ID.
+ * Mappings associate each Splitwise member column with a current member's Splitpayerly user ID.
  * @param {{ groupId: string, userId: string, csvText: string, memberMappings: Record<string, string> }} input Import request details.
  */
 export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappings }) => {
@@ -126,7 +126,7 @@ export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappi
       [groupId, mappedIds],
     );
     if (memberResult.rowCount !== mappedIds.length) {
-      throw Object.assign(new Error('Every mapped SplitCare account must already belong to this group. Add missing members, then retry the import.'), { statusCode: 400 });
+      throw Object.assign(new Error('Every mapped Splitpayerly account must already belong to this group. Add missing members, then retry the import.'), { statusCode: 400 });
     }
 
     const importRecord = await client.query(
@@ -159,7 +159,7 @@ export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappi
         const payer = balances.find((balance) => balance.cents > 0);
         const payee = balances.find((balance) => balance.cents < 0);
         if (!payer || !payee || payer.userId === payee.userId) {
-          throw Object.assign(new Error(`Row ${transaction.rowNumber}: map the payment's payer and recipient to different SplitCare accounts.`), { statusCode: 400 });
+          throw Object.assign(new Error(`Row ${transaction.rowNumber}: map the payment's payer and recipient to different Splitpayerly accounts.`), { statusCode: 400 });
         }
         const details = `Splitwise payment imported: ${transaction.description}`;
         addBalanceDelta(
@@ -194,7 +194,7 @@ export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappi
           ? `${transaction.description} (Splitwise import; paid by ${payerName})`.slice(0, 500)
           : transaction.description.slice(0, 500);
         const amount = centsToAmount(allocation.cents);
-        const category = categoryForSplitCare(transaction.sourceCategory);
+        const category = categoryForSplitpayerly(transaction.sourceCategory);
         const expenseId = randomUUID();
         importedExpenses.push([
           expenseId,

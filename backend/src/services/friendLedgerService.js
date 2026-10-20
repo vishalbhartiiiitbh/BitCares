@@ -548,7 +548,7 @@ export const settleFriendBalances = async ({
        VALUES ($1,$2,$3,'PAYMENT_RECEIVED')`,
       [payeeId, details, payerId],
     );
-    await queueEmailNotification(client, payeeId, 'paymentReceived', 'You received a SplitCare payment', details);
+    await queueEmailNotification(client, payeeId, 'paymentReceived', 'You received a Splitpayerly payment', details);
     return { ...settlement.rows[0], allocations };
   });
 };

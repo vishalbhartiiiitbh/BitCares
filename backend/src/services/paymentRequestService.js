@@ -93,7 +93,7 @@ export const createPaymentRequest = async ({
                  read_at AS "readAt"`,
       [memberId, groupId, details, requesterId],
     );
-    await queueEmailNotification(client, memberId, 'expenseDue', 'SplitCare payment reminder', details);
+    await queueEmailNotification(client, memberId, 'expenseDue', 'Splitpayerly payment reminder', details);
     const activity = activityResult.rows[0];
     activity.paidByName = requesterName;
     activity.paidByUsername = requester?.username;

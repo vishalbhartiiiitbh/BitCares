@@ -129,7 +129,7 @@ export const recordSettlement = async ({
        VALUES ($1, $2, $3, $4, 'PAYMENT_RECEIVED')`,
       [payeeId, groupId, activityDetails, payerId],
     );
-    await queueEmailNotification(client, payeeId, 'paymentReceived', 'You received a SplitCare payment', activityDetails);
+    await queueEmailNotification(client, payeeId, 'paymentReceived', 'You received a Splitpayerly payment', activityDetails);
     return result.rows[0];
   });
 };

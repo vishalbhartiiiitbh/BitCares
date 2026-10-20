@@ -39,7 +39,7 @@ export const recordGroupActivity = async (client, {
   );
   const preference = emailPreferencesByActivity[activityType];
   if (preference) {
-    const subject = activityType.startsWith('EXPENSE_') ? 'SplitCare expense update' : 'SplitCare group update';
+    const subject = activityType.startsWith('EXPENSE_') ? 'Splitpayerly expense update' : 'Splitpayerly group update';
     for (const recipient of recipients.rows) {
       await queueEmailNotification(client, recipient.user_id, preference, subject, details);
     }

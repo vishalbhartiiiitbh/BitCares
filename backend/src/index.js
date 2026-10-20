@@ -9,7 +9,7 @@ connectDB()
   .then(() => {
     startEmailNotificationWorker();
     app.listen(port, () => {
-      console.log(`SplitCare API listening on port ${port}`);
+      console.log(`Splitpayerly API listening on port ${port}`);
     });
   })
   .catch((error) => {

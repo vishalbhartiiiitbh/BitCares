@@ -133,8 +133,8 @@ const queueMonthlySummaries = async () => {
         [
           recipient.userId,
           user.rows[0].email,
-          `Your SplitCare activity summary for ${monthName}`,
-          `Your SplitCare activity for ${monthName}:\n\nExpenses you participated in: ${expenseCount}\nTotal you paid: ${paidTotal}\n\nOpen SplitCare to review your groups, expenses, and balances.`,
+          `Your Splitpayerly activity summary for ${monthName}`,
+          `Your Splitpayerly activity for ${monthName}:\n\nExpenses you participated in: ${expenseCount}\nTotal you paid: ${paidTotal}\n\nOpen Splitpayerly to review your groups, expenses, and balances.`,
         ],
       );
     });

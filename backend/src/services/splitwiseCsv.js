@@ -109,7 +109,7 @@ export const parseSplitwiseCsv = (text) => {
     throw invalidCsv('The CSV must include a column for every Splitwise member.');
   }
   if (new Set(memberNames.map((name) => name.toLocaleLowerCase())).size !== memberNames.length) {
-    throw invalidCsv('Member column names must be unique so each one can be mapped to a SplitCare account.');
+    throw invalidCsv('Member column names must be unique so each one can be mapped to a Splitpayerly account.');
   }
 
   let summaryRows = 0;
@@ -184,14 +184,14 @@ export const parseSplitwiseCsv = (text) => {
 };
 
 /**
- * Validate that every CSV member maps to a distinct SplitCare account.
+ * Validate that every CSV member maps to a distinct Splitpayerly account.
  * @param {string[]} memberNames Splitwise member column names.
- * @param {Record<string, string>} memberMappings Member-name to SplitCare user-ID mapping.
- * @returns {string[]} Mapped SplitCare user IDs in CSV member order.
+ * @param {Record<string, string>} memberMappings Member-name to Splitpayerly user-ID mapping.
+ * @returns {string[]} Mapped Splitpayerly user IDs in CSV member order.
  */
 export const validateSplitwiseMemberMappings = (memberNames, memberMappings) => {
   if (!memberMappings || typeof memberMappings !== 'object' || Array.isArray(memberMappings)) {
-    throw invalidCsv('Map every Splitwise member to a SplitCare group member.');
+    throw invalidCsv('Map every Splitwise member to a Splitpayerly group member.');
   }
 
   const mappedIds = memberNames.map((name) => memberMappings[name]);
@@ -199,11 +199,11 @@ export const validateSplitwiseMemberMappings = (memberNames, memberMappings) => 
     typeof mappedIds[index] !== 'string' || !UUID_PATTERN.test(mappedIds[index])
   ));
   if (missingOrInvalid) {
-    throw invalidCsv(`Choose a SplitCare group member for "${missingOrInvalid}".`);
+    throw invalidCsv(`Choose a Splitpayerly group member for "${missingOrInvalid}".`);
   }
   const normalizedIds = mappedIds.map((id) => id.toLowerCase());
   if (new Set(normalizedIds).size !== normalizedIds.length) {
-    throw invalidCsv('Each Splitwise member must map to a different SplitCare group member.');
+    throw invalidCsv('Each Splitwise member must map to a different Splitpayerly group member.');
   }
   return normalizedIds;
 };
@@ -269,7 +269,7 @@ export const allocateSplitwiseExpense = (transaction, balances) => {
 };
 
 /**
- * Return the signed ledger change for a payment using SplitCare's sorted-pair convention.
+ * Return the signed ledger change for a payment using Splitpayerly's sorted-pair convention.
  * A positive balance means the second member owes the first, so a payer in the first
  * position increases the pair balance while a payer in the second position decreases it.
  * @param {string} payerId Member who made the payment.

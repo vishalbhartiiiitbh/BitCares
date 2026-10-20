@@ -628,10 +628,10 @@ function App() {
   useEffect(() => {
     const isPrivateView = Boolean(user || showAuth);
     document.title = user
-      ? "SplitCare | Shared expenses"
+      ? "Splitpayerly | Shared expenses"
       : showAuth
-        ? `${mode === "reset" ? "Reset your password" : mode === "register" ? "Create an account" : "Sign in"} | SplitCare`
-        : "SplitCare | Shared expenses, handled";
+        ? `${mode === "reset" ? "Reset your password" : mode === "register" ? "Create an account" : "Sign in"} | Splitpayerly`
+        : "Splitpayerly | Shared expenses, handled";
     document.querySelector('meta[name="robots"]')?.setAttribute(
       "content",
       isPrivateView ? "noindex, nofollow" : "index, follow, max-image-preview:large",
@@ -829,7 +829,7 @@ function App() {
           <Brand />
           <nav aria-label="Main navigation">
             <a href="#how-it-works">How it works</a>
-            <a href="#features">Why SplitCare</a>
+            <a href="#features">Why Splitpayerly</a>
           </nav>
           <div className="landing-nav-actions">
             <button className="landing-login" type="button" onClick={() => openAuth("login")}>Log in</button>
@@ -840,8 +840,8 @@ function App() {
         {(friendInviteCode || referralCode) && (
           <div className="landing-invite-banner" role="status">
             {referralCode
-              ? `You’ve been invited by ${referrerUsername || "a SplitCare user"}. Sign up to connect and earn 10 points.`
-              : "You’ve been invited to connect on SplitCare. Sign in or create an account to continue."}
+              ? `You’ve been invited by ${referrerUsername || "a Splitpayerly user"}. Sign up to connect and earn 10 points.`
+              : "You’ve been invited to connect on Splitpayerly. Sign in or create an account to continue."}
           </div>
         )}
 
@@ -859,7 +859,7 @@ function App() {
             <div className="landing-trust-note"><span aria-hidden="true">✓</span> Keep shared spending clear, simple, and in one place.</div>
           </div>
 
-          <div className="landing-hero-art" aria-label="Example SplitCare group balance overview">
+          <div className="landing-hero-art" aria-label="Example Splitpayerly group balance overview">
             <div className="landing-orbit landing-orbit-one" />
             <div className="landing-orbit landing-orbit-two" />
             <div className="landing-balance-card">
@@ -936,7 +936,7 @@ function App() {
         <footer className="landing-footer">
           <Brand />
           <span>Shared money, less friction.</span>
-          <button type="button" onClick={() => openAuth("login")}>Log in to SplitCare <span aria-hidden="true">↗</span></button>
+          <button type="button" onClick={() => openAuth("login")}>Log in to Splitpayerly <span aria-hidden="true">↗</span></button>
         </footer>
       </main>
     );
@@ -983,7 +983,7 @@ function App() {
           {mode !== "reset" && <button className="auth-back-home" type="button" onClick={() => setShowAuth(false)}>← Back to home</button>}
           {(friendInviteCode || referralCode) && <p className="friend-page-message" role="status">
             {referralCode
-              ? `You were invited by ${referrerUsername || 'a SplitCare user'}. Create an account to receive 10 referral points and add them as a friend.`
+              ? `You were invited by ${referrerUsername || 'a Splitpayerly user'}. Create an account to receive 10 referral points and add them as a friend.`
               : 'Sign in or create an account to connect with the person who shared this friend link.'}
           </p>}
           {(mode === "login" || mode === "register") && <div className="mode-tabs" role="tablist">
@@ -1096,36 +1096,38 @@ function App() {
                   </label>
                 )}
                 {!verifiedEmailToken && (
-                  <button className="text-button" type="button" onClick={verifyRegistrationEmail} disabled={busy || (registrationCodeSent && registrationCode.length !== 6)}>
-                    {busy ? "Please wait…" : registrationCodeSent ? "Verify email code" : "Send email verification code"}
-                  </button>
-                )}
-                {registrationCodeSent && !verifiedEmailToken && (
-                  <button
-                    className="text-button"
-                    type="button"
-                    onClick={async () => {
-                      setBusy(true);
-                      setMessage("");
-                      try {
-                        const data = await apiRequest("/users/register/send-code", {
-                          method: "POST",
-                          body: JSON.stringify({ email: form.email }),
-                        });
-                        setRegistrationCode("");
-                        setMessage(data.message);
-                        setMessageIsSuccess(true);
-                      } catch (error) {
-                        setMessage(error.message);
-                        setMessageIsSuccess(false);
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                    disabled={busy}
-                  >
-                    Resend code
-                  </button>
+                  <div className={`registration-verification-actions ${registrationCodeSent ? "code-sent" : ""}`}>
+                    <button className="verification-action-primary" type="button" onClick={verifyRegistrationEmail} disabled={busy || (registrationCodeSent && registrationCode.length !== 6)}>
+                      {busy ? "Please wait…" : registrationCodeSent ? "Verify email code" : "Send email verification code"}
+                    </button>
+                    {registrationCodeSent && (
+                      <button
+                        className="verification-action-secondary"
+                        type="button"
+                        onClick={async () => {
+                          setBusy(true);
+                          setMessage("");
+                          try {
+                            const data = await apiRequest("/users/register/send-code", {
+                              method: "POST",
+                              body: JSON.stringify({ email: form.email }),
+                            });
+                            setRegistrationCode("");
+                            setMessage(data.message);
+                            setMessageIsSuccess(true);
+                          } catch (error) {
+                            setMessage(error.message);
+                            setMessageIsSuccess(false);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                        disabled={busy}
+                      >
+                        {busy ? "Sending…" : "Resend code"}
+                      </button>
+                    )}
+                  </div>
                 )}
                 {verifiedEmailToken && <p className="success-message">Email verified.</p>}
               </>
@@ -1154,7 +1156,7 @@ function App() {
                 {busy
                   ? "Please wait…"
                   : mode === "login"
-                    ? "Enter SplitCare →"
+                    ? "Enter Splitpayerly →"
                     : mode === "register"
                       ? "Create my account →"
                       : mode === "forgot"
@@ -1176,7 +1178,7 @@ function App() {
 function Brand() {
   return (
     <div className="brand">
-      <span className="brand-mark">÷</span><span className="brand-name">splitcare</span>
+      <span className="brand-mark">÷</span><span className="brand-name">splitpayerly</span>
     </div>
   );
 }
@@ -1644,7 +1646,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
         {settlementOpen && <section className="friend-history-settlement" ref={settlementPanelRef} id="friend-settlement-panel">
           <div className="friend-history-section-heading">
             <div><p className="eyebrow">PAYMENTS</p><h2>Settle balances</h2></div>
-            <button type="button" className="friend-history-back" onClick={() => setSettlementOpen(false)}>Close</button>
+            <button type="button" className="friend-history-settlement-close" onClick={() => setSettlementOpen(false)}>Close</button>
           </div>
           <form onSubmit={saveSettlement}>
             <fieldset className="friend-settlement-modes">
@@ -2182,7 +2184,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       // A raw code is also accepted for scanners that return QR text directly.
     }
     if (!code) {
-      setFriendQrError('That QR code is not a SplitCare friend invite.');
+      setFriendQrError('That QR code is not a Splitpayerly friend invite.');
       return;
     }
     void acceptFriendInvite(code);
@@ -2220,8 +2222,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     }
     try {
       await navigator.share({
-        title: 'Join me on SplitCare',
-        text: 'Create a SplitCare account using my referral link. We both earn 10 points.',
+        title: 'Join me on Splitpayerly',
+        text: 'Create a Splitpayerly account using my referral link. We both earn 10 points.',
         url: referralDetails.url,
       });
     } catch (error) {
@@ -2240,8 +2242,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     }
     try {
       await navigator.share({
-        title: 'Connect with me on SplitCare',
-        text: 'Use my SplitCare friend link to connect directly.',
+        title: 'Connect with me on Splitpayerly',
+        text: 'Use my Splitpayerly friend link to connect directly.',
         url: friendInvite.url,
       });
     } catch (error) {
@@ -3464,8 +3466,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             <div className="side-heading">
               <span>GROUPS</span>
               <span className="side-heading-actions">
-                <button onClick={openGroupForm}>+ add</button>
-                <button onClick={() => setShowJoinForm(true)}>join</button>
+                <button className="group-entry-button group-entry-button-compact group-entry-create" type="button" onClick={openGroupForm} aria-label="Create a new group">+ Add</button>
+                <button className="group-entry-button group-entry-button-compact group-entry-join" type="button" onClick={() => setShowJoinForm(true)} aria-label="Join a group with a code">Join</button>
               </span>
             </div>
             {groups.length ? (
@@ -3725,13 +3727,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             </div>
             <div className="action-row">
               <button
-                className="quiet-button"
+                className="group-entry-button group-entry-create"
+                type="button"
                 onClick={openGroupForm}
               >
                 + New group
               </button>
               <button
-                className="quiet-button"
+                className="group-entry-button group-entry-join"
+                type="button"
                 onClick={() => setShowJoinForm(true)}
               >
                 Join with code
@@ -3992,7 +3996,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                     autoComplete="off"
                   />
                 </label>
-                <p className="modal-help group-member-help">The person must have a SplitCare account. You’ll be added to the group automatically.</p>
+                <p className="modal-help group-member-help">The person must have a Splitpayerly account. You’ll be added to the group automatically.</p>
                 {groupError && <p className="error-message">{groupError}</p>}
                 <button className="submit-button" disabled={groupBusy}>{groupBusy ? 'Creating…' : 'Create group'}</button>
               </form>
@@ -4012,7 +4016,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           )}
           {showAddFriend && (
             <Modal title="Add a friend" onClose={() => setShowAddFriend(false)}>
-              <p className="modal-help">Send a request using their username or the email address they registered with on SplitCare. They will appear in your friends list after accepting.</p>
+              <p className="modal-help">Send a request using their username or the email address they registered with on Splitpayerly. They will appear in your friends list after accepting.</p>
               <form onSubmit={sendFriendRequest}>
                 <label>
                   Find by
@@ -4064,7 +4068,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           {showReferralModal && (
             <Modal title="Refer a friend" onClose={() => setShowReferralModal(false)}>
               <div className="friend-qr-modal">
-                <p className="modal-help">Invite a friend to create a SplitCare account. You both earn 10 points after they finish signup and verify their email.</p>
+                <p className="modal-help">Invite a friend to create a Splitpayerly account. You both earn 10 points after they finish signup and verify their email.</p>
                 {referralBusy && <p className="modal-help">Loading your referral link…</p>}
                 {referralDetails && (
                   <>
@@ -4092,7 +4096,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               }
             }}>
               <div className="friend-qr-modal">
-                <p className="modal-help">Allow camera access and scan another user’s active SplitCare QR code to connect directly.</p>
+                <p className="modal-help">Allow camera access and scan another user’s active Splitpayerly QR code to connect directly.</p>
                 <FriendQrScanner key={friendScannerKey} onScan={handleFriendQrScan} onError={setFriendQrError} />
                 {friendQrBusy && <p className="modal-help">Connecting…</p>}
                 {friendQrError && <p className="error-message" role="alert">{friendQrError}</p>}
@@ -4129,7 +4133,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           {showExpenseForm && (
             <Modal
               title={editingExpenseId ? 'Edit expense' : 'Add an expense'}
-              className={selectedGroup ? 'group-expense-modal' : friendExpenseTarget ? 'friend-expense-modal' : ''}
+              className={`expense-entry-modal ${selectedGroup ? 'group-expense-modal' : friendExpenseTarget ? 'friend-expense-modal' : ''}`}
               onClose={() => setShowExpenseForm(false)}
             >
               <form className="expense-entry-form" onSubmit={addExpense}>
@@ -4497,7 +4501,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           {showEmailSettings && (
             <Modal title="Email notification settings" onClose={() => setShowEmailSettings(false)}>
               <div className="email-notification-settings">
-                <p>Choose which SplitCare activity updates you want delivered to {user.email}.</p>
+                <p>Choose which Splitpayerly activity updates you want delivered to {user.email}.</p>
                 {emailSettingsBusy && <p className="modal-help">Loading email settings…</p>}
                 <fieldset disabled={emailSettingsBusy}>
                   <legend>Groups and friends</legend>
@@ -4516,7 +4520,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 <fieldset disabled={emailSettingsBusy}>
                   <legend>News and updates</legend>
                   <label><input type="checkbox" checked={emailNotificationPreferences.monthlySummary} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, monthlySummary: event.target.checked }))} /> Monthly summary of my activity</label>
-                  <label><input type="checkbox" checked={emailNotificationPreferences.productUpdates} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, productUpdates: event.target.checked }))} /> Major SplitCare news and updates</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.productUpdates} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, productUpdates: event.target.checked }))} /> Major Splitpayerly news and updates</label>
                   <p>Product announcements are not currently published by the app.</p>
                 </fieldset>
                 {emailSettingsError && <p className="error-message" role="alert">{emailSettingsError}</p>}
@@ -4609,7 +4613,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           <div className="plus-mark">✦</div>
           <h2>Get 1–2 years of membership.</h2>
           <p>
-            The first 1,000 early registrants can get 1–2 years of SplitCare
+            The first 1,000 early registrants can get 1–2 years of Splitpayerly
             membership when paid plans launch. Refer friends to earn points
             toward claiming a membership.
           </p>
@@ -4769,11 +4773,11 @@ function GroupDetails({
   const submitSplitwiseImport = async () => {
     if (!splitwiseFile || !splitwisePreview) return;
     if (splitwisePreview.memberNames.some((name) => !splitwiseMemberMappings[name])) {
-      setSplitwiseError('Choose a SplitCare group member for every Splitwise member before importing.');
+      setSplitwiseError('Choose a Splitpayerly group member for every Splitwise member before importing.');
       return;
     }
     if (new Set(Object.values(splitwiseMemberMappings)).size !== splitwisePreview.memberNames.length) {
-      setSplitwiseError('Map each Splitwise member to a different SplitCare group member.');
+      setSplitwiseError('Map each Splitwise member to a different Splitpayerly group member.');
       return;
     }
     const confirmed = window.confirm(
@@ -4861,7 +4865,7 @@ function GroupDetails({
   const printExpenseSummary = () => {
     const reportWindow = window.open('', '_blank');
     if (!reportWindow) {
-      window.alert('Allow pop-ups for SplitCare to print or save the group summary as a PDF.');
+      window.alert('Allow pop-ups for Splitpayerly to print or save the group summary as a PDF.');
       return;
     }
     reportWindow.opener = null;
@@ -5417,7 +5421,7 @@ function GroupDetails({
                       </p>
                       {splitwisePreview.multiPayerExpenses > 0 && (
                         <p className="modal-help">
-                          {splitwisePreview.multiPayerExpenses} expense(s) have multiple payers. Splitwise does not include their original individual shares, so exact pairwise balances cannot be recovered for those expenses. SplitCare estimates those shares while preserving the transaction totals and each member's net balance.
+                          {splitwisePreview.multiPayerExpenses} expense(s) have multiple payers. Splitwise does not include their original individual shares, so exact pairwise balances cannot be recovered for those expenses. Splitpayerly estimates those shares while preserving the transaction totals and each member's net balance.
                         </p>
                       )}
                       {splitwisePreview.memberNames.map((splitwiseName) => (
@@ -5444,7 +5448,7 @@ function GroupDetails({
                             ))}
                           </select>
                           {splitwiseMemberMappings[splitwiseName] && (
-                            <small>Mapped SplitCare user ID: {splitwiseMemberMappings[splitwiseName]}</small>
+                            <small>Mapped Splitpayerly user ID: {splitwiseMemberMappings[splitwiseName]}</small>
                           )}
                         </label>
                       ))}
@@ -6033,7 +6037,7 @@ function Modal({ title, onClose, children, className = '', closeOnBackdrop = tru
         <button className="modal-close" onClick={onClose} aria-label="Close">
           ×
         </button>
-        <p className="eyebrow">SplitCare</p>
+        <p className="eyebrow">Splitpayerly</p>
         <h2>{title}</h2>
         {children}
       </section>

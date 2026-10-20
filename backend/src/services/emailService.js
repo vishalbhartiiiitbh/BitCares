@@ -25,9 +25,9 @@ export const sendPasswordResetEmail = async (email, resetUrl) => {
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     to: email,
-    subject: 'Reset your SplitCare password',
-    text: `Use this link to reset your SplitCare password. It expires in 10 minutes and can only be used once:\n\n${resetUrl}\n\nIf you did not request a password reset, you can ignore this email.`,
-    html: `<p>Use the link below to reset your SplitCare password. It expires in 10 minutes and can only be used once.</p><p><a href="${resetUrl}">Reset your password</a></p><p>If you did not request a password reset, you can ignore this email.</p>`,
+    subject: 'Reset your Splitpayerly password',
+    text: `Use this link to reset your Splitpayerly password. It expires in 10 minutes and can only be used once:\n\n${resetUrl}\n\nIf you did not request a password reset, you can ignore this email.`,
+    html: `<p>Use the link below to reset your Splitpayerly password. It expires in 10 minutes and can only be used once.</p><p><a href="${resetUrl}">Reset your password</a></p><p>If you did not request a password reset, you can ignore this email.</p>`,
   });
 };
 
@@ -38,9 +38,9 @@ export const sendWelcomeEmail = async (email, fullName) => {
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     to: email,
-    subject: 'Welcome to SplitCare',
-    text: `Hi ${name},\n\nWelcome to SplitCare! Your account is ready. You can now organize shared expenses, track balances, and settle up with friends.\n\nGet started: ${frontendUrl}\n\nThe SplitCare team`,
-    html: `<p>Hi ${name},</p><p>Welcome to SplitCare! Your account is ready. You can now organize shared expenses, track balances, and settle up with friends.</p><p><a href="${frontendUrl}">Get started with SplitCare</a></p><p>The SplitCare team</p>`,
+    subject: 'Welcome to Splitpayerly',
+    text: `Hi ${name},\n\nWelcome to Splitpayerly! Your account is ready. You can now organize shared expenses, track balances, and settle up with friends.\n\nGet started: ${frontendUrl}\n\nThe Splitpayerly team`,
+    html: `<p>Hi ${name},</p><p>Welcome to Splitpayerly! Your account is ready. You can now organize shared expenses, track balances, and settle up with friends.</p><p><a href="${frontendUrl}">Get started with Splitpayerly</a></p><p>The Splitpayerly team</p>`,
   });
 };
 
@@ -59,10 +59,10 @@ export const sendEmailVerificationCode = async (email, code, purpose) => {
   const isDeletion = purpose === 'delete_account';
   const isEmailChange = purpose.startsWith('email_change');
   const subject = isDeletion
-    ? 'Confirm your SplitCare account deletion'
+    ? 'Confirm your Splitpayerly account deletion'
     : isEmailChange
-      ? 'Verify your SplitCare email change'
-      : 'Verify your SplitCare email';
+      ? 'Verify your Splitpayerly email change'
+      : 'Verify your Splitpayerly email';
   const action = isDeletion
     ? 'confirm your account deletion'
     : isEmailChange

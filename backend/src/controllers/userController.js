@@ -441,8 +441,8 @@ export const changeEmail = async (req, res) => {
         [
           req.user._id,
           newEmail,
-          'Your SplitCare email address was updated',
-          `Your SplitCare account email address was successfully changed from ${oldEmail} to ${newEmail}.\n\nIf you did not make this change, please contact SplitCare support immediately.`,
+          'Your Splitpayerly email address was updated',
+          `Your Splitpayerly account email address was successfully changed from ${oldEmail} to ${newEmail}.\n\nIf you did not make this change, please contact Splitpayerly support immediately.`,
         ],
       );
       await client.query(

@@ -1,8 +1,8 @@
 {
-  "name": "splitcare-backend",
+  "name": "splitpayerly-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "SplitCare API backend",
+  "description": "Splitpayerly API backend",
   "main": "src/index.js",
   "type": "module",
   "engines": {
