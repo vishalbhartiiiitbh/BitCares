@@ -4,6 +4,7 @@ const emailPreferencesByActivity = {
   GROUP_CREATED: 'groupAdded',
   MEMBER_ADDED: 'groupAdded',
   MEMBER_JOINED: 'groupAdded',
+  WHITEBOARD_UPDATED: 'whiteboardUpdated',
   EXPENSE_ADDED: 'expenseAdded',
   EXPENSE_UPDATED: 'expenseChanged',
   EXPENSE_DELETED: 'expenseChanged',

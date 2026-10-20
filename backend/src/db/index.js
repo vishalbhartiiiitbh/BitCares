@@ -72,7 +72,7 @@ const connectDB = async () => {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_count INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notification_preferences JSONB NOT NULL DEFAULT
-      '{"groupAdded":false,"friendAdded":false,"expenseAdded":false,"expenseChanged":false,"expenseComment":false,"expenseDue":false,"paymentReceived":false,"monthlySummary":false,"productUpdates":false}'::jsonb;
+      '{"groupAdded":false,"whiteboardUpdated":false,"friendAdded":false,"expenseAdded":false,"expenseChanged":false,"expenseComment":false,"expenseDue":false,"paymentReceived":false,"monthlySummary":false,"productUpdates":false}'::jsonb;
 
     CREATE TABLE IF NOT EXISTS account_email_codes (
       email TEXT NOT NULL,

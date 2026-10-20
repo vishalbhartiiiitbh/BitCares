@@ -3,6 +3,7 @@ import { sendNotificationEmail } from './emailService.js';
 
 export const EMAIL_NOTIFICATION_PREFERENCES = Object.freeze({
   groupAdded: false,
+  whiteboardUpdated: false,
   friendAdded: false,
   expenseAdded: false,
   expenseChanged: false,

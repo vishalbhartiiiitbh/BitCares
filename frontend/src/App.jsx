@@ -5,6 +5,7 @@ const API_URL = `${import.meta.env.VITE_API_URL}/api` || "/api";
 const emptyForm = { username: "", email: "", fullnamae: "", password: "" };
 const defaultEmailNotificationPreferences = {
   groupAdded: false,
+  whiteboardUpdated: false,
   friendAdded: false,
   expenseAdded: false,
   expenseChanged: false,
@@ -4341,6 +4342,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 <fieldset disabled={emailSettingsBusy}>
                   <legend>Groups and friends</legend>
                   <label><input type="checkbox" checked={emailNotificationPreferences.groupAdded} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, groupAdded: event.target.checked }))} /> When someone adds me to a group</label>
+                  <label><input type="checkbox" checked={emailNotificationPreferences.whiteboardUpdated} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, whiteboardUpdated: event.target.checked }))} /> When someone updates a group whiteboard</label>
                   <label><input type="checkbox" checked={emailNotificationPreferences.friendAdded} onChange={(event) => setEmailNotificationPreferences((current) => ({ ...current, friendAdded: event.target.checked }))} /> When someone sends me a friend request</label>
                 </fieldset>
                 <fieldset disabled={emailSettingsBusy}>
@@ -5125,7 +5127,6 @@ function GroupDetails({
               <section>
                 <div className="group-section-heading">
                   <div><p className="eyebrow">YOUR SHARE</p><h3>Your group balances</h3></div>
-                  <button className="group-inline-action" onClick={onSettle} disabled={settlementsBusy}>{settlementsBusy ? 'Calculating…' : 'Refresh settle-up plan'}</button>
                 </div>
                 {balancesBusy ? <p className="empty-state">Loading group balances…</p> : balances.length ? (
                   <div className="group-balances-list">
@@ -5148,16 +5149,6 @@ function GroupDetails({
                   </div>
                 ) : <p className="empty-state">You’re settled up in this group.</p>}
                 <SpendingInsights transactions={transactions} members={group.members || []} userId={user._id} />
-                <div className="settlement-plan">
-                  <h4>Suggested settlements</h4>
-                  <button className="group-inline-action" onClick={() => openSettlementForm()}>Record a payment</button>
-                  {settlementsBusy ? <p>Finding the simplest way to settle…</p> : settlements.length ? settlements.map((settlement, index) => (
-                    <div className="settlement-plan-row" key={`${settlement.from}-${settlement.to}-${settlement.currency}-${index}`}>
-                      <span><strong>{memberName(settlement.from)}</strong> pays <strong>{memberName(settlement.to)}</strong></span>
-                      <b>{settlement.currency} {Number(settlement.amount).toFixed(2)}</b>
-                    </div>
-                  )) : settlementError ? <p className="error-message">{settlementError}</p> : <p>Choose “Settle up” to calculate suggested payments, or this group may already be settled.</p>}
-                </div>
               </section>
             )}
             {activeTab === 'settings' && (
