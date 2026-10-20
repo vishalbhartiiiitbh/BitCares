@@ -1689,12 +1689,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [editingExpenseId, setEditingExpenseId] = useState('');
   const [clearExpenseProof, setClearExpenseProof] = useState(false);
   const [groupName, setGroupName] = useState('');
+  const [groupCurrency, setGroupCurrency] = useState(user.defaultCurrency || 'INR');
   const [groupCoverImage, setGroupCoverImage] = useState(null);
   const [groupSimplifyDebts, setGroupSimplifyDebts] = useState(false);
   const [groupMemberIds, setGroupMemberIds] = useState([]);
   const [groupMemberIdentifier, setGroupMemberIdentifier] = useState('');
   const [groupError, setGroupError] = useState('');
   const [groupBusy, setGroupBusy] = useState(false);
+  const [currencyOptions, setCurrencyOptions] = useState(['AUD', 'CAD', 'EUR', 'GBP', 'INR', 'USD']);
+  const [currencyOptionsError, setCurrencyOptionsError] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [showMobileNav, setShowMobileNav] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -1787,6 +1790,21 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       clearTimeout(timeout);
     };
   }, [profileForm.username, showProfile, user._id, accessToken]);
+
+  useEffect(() => {
+    let active = true;
+    apiRequest('/expenses/currencies', { headers: authHeaders })
+      .then((currencies) => {
+        if (active && Array.isArray(currencies) && currencies.length) {
+          setCurrencyOptions(currencies);
+          setCurrencyOptionsError('');
+        }
+      })
+      .catch((error) => {
+        if (active) setCurrencyOptionsError(`All currency options could not be loaded: ${error.message}`);
+      });
+    return () => { active = false; };
+  }, [accessToken]);
 
   useEffect(() => {
     Promise.all([
@@ -2248,11 +2266,18 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const closeGroupForm = () => {
     setShowGroupForm(false);
     setGroupName('');
+    setGroupCurrency(user.defaultCurrency || 'INR');
     setGroupCoverImage(null);
     setGroupSimplifyDebts(false);
     setGroupMemberIds([]);
     setGroupMemberIdentifier('');
     setGroupError('');
+  };
+
+  const openGroupForm = () => {
+    setGroupCurrency(user.defaultCurrency || 'INR');
+    setGroupError('');
+    setShowGroupForm(true);
   };
 
   const createGroup = async (event) => {
@@ -2270,6 +2295,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       body.set('memberIds', JSON.stringify(groupMemberIds));
       body.set('memberIdentifiers', JSON.stringify(groupMemberIdentifier.trim() ? [groupMemberIdentifier.trim()] : []));
       body.set('simplifyDebts', String(groupSimplifyDebts));
+      body.set('currency', groupCurrency);
       if (groupCoverImage) body.set('coverImage', groupCoverImage);
       const group = await apiRequest("/groups", {
         method: "POST",
@@ -2279,6 +2305,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       setGroups((current) => [group, ...current]);
       setShowGroupForm(false);
       setGroupName('');
+      setGroupCurrency(user.defaultCurrency || 'INR');
       setGroupCoverImage(null);
       setGroupSimplifyDebts(false);
       setGroupMemberIds([]);
@@ -2460,7 +2487,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     setExpenseDraft({
       description: '',
       totalAmount: '',
-      currency: user.defaultCurrency || 'INR',
+      currency: group?.currency || user.defaultCurrency || 'INR',
       category: 'Uncategorized',
       subcategory: '',
       groupId,
@@ -2569,6 +2596,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     setExpenseDraft((current) => ({
       ...current,
       groupId,
+      currency: group?.currency || user.defaultCurrency || 'INR',
       paidBy: participantIds.includes(current.paidBy) ? current.paidBy : user._id,
       participantIds,
       splitValues: {},
@@ -2591,6 +2619,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     setExpenseDraft((current) => ({
       ...current,
       groupId: '',
+      currency: user.defaultCurrency || 'INR',
       paidBy: participantIds.includes(current.paidBy) ? current.paidBy : user._id,
       participantIds,
       splitValues: {},
@@ -2761,6 +2790,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       const body = new FormData();
       body.set('name', settings.name);
       body.set('simplifyDebts', String(settings.simplifyDebts));
+      body.set('currency', settings.currency);
       if (settings.coverImage) body.set('coverImage', settings.coverImage);
       if (settings.removeCoverImage) body.set('removeCoverImage', 'true');
       const { warning, ...updatedGroup } = await apiRequest(`/groups/${groupId}`, {
@@ -3288,7 +3318,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             <div className="side-heading">
               <span>GROUPS</span>
               <span className="side-heading-actions">
-                <button onClick={() => setShowGroupForm(true)}>+ add</button>
+                <button onClick={openGroupForm}>+ add</button>
                 <button onClick={() => setShowJoinForm(true)}>join</button>
               </span>
             </div>
@@ -3535,7 +3565,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             <div className="action-row">
               <button
                 className="quiet-button"
-                onClick={() => setShowGroupForm(true)}
+                onClick={openGroupForm}
               >
                 + New group
               </button>
@@ -3732,7 +3762,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               <div className="friend-invite-actions">
                 <button className="quiet-button" type="button" onClick={() => {
                   setShowGroupsChooser(false);
-                  setShowGroupForm(true);
+                  openGroupForm();
                 }}>Create a group</button>
                 <button className="quiet-button" type="button" onClick={() => {
                   setShowGroupsChooser(false);
@@ -3751,6 +3781,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   Group name
                   <input name="name" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Lisbon weekend" required />
                 </label>
+                <label>
+                  Group base currency
+                  <select value={groupCurrency} onChange={(event) => setGroupCurrency(event.target.value)}>
+                    {currencyOptions.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+                  </select>
+                  <small>All group expenses and balances are stored in this currency. Members can enter expenses in other currencies.</small>
+                </label>
+                {currencyOptionsError && <p className="error-message" role="alert">{currencyOptionsError}</p>}
                 <label>
                   Group profile picture (optional)
                   <input type="file" accept="image/*" onChange={(event) => setGroupCoverImage(event.target.files?.[0] || null)} />
@@ -3939,11 +3977,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   <label>Amount<input value={expenseDraft.strategy === 'ITEMIZED' ? itemizedTotal.toFixed(2) : expenseDraft.totalAmount} onChange={(event) => updateExpenseDraft('totalAmount', event.target.value)} type="number" min="0.01" step="0.01" placeholder="0.00" readOnly={expenseDraft.strategy === 'ITEMIZED'} required /></label>
                   <label>Currency
                     <select value={expenseDraft.currency} onChange={(event) => updateExpenseDraft('currency', event.target.value)}>
-                      <option value="INR">INR ₹</option><option value="USD">USD $</option><option value="EUR">EUR €</option>
-                      <option value="GBP">GBP £</option><option value="CAD">CAD $</option><option value="AUD">AUD $</option>
+                      {[...new Set([expenseDraft.currency, ...currencyOptions])].map((currency) => (
+                        <option key={currency} value={currency}>{currency}</option>
+                      ))}
                     </select>
                   </label>
                 </div>
+                <p className="modal-help">This expense will be converted into the group base currency ({groups.find((group) => group._id === expenseDraft.groupId)?.currency || expenseDraft.currency}) before it affects balances.</p>
+                {currencyOptionsError && <p className="error-message" role="alert">{currencyOptionsError}</p>}
                 <div className="expense-category-picker">
                   <button
                     type="button"
@@ -4216,10 +4257,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 <label>Phone<input name="phone" value={profileForm.phone} onChange={updateProfileField} placeholder="Optional" /></label>
                 <label>Default currency
                   <select name="defaultCurrency" value={profileForm.defaultCurrency} onChange={updateProfileField}>
-                    <option value="INR">INR ₹</option><option value="USD">USD $</option><option value="EUR">EUR €</option>
-                    <option value="GBP">GBP £</option><option value="CAD">CAD $</option><option value="AUD">AUD $</option>
+                    {[...new Set([profileForm.defaultCurrency, ...currencyOptions])].map((currency) => (
+                      <option key={currency} value={currency}>{currency}</option>
+                    ))}
                   </select>
-                  <small>Friend balances are converted using the latest daily exchange rates.</small>
+                  <small>Used as the default when you create a group. Existing groups keep their selected base currency.</small>
+                  {currencyOptionsError && <small className="error-message">{currencyOptionsError}</small>}
                 </label>
                 <button className="password-update-toggle" type="button" aria-expanded={passwordUpdateEnabled} onClick={() => {
                   setPasswordUpdateEnabled((enabled) => !enabled);
@@ -4337,6 +4380,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               openSettlementOnLoad={settleGroupAutoOpenId === selectedGroup._id}
               settingsBusy={groupSettingsBusy}
               settingsError={groupSettingsError}
+              currencyOptions={currencyOptions}
+              currencyOptionsError={currencyOptionsError}
               addMemberBusy={addMemberBusy}
               addMemberError={addMemberError}
               friends={friends}
@@ -4406,7 +4451,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             membership when paid plans launch. Refer friends to earn points
             toward claiming a membership.
           </p>
-          <button onClick={() => setShowGroupForm(true)}>Create a group</button>
+          <button onClick={openGroupForm}>Create a group</button>
           <button onClick={() => setShowJoinForm(true)}>Join with code</button>
         </aside>}
       </div>
@@ -4472,6 +4517,8 @@ function GroupDetails({
   openSettlementOnLoad = false,
   settingsBusy,
   settingsError,
+  currencyOptions,
+  currencyOptionsError,
   addMemberBusy,
   addMemberError,
   friends,
@@ -4504,6 +4551,7 @@ function GroupDetails({
   const [whiteboardError, setWhiteboardError] = useState('');
   const [whiteboardSaved, setWhiteboardSaved] = useState(false);
   const [nameDraft, setNameDraft] = useState(group.name);
+  const [groupCurrencyDraft, setGroupCurrencyDraft] = useState(group.currency || 'INR');
   const [simplifyDebtsDraft, setSimplifyDebtsDraft] = useState(group.simplifyDebts !== false);
   const [coverImageDraft, setCoverImageDraft] = useState(null);
   const [removeCoverImage, setRemoveCoverImage] = useState(false);
@@ -4514,12 +4562,12 @@ function GroupDetails({
   const [friendRequestBusyId, setFriendRequestBusyId] = useState('');
   const [friendRequestError, setFriendRequestError] = useState('');
   const [settlementOpen, setSettlementOpen] = useState(false);
-  const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: 'INR', amount: '', note: '', paymentProof: null });
+  const [settlementDraft, setSettlementDraft] = useState({ payeeId: '', currency: group.currency || 'INR', amount: '', note: '', paymentProof: null });
   const [settlementSaveError, setSettlementSaveError] = useState('');
   const [settlementSaveBusy, setSettlementSaveBusy] = useState(false);
   const autoSettlementOpenedRef = useRef(false);
   const [paymentRequestOpen, setPaymentRequestOpen] = useState(false);
-  const [paymentRequestDraft, setPaymentRequestDraft] = useState({ memberId: '', amount: '', currency: 'INR', note: '' });
+  const [paymentRequestDraft, setPaymentRequestDraft] = useState({ memberId: '', amount: '', currency: group.currency || 'INR', note: '' });
   const [paymentRequestError, setPaymentRequestError] = useState('');
   const [paymentRequestBusy, setPaymentRequestBusy] = useState(false);
   const [splitwiseFile, setSplitwiseFile] = useState(null);
@@ -4865,7 +4913,7 @@ function GroupDetails({
   const openSettlementForm = () => {
     setSettlementDraft({
       payeeId: '',
-      currency: balances.find((balance) => balance.currency)?.currency || 'INR',
+      currency: group.currency || 'INR',
       amount: '',
       note: '',
       paymentProof: null,
@@ -4925,10 +4973,11 @@ function GroupDetails({
 
   useEffect(() => {
     setNameDraft(group.name);
+    setGroupCurrencyDraft(group.currency || 'INR');
     setSimplifyDebtsDraft(group.simplifyDebts !== false);
     setCoverImageDraft(null);
     setRemoveCoverImage(false);
-  }, [group._id, group.name, group.simplifyDebts, group.coverImageUrl]);
+  }, [group._id, group.name, group.simplifyDebts, group.coverImageUrl, group.currency]);
 
   useEffect(() => {
     const latestContent = whiteboard?.content || '';
@@ -4949,9 +4998,14 @@ function GroupDetails({
 
   const saveSettings = async (event) => {
     event.preventDefault();
+    if (isOwner && groupCurrencyDraft !== (group.currency || 'INR')
+      && !window.confirm(`Change the group currency from ${group.currency || 'INR'} to ${groupCurrencyDraft}? Existing financial history will be converted using current exchange rates.`)) {
+      return;
+    }
     const saved = await onSaveSettings({
       name: nameDraft.trim(),
       simplifyDebts: simplifyDebtsDraft,
+      currency: groupCurrencyDraft,
       coverImage: coverImageDraft,
       removeCoverImage,
     });
@@ -4977,7 +5031,7 @@ function GroupDetails({
             <div>
               <p className="eyebrow">GROUP</p>
               <h2>{group.name}</h2>
-              <span>{group.members?.length || 0} {(group.members?.length || 0) === 1 ? 'person' : 'people'}</span>
+              <span>{group.members?.length || 0} {(group.members?.length || 0) === 1 ? 'person' : 'people'} · Base currency {group.currency || 'INR'}</span>
             </div>
           </div>
           <div className="group-workspace-actions">
@@ -5129,6 +5183,17 @@ function GroupDetails({
                     </label>
                   )}
                   <label>Group name<input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength="120" required /></label>
+                  {isOwner && (
+                    <label>Group base currency
+                      <select value={groupCurrencyDraft} onChange={(event) => setGroupCurrencyDraft(event.target.value)} disabled={settingsBusy}>
+                        {[...new Set([groupCurrencyDraft, ...currencyOptions])].map((currency) => (
+                          <option key={currency} value={currency}>{currency}</option>
+                        ))}
+                      </select>
+                      <small>Changing this converts existing group balances, expenses, settlements, and payment history using current exchange rates.</small>
+                      {currencyOptionsError && <small className="error-message">{currencyOptionsError}</small>}
+                    </label>
+                  )}
                   <div className="group-settings-members">
                     <h4>Group members</h4>
                     {group.members?.map((member) => (
@@ -5292,7 +5357,10 @@ function GroupDetails({
                       ? <img src={balance.coverimage} alt="" />
                       : (balance.fullnamae || balance.username).slice(0, 1).toUpperCase()}
                   </span>
-                  <div><strong>{balance.fullnamae || balance.username}</strong><small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'owes you' : 'you owe'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small></div>
+                  <div>
+                    <strong>{balance.fullnamae || balance.username}</strong>
+                    <small className={amount > 0 ? 'balance-positive' : 'balance-negative'}>{amount > 0 ? 'owes you' : 'you owe'} {balance.currency || 'INR'} {Math.abs(amount).toFixed(2)}</small>
+                  </div>
                 </div>
               );
             })}
@@ -5393,9 +5461,7 @@ function GroupDetails({
             </label>
             <div className="group-settlement-amount-fields">
               <label>Currency
-                <select value={settlementDraft.currency} onChange={(event) => setSettlementDraft((current) => ({ ...current, currency: event.target.value }))}>
-                  {[...new Set(['INR', ...balances.map((balance) => balance.currency).filter(Boolean)])].map((currency) => <option key={currency}>{currency}</option>)}
-                </select>
+                <input value={group.currency || 'INR'} readOnly />
               </label>
               <label>Amount
                 <input type="number" min="0.01" step="0.01" value={settlementDraft.amount} onChange={(event) => setSettlementDraft((current) => ({ ...current, amount: event.target.value }))} required />
@@ -5477,6 +5543,9 @@ function ExpenseDetails({ expense, group, members, userId, accessToken, onClose,
             <p className="eyebrow">{group?.name || 'EXPENSE'}</p>
             <h2 id="expense-details-title">{expense.description}</h2>
             <strong>{expense.currency} {Number(expense.totalAmount).toFixed(2)}</strong>
+            {expense.originalCurrency && expense.originalCurrency !== expense.currency && (
+              <span>Entered as {expense.originalCurrency} {Number(expense.originalAmount).toFixed(2)} · rate {Number(expense.conversionRate).toFixed(6)}</span>
+            )}
             <span>Added by {expense.paidByName || expense.paidByUsername || 'a group member'} on {new Date(expense.createdAt).toLocaleDateString()}</span>
           </div>
         </div>
@@ -5682,6 +5751,8 @@ function GroupActivityList({
             }
             const isSettlement = ['SETTLEMENT', 'FRIEND_SETTLEMENT'].includes(transaction.type);
             const total = Number(transaction.totalAmount) || 0;
+            const originalTotal = Number(transaction.originalAmount ?? total) || 0;
+            const originalCurrency = transaction.originalCurrency || transaction.currency;
             const ownSplit = Number(transaction.splits?.find((split) => split.userId === userId)?.amountOwed || 0);
             const isPayer = transaction.paidBy === userId;
             const payerName = transaction.paidByName || transaction.paidByUsername || 'A member';
@@ -5761,13 +5832,19 @@ function GroupActivityList({
                 </div>
                 <div className="group-activity-amount">
                   <span>{isPayer ? 'you paid' : `${payerName} paid`}</span>
-                  <strong>{transaction.currency} {total.toFixed(2)}</strong>
+                  <strong>{originalCurrency} {originalTotal.toFixed(2)}</strong>
+                  {originalCurrency !== transaction.currency
+                    ? <small>≈ {transaction.currency} {total.toFixed(2)} group total</small>
+                    : null}
                 </div>
                 <div className={`group-activity-share ${shareClass}`}>
                   <span>{shareLabel}</span>
                   {shareAmount === null
                     ? <small>not involved</small>
-                    : <strong>{transaction.currency} {shareAmount.toFixed(2)}</strong>}
+                    : <>
+                      <strong>{transaction.currency} {shareAmount.toFixed(2)}</strong>
+                      {originalCurrency !== transaction.currency && <small>Group currency: {transaction.currency}</small>}
+                    </>}
                 </div>
               </article>
             );

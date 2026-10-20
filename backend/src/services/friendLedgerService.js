@@ -9,7 +9,6 @@ const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 // Friend and balance rows use the same canonical ordering for either user's perspective.
 const pairKey = (firstId, secondId) => [firstId, secondId].sort();
-const currencies = ['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD'];
 
 const assertFriends = async (client, firstId, secondId) => {
   if (!validId(firstId) || !validId(secondId) || firstId === secondId) {
@@ -296,8 +295,8 @@ export const settleFriendBalances = async ({
     || ![userId, friendId].includes(payerId)) {
     throw Object.assign(new Error('Choose a valid payer and friend'), { statusCode: 400 });
   }
-  if (!currencies.includes(currency)) {
-    throw Object.assign(new Error('Choose a supported payment currency'), { statusCode: 400 });
+  if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
+    throw Object.assign(new Error('Choose a valid three-letter payment currency code'), { statusCode: 400 });
   }
   if (!['selected', 'all'].includes(mode)) {
     throw Object.assign(new Error('Choose selected balances or all friend balances'), { statusCode: 400 });
@@ -306,7 +305,7 @@ export const settleFriendBalances = async ({
     throw Object.assign(new Error('Select at least one group balance to settle'), { statusCode: 400 });
   }
   if (mode === 'selected' && selections.some((selection) => (
-    !selection || !validId(selection.groupId) || !currencies.includes(selection.currency)
+    !selection || !validId(selection.groupId) || typeof selection.currency !== 'string' || !/^[A-Z]{3}$/.test(selection.currency)
   ))) {
     throw Object.assign(new Error('Choose valid group balances to settle'), { statusCode: 400 });
   }

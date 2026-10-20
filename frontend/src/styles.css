@@ -2340,6 +2340,7 @@ input::placeholder {
 }
 
 .group-activity-amount span,
+.group-activity-amount > small,
 .group-activity-share > span,
 .group-activity-share > small {
     color: #a0a39f;
@@ -2570,6 +2571,10 @@ input::placeholder {
 .group-balance-row > div small {
     color: #8a938b;
     font-size: 10px;
+}
+
+.group-balance-row > div .balance-converted {
+    color: #707670;
 }
 
 .group-balance-row p {

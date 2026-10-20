@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { withTransaction } from '../db/index.js';
 import { uploadImageBuffer } from '../config/cloudinary.js';
 import { queueEmailNotification } from './emailNotificationService.js';
+import { normalizeGroupBalances } from './groupCurrencyService.js';
 
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
@@ -18,6 +19,7 @@ export const recordSettlement = async ({
   if (!validId(groupId) || !validId(payerId) || !validId(payeeId) || payerId === payeeId) {
     throw Object.assign(new Error('Choose a valid group member to receive the payment'), { statusCode: 400 });
   }
+  const groupCurrency = await normalizeGroupBalances(groupId, payerId);
   let settlementAmount;
   try {
     settlementAmount = new Decimal(amount);
@@ -27,8 +29,11 @@ export const recordSettlement = async ({
   if (!settlementAmount.isFinite() || settlementAmount.lte(0) || settlementAmount.decimalPlaces() > 2) {
     throw Object.assign(new Error('Settlement amount must be greater than zero and use at most two decimal places'), { statusCode: 400 });
   }
-  if (!['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD'].includes(currency)) {
-    throw Object.assign(new Error('Choose a supported settlement currency'), { statusCode: 400 });
+  if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
+    throw Object.assign(new Error('Enter a valid three-letter settlement currency code'), { statusCode: 400 });
+  }
+  if (currency !== groupCurrency) {
+    throw Object.assign(new Error(`Settle this group in its base currency (${groupCurrency})`), { statusCode: 400 });
   }
   if (note !== null && typeof note !== 'string') {
     throw Object.assign(new Error('Settlement note must be text'), { statusCode: 400 });

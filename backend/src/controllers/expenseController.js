@@ -1,4 +1,5 @@
 import { addExpense, addExpenseComment, deleteExpense, deleteExpenseComment, listExpenses, listPersonalExpenses, updateExpense } from '../services/expenseService.js';
+import { getAvailableCurrencies } from '../services/exchangeRateService.js';
 
 const parseArray = (value, label) => {
   if (Array.isArray(value)) return value;
@@ -30,6 +31,10 @@ export const list = async (req, res) => {
 
 export const listPersonal = async (req, res) => {
   res.json({ data: await listPersonalExpenses(req.user._id) });
+};
+
+export const currencies = async (_req, res) => {
+  res.json({ data: await getAvailableCurrencies() });
 };
 
 export const createExpense = async (req, res) => {

@@ -4,6 +4,7 @@ import { query, withTransaction } from '../db/index.js';
 import { simplifyDebts } from './debtSimplifier.js';
 import { getExchangeRate } from './exchangeRateService.js';
 import { recordGroupActivity } from './groupActivityService.js';
+import { normalizeGroupBalances, normalizeGroupBalancesInTransaction } from './groupCurrencyService.js';
 
 const groupCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
 const hydrate = async (row, client = null) => {
@@ -35,7 +36,7 @@ export const ensurePersonalExpenseGroup = async (userId) => withTransaction(asyn
 	return hydrate(group, client);
 });
 
-export const createGroup = async ({ name, createdBy, memberIds = [], memberIdentifiers = [], simplifyDebts = false, coverImageUrl = null }) => withTransaction(async (client) => {
+export const createGroup = async ({ name, createdBy, memberIds = [], memberIdentifiers = [], simplifyDebts = false, coverImageUrl = null, currency = 'INR' }) => withTransaction(async (client) => {
 	const identifiers = [...new Set(memberIdentifiers.map((identifier) => identifier.trim().toLowerCase()).filter(Boolean))];
 	const resolvedMemberIds = [];
 	for (const identifier of identifiers) {
@@ -64,12 +65,12 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 	}
 
 	const created = await client.query(
-		`INSERT INTO groups (name, group_code, created_by, simplify_debts, cover_image_url)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO groups (name, group_code, created_by, simplify_debts, cover_image_url, currency)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy",
 		           simplify_debts AS "simplifyDebts", cover_image_url AS "coverImageUrl",
-		           created_at AS "createdAt"`,
-		[name.trim(), groupCode(), createdBy, simplifyDebts, coverImageUrl],
+		           currency, created_at AS "createdAt"`,
+		[name.trim(), groupCode(), createdBy, simplifyDebts, coverImageUrl, currency],
 	);
 	const id = created.rows[0]._id;
 	for (const member of [...new Set([createdBy, ...allMemberIds])]) await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, member]);
@@ -83,10 +84,10 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 	});
 	return hydrate(created.rows[0], client);
 });
-export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.is_personal AS "isPersonal", g.cover_image_url AS "coverImageUrl", g.simplify_debts AS "simplifyDebts", g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 AND NOT g.is_friend_ledger ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
+export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.is_personal AS "isPersonal", g.cover_image_url AS "coverImageUrl", g.simplify_debts AS "simplifyDebts", g.currency, g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 AND NOT g.is_friend_ledger ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
 export const addGroupMember = async ({ groupId, requesterId, identifier }) => withTransaction(async (client) => {
 	const groupResult = await client.query(
-		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger", created_at AS "createdAt" FROM groups WHERE id = $1',
+		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger", currency, created_at AS "createdAt" FROM groups WHERE id = $1',
 		[groupId],
 	);
 	const group = groupResult.rows[0];
@@ -132,6 +133,7 @@ export const addGroupMember = async ({ groupId, requesterId, identifier }) => wi
 	return hydrate(group, client);
 });
 export const getGroupBalances = async (groupId, userId) => {
+	await normalizeGroupBalances(groupId, userId);
 	const group = await query(
 		'SELECT is_friend_ledger FROM groups WHERE id = $1',
 		[groupId],
@@ -151,7 +153,6 @@ export const getGroupBalances = async (groupId, userId) => {
 		[counterpartIds],
 	);
 	const membersById = new Map(members.rows.map((member) => [member._id, member]));
-
 	return personalTransfers.map((transfer) => {
 		const isOwed = transfer.to === userId;
 		const memberId = isOwed ? transfer.from : transfer.to;
@@ -239,11 +240,11 @@ export const getDashboardBalanceSummary = async (userId) => {
 		incomingBalances: sortByAmount('youAreOwed'),
 	};
 };
-export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts, coverImageUrl, removeCoverImage = false }) => withTransaction(async (client) => {
+export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts, currency, coverImageUrl, removeCoverImage = false }) => withTransaction(async (client) => {
 	const membership = await client.query(
 		`SELECT g.id, g.name, g.group_code AS "groupCode", g.created_by AS "createdBy",
 		        g.is_personal AS "isPersonal", g.is_friend_ledger AS "isFriendLedger", g.cover_image_url AS "coverImageUrl",
-		        g.simplify_debts AS "simplifyDebts", g.created_at AS "createdAt"
+		        g.simplify_debts AS "simplifyDebts", g.currency, g.created_at AS "createdAt"
 		 FROM groups g JOIN group_members gm ON gm.group_id = g.id
 		 WHERE g.id = $1 AND gm.user_id = $2 FOR UPDATE OF g`,
 		[groupId, userId],
@@ -252,24 +253,144 @@ export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts
 	const group = membership.rows[0];
 	if (group.isPersonal) throw Object.assign(new Error('Personal Expenses settings cannot be changed'), { statusCode: 400 });
 	if (group.isFriendLedger) throw Object.assign(new Error('This private friend ledger cannot be changed as a group'), { statusCode: 400 });
+	if (currency !== undefined && currency !== group.currency) {
+		if (group.createdBy !== userId) {
+			throw Object.assign(new Error('Only the group creator can change its base currency'), { statusCode: 403 });
+		}
+		if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
+			throw Object.assign(new Error('Choose a valid group currency'), { statusCode: 400 });
+		}
+		await normalizeGroupBalancesInTransaction(client, groupId, userId);
+		const conversionRate = await getExchangeRate(group.currency, currency);
+		const scaledCurrencies = new Set([group.currency]);
+		const [activityRows, settlementRows, allocationRows, expenseRows, itemRows] = await Promise.all([
+			client.query(
+				'SELECT id, amount::text AS amount, currency FROM group_activity WHERE group_id = $1 AND amount IS NOT NULL AND currency IS NOT NULL',
+				[groupId],
+			),
+			client.query(
+				'SELECT id, amount::text AS amount, currency FROM group_settlements WHERE group_id = $1',
+				[groupId],
+			),
+			client.query(
+				'SELECT id, amount::text AS amount, currency, exchange_rate::text AS "exchangeRate" FROM friend_settlement_allocations WHERE group_id = $1',
+				[groupId],
+			),
+			client.query(
+				'SELECT id, total_amount::text AS amount FROM expenses WHERE group_id = $1 AND currency = $2',
+				[groupId, group.currency],
+			),
+			client.query(
+				`SELECT ei.id, ei.amount::text AS amount
+				 FROM expense_items ei JOIN expenses e ON e.id = ei.expense_id
+				 WHERE e.group_id = $1 AND e.currency = $2`,
+				[groupId, group.currency],
+			),
+		]);
+		[...activityRows.rows, ...settlementRows.rows, ...allocationRows.rows]
+			.forEach((row) => scaledCurrencies.add(row.currency));
+		const rates = new Map(await Promise.all([...scaledCurrencies].map(async (sourceCurrency) => [
+			sourceCurrency,
+			sourceCurrency === currency ? 1 : await getExchangeRate(sourceCurrency, currency),
+		])));
+		const convertPositiveAmount = (amount, rate) => {
+			const converted = new Decimal(amount).mul(rate).toDecimalPlaces(2);
+			if (converted.lte(0)) {
+				throw Object.assign(
+					new Error('A historical payment is too small to convert safely into the selected currency'),
+					{ statusCode: 409 },
+				);
+			}
+			return converted.toFixed(2);
+		};
+		[...expenseRows.rows, ...itemRows.rows].forEach((row) => convertPositiveAmount(row.amount, conversionRate));
+
+		await client.query(
+			`UPDATE balances SET net_owed = ROUND(net_owed * $1::numeric, 2),
+			                     currency = $2, updated_at = NOW()
+			 WHERE group_id = $3 AND currency = $4`,
+			[conversionRate, currency, groupId, group.currency],
+		);
+		await client.query(
+			`UPDATE expense_splits es
+			 SET amount_owed = ROUND(es.amount_owed * $2::numeric, 2),
+			     split_value = CASE WHEN e.split_strategy <> ALL(ARRAY['PERCENTAGE', 'SHARES'])
+			       THEN ROUND(es.split_value * $2::numeric, 2)
+			       ELSE es.split_value END
+			 FROM expenses e
+			 WHERE es.expense_id = e.id AND e.group_id = $1`,
+			[groupId, conversionRate],
+		);
+		await client.query(
+			`UPDATE expense_items SET amount = ROUND(amount * $2::numeric, 2)
+			 WHERE expense_id IN (SELECT id FROM expenses WHERE group_id = $1)`,
+			[groupId, conversionRate],
+		);
+		await client.query(
+			`UPDATE expense_item_splits eis
+			 SET amount_owed = ROUND(eis.amount_owed * $2::numeric, 2)
+			 FROM expense_items ei
+			 JOIN expenses e ON e.id = ei.expense_id
+			 WHERE eis.item_id = ei.id AND e.group_id = $1`,
+			[groupId, conversionRate],
+		);
+		await client.query(
+			`UPDATE expenses
+			 SET total_amount = ROUND(total_amount * $2::numeric, 2),
+			     conversion_rate = ROUND(COALESCE(conversion_rate, 1) * $2::numeric, 10),
+			     currency = $3
+			 WHERE group_id = $1 AND currency = $4`,
+			[groupId, conversionRate, currency, group.currency],
+		);
+		for (const row of activityRows.rows) {
+			const rate = rates.get(row.currency);
+			await client.query(
+				'UPDATE group_activity SET amount = ROUND(amount * $2::numeric, 2), currency = $3 WHERE id = $1',
+				[row.id, rate, currency],
+			);
+		}
+		for (const row of settlementRows.rows) {
+			const rate = rates.get(row.currency);
+			await client.query(
+				'UPDATE group_settlements SET amount = $2, currency = $3 WHERE id = $1',
+				[row.id, convertPositiveAmount(row.amount, rate), currency],
+			);
+		}
+		for (const row of allocationRows.rows) {
+			const rate = rates.get(row.currency);
+			await client.query(
+				`UPDATE friend_settlement_allocations
+				 SET amount = $2, currency = $3, exchange_rate = $4
+				 WHERE id = $1`,
+				[
+					row.id,
+					convertPositiveAmount(row.amount, rate),
+					currency,
+					new Decimal(row.exchangeRate).div(rate).toDecimalPlaces(8).toFixed(8),
+				],
+			);
+		}
+	}
 	const nextName = name === undefined ? group.name : name.trim();
 	const nextSimplifyDebts = simplifyDebts === undefined ? group.simplifyDebts : simplifyDebts;
 	const nextCoverImageUrl = coverImageUrl || (removeCoverImage ? null : group.coverImageUrl);
 	const changes = [];
 	if (nextName !== group.name) changes.push(`renamed the group to “${nextName}”`);
+	if (currency !== undefined && currency !== group.currency) changes.push(`changed the group base currency from ${group.currency} to ${currency}`);
 	if (nextSimplifyDebts !== group.simplifyDebts) {
 		changes.push(`turned debt simplification ${nextSimplifyDebts ? 'on' : 'off'}`);
 	}
 	if (nextCoverImageUrl !== group.coverImageUrl) changes.push(nextCoverImageUrl ? 'changed the group picture' : 'removed the group picture');
 	const result = await client.query(
 		`UPDATE groups
-		 SET name = $1, simplify_debts = $2, cover_image_url = $3
-		 WHERE id = $4
+		 SET name = $1, simplify_debts = $2, cover_image_url = $3, currency = $4
+		 WHERE id = $5
 		 RETURNING id AS "_id", name, group_code AS "groupCode",
 		           created_by AS "createdBy", is_personal AS "isPersonal",
 		           cover_image_url AS "coverImageUrl", simplify_debts AS "simplifyDebts",
+		           currency,
 		           created_at AS "createdAt"`,
-		[nextName, nextSimplifyDebts, nextCoverImageUrl, groupId],
+		[nextName, nextSimplifyDebts, nextCoverImageUrl, currency || group.currency, groupId],
 	);
 	if (changes.length) {
 		const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [userId]);
@@ -325,7 +446,7 @@ export const removeGroupMember = async ({ groupId, requesterId, memberId }) => w
 		...((await client.query(
 			`SELECT name, group_code AS "groupCode", created_by AS "createdBy",
 			        is_personal AS "isPersonal", cover_image_url AS "coverImageUrl",
-			        simplify_debts AS "simplifyDebts", created_at AS "createdAt"
+			        simplify_debts AS "simplifyDebts", currency, created_at AS "createdAt"
 			 FROM groups WHERE id = $1`,
 			[groupId],
 		)).rows[0]),
@@ -334,7 +455,8 @@ export const removeGroupMember = async ({ groupId, requesterId, memberId }) => w
 export const joinGroupByCode = async ({ groupCode: code, userId }) => withTransaction(async (client) => {
 	const result = await client.query(
 		`SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy",
-		        is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger", created_at AS "createdAt"
+		        is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger",
+		        currency, created_at AS "createdAt"
 		 FROM groups WHERE group_code = $1`,
 		[code.trim().toUpperCase()],
 	);

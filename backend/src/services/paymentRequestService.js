@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { withTransaction } from '../db/index.js';
 import { simplifyDebts } from './debtSimplifier.js';
 import { queueEmailNotification } from './emailNotificationService.js';
+import { normalizeGroupBalances } from './groupCurrencyService.js';
 
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
@@ -28,6 +29,10 @@ export const createPaymentRequest = async ({
   }
   if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
     throw Object.assign(new Error('Choose a valid payment currency'), { statusCode: 400 });
+  }
+  const groupCurrency = await normalizeGroupBalances(groupId, requesterId);
+  if (currency !== groupCurrency) {
+    throw Object.assign(new Error(`Request payment in this group's base currency (${groupCurrency})`), { statusCode: 400 });
   }
   if (note !== null && (typeof note !== 'string' || note.length > 1000)) {
     throw Object.assign(new Error('Request note must be text of 1,000 characters or fewer'), { statusCode: 400 });

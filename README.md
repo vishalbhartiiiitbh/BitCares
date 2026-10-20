@@ -12,6 +12,18 @@ cp .env.example .env
 
 Update `backend/.env` with your PostgreSQL `DATABASE_URL` and private JWT, Cloudinary, and other credentials. Do not commit `.env`.
 
+Currency conversion uses ExchangeRate-API. Set `EXCHANGE_RATE_API_KEY` in
+`backend/.env` (and in the backend host's environment settings) to your private
+API key. The group creator chooses one base currency when creating a group and
+can change it later from that group's Settings tab. Changing it converts the
+group's existing financial history using current provider rates.
+Members can enter expenses in other supported currencies; amounts, splits, and
+balances are converted into the group currency before they are saved. Expense
+history retains the entered amount, currency, and conversion rate. Existing
+groups' legacy balances and expenses are normalized on first access using the
+provider's current rate. Dashboard summaries can be viewed in each member's
+profile default currency; the group's ledger remains in its shared base currency.
+
 Password reset email uses Nodemailer and SMTP. Configure `SMTP_HOST`, `SMTP_PORT`,
 `SMTP_SECURE`, `SMTP_USER`, and `SMTP_PASS` in `backend/.env`. For Gmail, use
 an app password (with 2-Step Verification enabled), not your regular Gmail

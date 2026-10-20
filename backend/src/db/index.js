@@ -175,6 +175,7 @@ const connectDB = async () => {
       group_code VARCHAR(8) NOT NULL UNIQUE,
       created_by UUID NOT NULL REFERENCES users(id),
       simplify_debts BOOLEAN NOT NULL DEFAULT FALSE,
+      currency VARCHAR(3) NOT NULL DEFAULT 'INR',
       is_personal BOOLEAN NOT NULL DEFAULT FALSE,
       is_friend_ledger BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -187,6 +188,8 @@ const connectDB = async () => {
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS cover_image_url TEXT;
     ALTER TABLE groups
       ADD COLUMN IF NOT EXISTS simplify_debts BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE groups
+      ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'INR';
     ALTER TABLE groups ALTER COLUMN simplify_debts SET DEFAULT FALSE;
 
     CREATE UNIQUE INDEX IF NOT EXISTS groups_one_personal_per_user
@@ -236,6 +239,14 @@ const connectDB = async () => {
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS subcategory VARCHAR(60);
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS note TEXT;
     ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_proof_url TEXT;
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS original_amount NUMERIC(12,2);
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS original_currency VARCHAR(3);
+    ALTER TABLE expenses ADD COLUMN IF NOT EXISTS conversion_rate NUMERIC(20,10);
+    UPDATE expenses
+       SET original_amount = total_amount,
+           original_currency = currency,
+           conversion_rate = 1
+     WHERE original_amount IS NULL OR original_currency IS NULL OR conversion_rate IS NULL;
     CREATE TABLE IF NOT EXISTS expense_splits (expense_id UUID NOT NULL REFERENCES expenses(id) ON DELETE CASCADE, user_id UUID NOT NULL REFERENCES users(id), amount_owed NUMERIC(12,2) NOT NULL, split_value NUMERIC(12,2) NOT NULL, PRIMARY KEY (expense_id, user_id));
     CREATE TABLE IF NOT EXISTS expense_items (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), expense_id UUID NOT NULL REFERENCES expenses(id) ON DELETE CASCADE, description VARCHAR(500) NOT NULL, amount NUMERIC(12,2) NOT NULL CHECK (amount > 0), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS expense_item_splits (item_id UUID NOT NULL REFERENCES expense_items(id) ON DELETE CASCADE, user_id UUID NOT NULL REFERENCES users(id), amount_owed NUMERIC(12,2) NOT NULL, PRIMARY KEY (item_id, user_id));

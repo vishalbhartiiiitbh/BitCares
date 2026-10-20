@@ -1,7 +1,6 @@
 import Decimal from 'decimal.js';
 
 const REQUIRED_COLUMNS = ['date', 'description', 'category', 'cost', 'currency'];
-const SUPPORTED_CURRENCIES = new Set(['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD']);
 const MAX_TRANSACTIONS = 5000;
 const MAX_CENTS = 999999999999;
 const UUID_PATTERN = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -134,8 +133,8 @@ export const parseSplitwiseCsv = (text) => {
       throw invalidCsv(`Row ${rowNumber}: Cost must be greater than zero and no more than 9,999,999,999.99.`);
     }
     const currency = currencyValue.trim().toUpperCase();
-    if (!SUPPORTED_CURRENCIES.has(currency)) {
-      throw invalidCsv(`Row ${rowNumber}: ${currency || 'Currency'} is not supported by SplitCare.`);
+    if (!/^[A-Z]{3}$/.test(currency)) {
+      throw invalidCsv(`Row ${rowNumber}: enter a valid three-letter currency code.`);
     }
 
     const balances = memberValues.map((value, memberIndex) => ({

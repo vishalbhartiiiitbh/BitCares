@@ -4,6 +4,8 @@ import { recordSettlement } from '../services/settlementService.js';
 import { createPaymentRequest } from '../services/paymentRequestService.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 import { importSplitwiseCsv, previewSplitwiseImport } from '../services/splitwiseImportService.js';
+import { getAvailableCurrencies } from '../services/exchangeRateService.js';
+import { normalizeGroupBalances } from '../services/groupCurrencyService.js';
 
 const getSplitwiseCsvText = (req) => {
   if (!req.file) throw Object.assign(new Error('Choose a Splitwise CSV file to upload.'), { statusCode: 400 });
@@ -19,6 +21,15 @@ export const list = async (req, res) => {
 
 export const create = async (req, res) => {
   const { name, simplifyDebts = 'false' } = req.body || {};
+  const currency = typeof req.body?.currency === 'string'
+    ? req.body.currency
+    : req.user.defaultCurrency || 'INR';
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw Object.assign(new Error('Choose a valid group currency'), { statusCode: 400 });
+  }
+  if (!(await getAvailableCurrencies()).includes(currency)) {
+    throw Object.assign(new Error('Choose a currency supported by the exchange-rate provider'), { statusCode: 400 });
+  }
   const parseList = (field, label) => {
     const value = req.body?.[field] ?? [];
     if (Array.isArray(value)) return value;
@@ -62,6 +73,7 @@ export const create = async (req, res) => {
       memberIdentifiers,
       simplifyDebts: simplifyDebts === true || simplifyDebts === 'true',
       coverImageUrl,
+      currency,
     });
   } catch (error) {
     if (coverImageUrl) {
@@ -121,7 +133,7 @@ export const saveWhiteboard = async (req, res) => {
 };
 
 export const update = async (req, res) => {
-  const { name, simplifyDebts } = req.body || {};
+  const { name, simplifyDebts, currency } = req.body || {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     throw Object.assign(new Error('Group name cannot be empty'), { statusCode: 400 });
   }
@@ -135,13 +147,23 @@ export const update = async (req, res) => {
     }
     parsedSimplifyDebts = simplifyDebts === true || simplifyDebts === 'true';
   }
-  if (name === undefined && parsedSimplifyDebts === undefined && !req.file && req.body.removeCoverImage !== 'true') {
+  if (currency !== undefined) {
+    if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
+      throw Object.assign(new Error('Choose a valid group currency'), { statusCode: 400 });
+    }
+  }
+  if (name === undefined && parsedSimplifyDebts === undefined && currency === undefined
+    && !req.file && req.body.removeCoverImage !== 'true') {
     throw Object.assign(new Error('Provide a group setting to update'), { statusCode: 400 });
   }
   const groupBeforeUpdate = (await listGroupsForUser(req.user._id))
     .find((group) => group._id === req.params.groupId);
   if (!groupBeforeUpdate) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
   if (groupBeforeUpdate.isPersonal) throw Object.assign(new Error('Personal Expenses settings cannot be changed'), { statusCode: 400 });
+  if (currency !== undefined && currency !== groupBeforeUpdate.currency
+    && !(await getAvailableCurrencies()).includes(currency)) {
+    throw Object.assign(new Error('Choose a currency supported by the exchange-rate provider'), { statusCode: 400 });
+  }
   const previousCover = groupBeforeUpdate.coverImageUrl;
   const coverImageUrl = req.file
     ? await uploadImageBuffer(req.file.buffer, 'splitcare/group-covers')
@@ -151,6 +173,7 @@ export const update = async (req, res) => {
     userId: req.user._id,
     name,
     simplifyDebts: parsedSimplifyDebts,
+    currency,
     coverImageUrl,
     removeCoverImage: req.body.removeCoverImage === 'true',
   });
@@ -245,5 +268,6 @@ export const importSplitwise = async (req, res) => {
 };
 
 export const simplify = async (req, res) => {
+  await normalizeGroupBalances(req.params.groupId, req.user._id);
   res.json({ data: await simplifyDebts(req.params.groupId, req.user._id) });
 };

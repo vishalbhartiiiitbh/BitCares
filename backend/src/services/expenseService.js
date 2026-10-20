@@ -5,6 +5,8 @@ import { eventEmitter, EVENTS } from '../events/eventEmitter.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 import { ensurePersonalExpenseGroup } from './groupService.js';
 import { recordGroupActivity } from './groupActivityService.js';
+import { getExchangeRate } from './exchangeRateService.js';
+import { normalizeGroupBalances } from './groupCurrencyService.js';
 
 const expenseSubcategories = {
   Entertainment: ['Games', 'Music', 'Movies', 'Sports', 'Events'],
@@ -15,6 +17,47 @@ const expenseSubcategories = {
   Uncategorized: [],
   Utilities: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'],
 };
+
+const convertMoney = (amount, rate) => {
+  let decimal;
+  try {
+    decimal = new Decimal(amount);
+  } catch {
+    throw Object.assign(new Error('Enter a valid expense amount'), { statusCode: 400 });
+  }
+  if (!decimal.isFinite() || decimal.lte(0)) {
+    throw Object.assign(new Error('Expense amount must be greater than zero'), { statusCode: 400 });
+  }
+  const converted = decimal.mul(rate).toDecimalPlaces(2);
+  if (converted.lte(0)) {
+    throw Object.assign(new Error('The converted expense is below the smallest supported amount'), { statusCode: 400 });
+  }
+  return converted.toFixed(2);
+};
+
+const convertSplitValues = (values, splitStrategy, rate) => {
+  if (!Array.isArray(values) || !['EXACT', 'REIMBURSEMENT', 'ADJUSTMENT'].includes(splitStrategy)) return values;
+  const converted = values.map((value) => {
+    let amount;
+    try {
+      amount = new Decimal(value);
+    } catch {
+      throw Object.assign(new Error('Split values must be valid numbers'), { statusCode: 400 });
+    }
+    if (!amount.isFinite()) throw Object.assign(new Error('Split values must be valid numbers'), { statusCode: 400 });
+    return amount.mul(rate).toDecimalPlaces(2);
+  });
+  if (splitStrategy === 'ADJUSTMENT' && converted.length) {
+    const sum = converted.reduce((total, value) => total.plus(value), new Decimal(0));
+    converted[converted.length - 1] = converted[converted.length - 1].minus(sum);
+  }
+  return converted.map((value) => value.toFixed(2));
+};
+
+const sumAmounts = (amounts) => amounts
+  .reduce((total, amount) => total.plus(amount), new Decimal(0))
+  .toDecimalPlaces(2)
+  .toFixed(2);
 
 export const listExpenses = async (groupId, userId, unlimited = false, includeFriendLedger = false) => {
   if (groupId) {
@@ -30,11 +73,27 @@ export const listExpenses = async (groupId, userId, unlimited = false, includeFr
     if (membership.rows[0].isFriendLedger && !includeFriendLedger) {
       throw Object.assign(new Error('Use the friend history page to view this private ledger'), { statusCode: 404 });
     }
+    if (!membership.rows[0].isFriendLedger) {
+      await normalizeGroupBalances(groupId, userId);
+    }
+  } else {
+    const groups = await query(
+      `SELECT g.id
+       FROM groups g
+       JOIN group_members gm ON gm.group_id = g.id
+       WHERE gm.user_id = $1 AND NOT g.is_personal AND NOT g.is_friend_ledger`,
+      [userId],
+    );
+    await Promise.all(groups.rows.map((group) => normalizeGroupBalances(group.id, userId)));
   }
   const result = await query(
     `SELECT e.id AS "_id", e.group_id AS "groupId", g.name AS "groupName",
+            g.currency AS "groupCurrency", g.is_friend_ledger AS "isFriendLedger",
             g.is_personal AS "isPersonal", e.description,
             e.total_amount::text AS "totalAmount", e.currency, e.type,
+            COALESCE(e.original_amount, e.total_amount)::text AS "originalAmount",
+            COALESCE(e.original_currency, e.currency) AS "originalCurrency",
+            COALESCE(e.conversion_rate, 1)::text AS "conversionRate",
             e.category, e.subcategory,
             e.split_strategy AS "splitStrategy", e.paid_by AS "paidBy",
             e.created_at AS "createdAt", e.note, e.payment_proof_url AS "paymentProofUrl",
@@ -110,10 +169,11 @@ export const listExpenses = async (groupId, userId, unlimited = false, includeFr
        ORDER BY s.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
       [userId],
     );
-    return [...result.rows, ...activity.rows]
+    const transactions = [...result.rows, ...activity.rows]
       .concat(settlements.rows)
       .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
       .slice(0, unlimited ? undefined : 100);
+    return transactions;
   }
 
   const activityResult = await query(
@@ -146,9 +206,10 @@ export const listExpenses = async (groupId, userId, unlimited = false, includeFr
      WHERE s.group_id = $1`,
     [groupId],
   );
-  return [...result.rows, ...settlements.rows, ...activityResult.rows]
+  const transactions = [...result.rows, ...settlements.rows, ...activityResult.rows]
     .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
     .slice(0, unlimited ? undefined : 100);
+  return transactions;
 };
 
 export const listPersonalExpenses = async (userId) => {
@@ -257,7 +318,7 @@ const calculateExpenseShares = ({
   const invalid = (message) => { throw Object.assign(new Error(message), { statusCode: 400 }); };
   if (typeof description !== 'string' || !description.trim()) invalid('Expense description is required');
   if (!Number.isFinite(Number(totalAmount)) || Number(totalAmount) <= 0) invalid('Expense amount must be greater than zero');
-  if (!['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD'].includes(currency)) invalid('Choose a supported expense currency');
+  if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) invalid('Enter a valid three-letter expense currency code');
   if (note !== null && note !== undefined && typeof note !== 'string') invalid('Expense note must be text');
   if (!['Entertainment', 'Food and drink', 'Home', 'Life', 'Transportation', 'Uncategorized', 'Utilities'].includes(category)) {
     invalid('Choose a supported expense category');
@@ -356,6 +417,9 @@ export const addExpense = async ({
 }) => {
   groupId = groupId || null;
   actorId = actorId || paidBy;
+  const originalAmount = String(totalAmount);
+  const originalCurrency = currency;
+  let conversionRate = 1;
   const isPersonal = !groupId;
   if (isPersonal) {
     if (paidBy !== participants?.[0] || participants?.length !== 1) {
@@ -371,8 +435,8 @@ export const addExpense = async ({
   if (!Number.isFinite(Number(totalAmount)) || Number(totalAmount) <= 0) {
     throw Object.assign(new Error('Expense amount must be greater than zero'), { statusCode: 400 });
   }
-  if (!['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD'].includes(currency)) {
-    throw Object.assign(new Error('Choose a supported expense currency'), { statusCode: 400 });
+  if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
+    throw Object.assign(new Error('Enter a valid three-letter expense currency code'), { statusCode: 400 });
   }
   if (typeof paidBy !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(paidBy)
     || participants.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id))) {
@@ -389,6 +453,35 @@ export const addExpense = async ({
   }
   if (subcategory && !expenseSubcategories[category].includes(subcategory)) {
     throw Object.assign(new Error('Choose a supported subcategory for this expense category'), { statusCode: 400 });
+  }
+
+  if (groupId) {
+    const groupResult = await query(
+      `SELECT currency, is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger"
+       FROM groups WHERE id = $1`,
+      [groupId],
+    );
+    if (!groupResult.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
+    const group = groupResult.rows[0];
+    if (!group.isPersonal && !group.isFriendLedger) {
+      await normalizeGroupBalances(groupId, actorId);
+      const groupCurrency = group.currency || 'INR';
+      conversionRate = await getExchangeRate(currency, groupCurrency);
+      if (splitStrategy === 'ITEMIZED') {
+        items = items.map((item) => ({ ...item, amount: convertMoney(item.amount, conversionRate) }));
+        totalAmount = sumAmounts(items.map((item) => item.amount));
+      } else if (['EXACT', 'REIMBURSEMENT'].includes(splitStrategy)) {
+        values = convertSplitValues(values, splitStrategy, conversionRate);
+        totalAmount = sumAmounts(values);
+      } else {
+        totalAmount = convertMoney(totalAmount, conversionRate);
+        values = convertSplitValues(values, splitStrategy, conversionRate);
+      }
+      if (new Decimal(totalAmount).lte(0)) {
+        throw Object.assign(new Error('The converted expense is below the smallest supported amount'), { statusCode: 400 });
+      }
+      currency = groupCurrency;
+    }
   }
 
   let splits;
@@ -418,6 +511,15 @@ export const addExpense = async ({
   } else {
     splits = SplitStrategyFactory.get(splitStrategy).calculateSplits(totalAmount, participants, values);
   }
+  if (!isPersonal) {
+    const membership = await query(
+      'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+      [groupId, actorId],
+    );
+    if (!membership.rowCount) {
+      throw Object.assign(new Error('Only group members can add an expense'), { statusCode: 403 });
+    }
+  }
   if (isPersonal) groupId = (await ensurePersonalExpenseGroup(paidBy))._id;
   const expense = await withTransaction(async (client) => {
     if (!isPersonal) {
@@ -446,22 +548,27 @@ export const addExpense = async ({
       }
       const allowed = await client.query(
         'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2::uuid[])',
-        [groupId, [...new Set([paidBy, ...participants])]],
+        [groupId, [...new Set([actorId, paidBy, ...participants])]],
       );
-      if (allowed.rowCount !== new Set([paidBy, ...participants]).size) {
-        throw Object.assign(new Error('Payer and participants must belong to the group'), { statusCode: 400 });
+      if (allowed.rowCount !== new Set([actorId, paidBy, ...participants]).size) {
+        throw Object.assign(new Error('Actor, payer and participants must belong to the group'), { statusCode: 400 });
       }
     }
     const proofUrl = proofBuffer
       ? await uploadImageBuffer(proofBuffer, 'splitcare/expense-proofs')
       : null;
     const created = await client.query(
-      `INSERT INTO expenses (group_id, description, total_amount, currency, split_strategy, paid_by, type, category, subcategory, note, payment_proof_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO expenses
+         (group_id, description, total_amount, currency, split_strategy, paid_by, type, category,
+          subcategory, note, payment_proof_url, original_amount, original_currency, conversion_rate)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING id AS "_id", group_id AS "groupId", description, total_amount::text AS "totalAmount",
                  currency, type, split_strategy AS "splitStrategy", paid_by AS "paidBy",
-                 category, subcategory, created_at AS "createdAt", note, payment_proof_url AS "paymentProofUrl"`,
-      [groupId, description.trim(), totalAmount, currency, splitStrategy, paidBy, type, category, subcategory?.trim() || null, note?.trim() || null, proofUrl],
+                 category, subcategory, created_at AS "createdAt", note, payment_proof_url AS "paymentProofUrl",
+                 original_amount::text AS "originalAmount", original_currency AS "originalCurrency",
+                 conversion_rate::text AS "conversionRate"`,
+      [groupId, description.trim(), totalAmount, currency, splitStrategy, paidBy, type, category,
+        subcategory?.trim() || null, note?.trim() || null, proofUrl, originalAmount, originalCurrency, conversionRate],
     );
     const row = created.rows[0];
     for (const item of itemSplits) {
@@ -500,14 +607,19 @@ export const addExpense = async ({
       actorId,
       activityType: 'EXPENSE_ADDED',
       description: `Expense added: ${description.trim()}`,
-      details: `${actor.rows[0]?.fullnamae || 'A group member'} added ${currency} ${new Decimal(totalAmount).toFixed(2)} for “${description.trim()}”.`,
+      details: `${actor.rows[0]?.fullnamae || 'A group member'} added ${originalCurrency} ${new Decimal(originalAmount).toFixed(2)} for “${description.trim()}”${originalCurrency === currency ? '' : ` (converted to ${currency} ${new Decimal(totalAmount).toFixed(2)})`}.`,
       amount: totalAmount,
       currency,
     });
     return row;
   });
   eventEmitter.emit(EVENTS.EXPENSE_CREATED, expense);
-  return expense;
+  return {
+    ...expense,
+    originalAmount,
+    originalCurrency,
+    conversionRate,
+  };
 };
 
 export const updateExpense = async ({
@@ -528,6 +640,39 @@ export const updateExpense = async ({
   proofBuffer = null,
   removePaymentProof = false,
 }) => {
+  const originalAmount = String(totalAmount);
+  const originalCurrency = currency;
+  let conversionRate = 1;
+  const expenseContext = await query(
+    `SELECT e.group_id AS "groupId", g.currency AS "groupCurrency",
+            g.is_personal AS "isPersonal", g.is_friend_ledger AS "isFriendLedger"
+     FROM expenses e
+     JOIN groups g ON g.id = e.group_id
+     JOIN group_members gm ON gm.group_id = e.group_id AND gm.user_id = $2
+     WHERE e.id = $1`,
+    [expenseId, editorId],
+  );
+  if (!expenseContext.rowCount) throw Object.assign(new Error('Expense not found or you cannot edit it'), { statusCode: 404 });
+  const context = expenseContext.rows[0];
+  if (!context.isPersonal && !context.isFriendLedger) {
+    await normalizeGroupBalances(context.groupId, editorId);
+    const groupCurrency = context.groupCurrency || 'INR';
+    conversionRate = await getExchangeRate(currency, groupCurrency);
+    if (splitStrategy === 'ITEMIZED') {
+      items = items.map((item) => ({ ...item, amount: convertMoney(item.amount, conversionRate) }));
+      totalAmount = sumAmounts(items.map((item) => item.amount));
+    } else if (['EXACT', 'REIMBURSEMENT'].includes(splitStrategy)) {
+      values = convertSplitValues(values, splitStrategy, conversionRate);
+      totalAmount = sumAmounts(values);
+    } else {
+      totalAmount = convertMoney(totalAmount, conversionRate);
+      values = convertSplitValues(values, splitStrategy, conversionRate);
+    }
+    if (new Decimal(totalAmount).lte(0)) {
+      throw Object.assign(new Error('The converted expense is below the smallest supported amount'), { statusCode: 400 });
+    }
+    currency = groupCurrency;
+  }
   const { splits, itemSplits } = calculateExpenseShares({
     paidBy, totalAmount, splitStrategy, participants, values, items,
     description, currency, category, subcategory, note,
@@ -537,6 +682,7 @@ export const updateExpense = async ({
       `SELECT e.id AS "_id", e.group_id AS "groupId", e.paid_by AS "paidBy",
               e.description, e.total_amount::text AS "totalAmount",
               e.currency, e.type, e.payment_proof_url AS "paymentProofUrl",
+              g.currency AS "groupCurrency",
               g.name AS "groupName", g.is_personal AS "isPersonal",
               g.is_friend_ledger AS "isFriendLedger",
               COALESCE((SELECT json_agg(json_build_object(
@@ -594,11 +740,20 @@ export const updateExpense = async ({
       userId: split.userId,
       amountOwed: new Decimal(split.amountOwed),
     }));
+    const previousCurrency = !existing.isPersonal && !existing.isFriendLedger
+      ? existing.groupCurrency || 'INR'
+      : existing.currency;
+    if (existing.currency !== previousCurrency) {
+      const previousRate = await getExchangeRate(existing.currency, previousCurrency);
+      previousSplits.forEach((split) => {
+        split.amountOwed = split.amountOwed.mul(previousRate).toDecimalPlaces(2);
+      });
+    }
     // Remove the old expense's effect before applying its replacement, in the same transaction.
     await applyGroupBalances(client, {
       groupId: existing.groupId,
       paidBy: existing.paidBy,
-      currency: existing.currency,
+      currency: previousCurrency,
       splits: previousSplits,
       multiplier: -1,
     });
@@ -610,11 +765,13 @@ export const updateExpense = async ({
       `UPDATE expenses
        SET description = $1, total_amount = $2, currency = $3, split_strategy = $4,
            paid_by = $5, type = $6, category = $7, subcategory = $8,
-           note = $9, payment_proof_url = $10
-       WHERE id = $11`,
+           note = $9, payment_proof_url = $10, original_amount = $11,
+           original_currency = $12, conversion_rate = $13
+       WHERE id = $14`,
       [description.trim(), totalAmount, currency, splitStrategy, paidBy,
         splitStrategy === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'EXPENSE',
-        category, subcategory?.trim() || null, note?.trim() || null, proofUrl, expenseId],
+        category, subcategory?.trim() || null, note?.trim() || null, proofUrl,
+        originalAmount, originalCurrency, conversionRate, expenseId],
     );
     await client.query('DELETE FROM expense_splits WHERE expense_id = $1', [expenseId]);
     await client.query('DELETE FROM expense_items WHERE expense_id = $1', [expenseId]);
@@ -641,7 +798,7 @@ export const updateExpense = async ({
       actorId: editorId,
       activityType: 'EXPENSE_UPDATED',
       description: `Expense updated: ${description.trim()}`,
-      details: `${editor.rows[0]?.fullnamae || 'A group member'} updated “${existing.description}” to “${description.trim()}” (${existing.currency} ${previousTotal.toFixed(2)} → ${currency} ${new Decimal(totalAmount).toFixed(2)}).`,
+      details: `${editor.rows[0]?.fullnamae || 'A group member'} updated “${existing.description}” to “${description.trim()}” (${existing.currency} ${previousTotal.toFixed(2)} → ${originalCurrency} ${new Decimal(originalAmount).toFixed(2)}${originalCurrency === currency ? '' : ` converted to ${currency} ${new Decimal(totalAmount).toFixed(2)}`}).`,
       amount: totalAmount,
       currency,
     });
@@ -651,6 +808,9 @@ export const updateExpense = async ({
       description: description.trim(),
       totalAmount: String(totalAmount),
       currency,
+      originalAmount,
+      originalCurrency,
+      conversionRate,
       type: splitStrategy === 'REIMBURSEMENT' ? 'REIMBURSEMENT' : 'EXPENSE',
       splitStrategy,
       paidBy,
@@ -665,12 +825,26 @@ export const updateExpense = async ({
 };
 
 export const deleteExpense = async ({ expenseId, userId, friendId = null }) => {
+  const expenseContext = await query(
+    `SELECT e.group_id AS "groupId", g.is_personal AS "isPersonal",
+            g.is_friend_ledger AS "isFriendLedger"
+     FROM expenses e
+     JOIN groups g ON g.id = e.group_id
+     JOIN group_members gm ON gm.group_id = e.group_id AND gm.user_id = $2
+     WHERE e.id = $1`,
+    [expenseId, userId],
+  );
+  if (!expenseContext.rowCount) throw Object.assign(new Error('Expense not found or you cannot delete it'), { statusCode: 404 });
+  if (!expenseContext.rows[0].isPersonal && !expenseContext.rows[0].isFriendLedger) {
+    await normalizeGroupBalances(expenseContext.rows[0].groupId, userId);
+  }
   const deleted = await withTransaction(async (client) => {
     const result = await client.query(
       `SELECT e.id AS "_id", e.group_id AS "groupId", e.description,
               e.total_amount::text AS "totalAmount", e.currency, e.type,
               e.paid_by AS "paidBy", e.payment_proof_url AS "paymentProofUrl",
-              g.name AS "groupName", g.is_personal AS "isPersonal",
+              g.name AS "groupName", g.currency AS "groupCurrency",
+              g.is_personal AS "isPersonal",
               g.is_friend_ledger AS "isFriendLedger",
               COALESCE((SELECT json_agg(json_build_object(
                 'userId', es.user_id::text,
@@ -720,14 +894,24 @@ export const deleteExpense = async ({ expenseId, userId, friendId = null }) => {
       }
     }
 
+    const balanceCurrency = !expense.isPersonal && !expense.isFriendLedger
+      ? expense.groupCurrency || 'INR'
+      : expense.currency;
+    const balanceSplits = expense.splits.map((split) => ({
+      userId: split.userId,
+      amountOwed: new Decimal(split.amountOwed),
+    }));
+    if (expense.currency !== balanceCurrency) {
+      const rate = await getExchangeRate(expense.currency, balanceCurrency);
+      balanceSplits.forEach((split) => {
+        split.amountOwed = split.amountOwed.mul(rate).toDecimalPlaces(2);
+      });
+    }
     await applyGroupBalances(client, {
       groupId: expense.groupId,
       paidBy: expense.paidBy,
-      currency: expense.currency,
-      splits: expense.splits.map((split) => ({
-        userId: split.userId,
-        amountOwed: new Decimal(split.amountOwed),
-      })),
+      currency: balanceCurrency,
+      splits: balanceSplits,
       multiplier: -1,
     });
     const actor = await client.query('SELECT fullnamae FROM users WHERE id = $1', [userId]);

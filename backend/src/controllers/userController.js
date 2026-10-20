@@ -5,6 +5,7 @@ import { query, withTransaction } from '../db/index.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 import { sendEmailVerificationCode, sendPasswordResetEmail } from '../services/emailService.js';
 import { EMAIL_NOTIFICATION_PREFERENCES } from '../services/emailNotificationService.js';
+import { getAvailableCurrencies } from '../services/exchangeRateService.js';
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' };
 const publicUser = (user) => { const value = { ...user }; delete value.password; delete value.refreshToken; return value; };
@@ -620,8 +621,8 @@ export const updateProfile = async (req, res) => {
   if (phone !== undefined) values.phone = phone.trim();
   if (coverimage?.trim()) values.coverimage = coverimage.trim();
   if (defaultCurrency !== undefined) {
-    if (!['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD'].includes(defaultCurrency)) {
-      throw Object.assign(new Error('Choose a supported default currency'), { statusCode: 400 });
+    if (typeof defaultCurrency !== 'string' || !(await getAvailableCurrencies()).includes(defaultCurrency)) {
+      throw Object.assign(new Error('Choose a currency supported by the exchange-rate provider'), { statusCode: 400 });
     }
     values.default_currency = defaultCurrency;
   }

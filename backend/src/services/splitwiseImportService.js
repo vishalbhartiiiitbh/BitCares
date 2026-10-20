@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { withTransaction } from '../db/index.js';
+import { normalizeGroupBalances } from './groupCurrencyService.js';
 import {
   allocateSplitwiseExpense,
   parseSplitwiseCsv,
@@ -109,7 +110,7 @@ export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappi
   );
 
   const fileHash = createHash('sha256').update(csvText).digest('hex');
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     const groupResult = await client.query(
       `SELECT g.id, g.name
          FROM groups g JOIN group_members gm ON gm.group_id = g.id
@@ -291,4 +292,6 @@ export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappi
       sourceTransactions: parsed.transactions.length,
     };
   });
+  await normalizeGroupBalances(groupId, userId);
+  return result;
 };
