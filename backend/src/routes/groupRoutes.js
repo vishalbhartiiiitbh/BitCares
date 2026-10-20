@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { addMember, balances, create, dashboardBalances, getWhiteboard, join, leave, list, remove, removeMember, requestPayment, saveWhiteboard, settle, simplify, update } from '../controllers/groupController.js';
+import { addMember, balances, create, dashboardBalances, getWhiteboard, importSplitwise, join, leave, list, previewSplitwise, remove, removeMember, requestPayment, saveWhiteboard, settle, simplify, update } from '../controllers/groupController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 
@@ -16,6 +16,10 @@ const uploadProof = multer({
     callback(null, true);
   },
 });
+const uploadCsv = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 router.use(requireAuth);
 router.get('/', asyncHandler(list));
 router.post('/', uploadProof.single('coverImage'), asyncHandler(create));
@@ -26,6 +30,8 @@ router.put('/:groupId/whiteboard', asyncHandler(saveWhiteboard));
 router.get('/:groupId/balances', asyncHandler(balances));
 router.post('/:groupId/members', asyncHandler(addMember));
 router.delete('/:groupId/members/:memberId', asyncHandler(removeMember));
+router.post('/:groupId/splitwise-import/preview', uploadCsv.single('file'), asyncHandler(previewSplitwise));
+router.post('/:groupId/splitwise-import', uploadCsv.single('file'), asyncHandler(importSplitwise));
 router.post('/:groupId/settlements', uploadProof.single('paymentProof'), asyncHandler(settle));
 router.post('/:groupId/payment-requests', asyncHandler(requestPayment));
 router.patch('/:groupId', uploadProof.single('coverImage'), asyncHandler(update));

@@ -2665,6 +2665,36 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       setSettlementsBusy(false);
     }
   };
+  const previewGroupSplitwiseImport = async (groupId, file) => {
+    const body = new FormData();
+    body.set('file', file);
+    return apiRequest(`/groups/${groupId}/splitwise-import/preview`, {
+      method: 'POST',
+      headers: authHeaders,
+      body,
+    });
+  };
+  const importGroupSplitwiseHistory = async (groupId, file, memberMappings) => {
+    const body = new FormData();
+    body.set('file', file);
+    body.set('memberMappings', JSON.stringify(memberMappings));
+    const result = await apiRequest(`/groups/${groupId}/splitwise-import`, {
+      method: 'POST',
+      headers: authHeaders,
+      body,
+    });
+    const [transactions, balances, settlements, allExpenses] = await Promise.all([
+      apiRequest(`/expenses?groupId=${groupId}&history=true`, { headers: authHeaders }),
+      apiRequest(`/groups/${groupId}/balances`, { headers: authHeaders }),
+      apiRequest(`/groups/${groupId}/simplify-debts`, { headers: authHeaders }),
+      apiRequest('/expenses?history=true', { headers: authHeaders }),
+    ]);
+    setGroupTransactions(transactions);
+    setGroupBalances(balances);
+    setGroupSettlements(settlements);
+    setExpenses(allExpenses);
+    return result;
+  };
   const saveGroupWhiteboard = async (groupId, content) => {
     const whiteboard = await apiRequest(`/groups/${groupId}/whiteboard`, {
       method: 'PUT',
@@ -4235,6 +4265,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               onSaveSettings={(settings) => saveGroupSettings(selectedGroup._id, settings)}
               onAddMember={(identifier) => addMemberToGroup(selectedGroup._id, identifier)}
               onRemoveMember={(memberId) => removeMemberFromGroup(selectedGroup._id, memberId)}
+              onPreviewSplitwise={(file) => previewGroupSplitwiseImport(selectedGroup._id, file)}
+              onImportSplitwise={(file, mappings) => importGroupSplitwiseHistory(selectedGroup._id, file, mappings)}
               onDelete={async () => {
                 if (await removeGroup(selectedGroup._id)) setSelectedGroup(null);
               }}
@@ -4361,6 +4393,8 @@ function GroupDetails({
   onRecordSettlement,
   onRequestPayment,
   onSendFriendRequest,
+  onPreviewSplitwise,
+  onImportSplitwise,
   onDelete,
   onLeave,
 }) {
@@ -4390,7 +4424,72 @@ function GroupDetails({
   const [paymentRequestDraft, setPaymentRequestDraft] = useState({ memberId: '', amount: '', currency: 'INR', note: '' });
   const [paymentRequestError, setPaymentRequestError] = useState('');
   const [paymentRequestBusy, setPaymentRequestBusy] = useState(false);
+  const [splitwiseFile, setSplitwiseFile] = useState(null);
+  const [splitwisePreview, setSplitwisePreview] = useState(null);
+  const [splitwiseMemberMappings, setSplitwiseMemberMappings] = useState({});
+  const [splitwiseBusy, setSplitwiseBusy] = useState(false);
+  const [splitwiseError, setSplitwiseError] = useState('');
+  const [splitwiseMessage, setSplitwiseMessage] = useState('');
+  const splitwiseFileInputRef = useRef(null);
   const isOwner = group.createdBy === user._id;
+  const previewSplitwiseFile = async (file) => {
+    setSplitwiseFile(file);
+    setSplitwisePreview(null);
+    setSplitwiseMemberMappings({});
+    setSplitwiseError('');
+    setSplitwiseMessage('');
+    if (!file) return;
+    setSplitwiseBusy(true);
+    try {
+      const preview = await onPreviewSplitwise(file);
+      const mappings = {};
+      preview.memberNames.forEach((splitwiseName) => {
+        const normalizedName = splitwiseName.trim().toLocaleLowerCase();
+        const matchingMember = group.members?.find((member) => (
+          [member.fullnamae, member.username].some((name) => name?.trim().toLocaleLowerCase() === normalizedName)
+        ));
+        if (matchingMember) mappings[splitwiseName] = matchingMember._id;
+      });
+      setSplitwisePreview(preview);
+      setSplitwiseMemberMappings(mappings);
+    } catch (error) {
+      setSplitwiseError(error.message);
+    } finally {
+      setSplitwiseBusy(false);
+    }
+  };
+  const submitSplitwiseImport = async () => {
+    if (!splitwiseFile || !splitwisePreview) return;
+    if (splitwisePreview.memberNames.some((name) => !splitwiseMemberMappings[name])) {
+      setSplitwiseError('Choose a SplitCare group member for every Splitwise member before importing.');
+      return;
+    }
+    if (new Set(Object.values(splitwiseMemberMappings)).size !== splitwisePreview.memberNames.length) {
+      setSplitwiseError('Map each Splitwise member to a different SplitCare group member.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Import ${splitwisePreview.transactionCount} historical transactions into ${group.name}? This changes group balances. The same CSV cannot be imported twice.`,
+    );
+    if (!confirmed) return;
+    setSplitwiseBusy(true);
+    setSplitwiseError('');
+    setSplitwiseMessage('');
+    try {
+      const result = await onImportSplitwise(splitwiseFile, splitwiseMemberMappings);
+      setSplitwiseMessage(
+        `Imported ${result.sourceTransactions} Splitwise transactions (${result.expenseCount} expense records and ${result.paymentCount} payments).`,
+      );
+      setSplitwiseFile(null);
+      setSplitwisePreview(null);
+      setSplitwiseMemberMappings({});
+      if (splitwiseFileInputRef.current) splitwiseFileInputRef.current.value = '';
+    } catch (error) {
+      setSplitwiseError(error.message);
+    } finally {
+      setSplitwiseBusy(false);
+    }
+  };
   const memberName = (id) => {
     const member = group.members?.find((item) => item._id === id);
     return member?.fullnamae || member?.username || 'Group member';
@@ -4591,6 +4690,98 @@ function GroupDetails({
     link.download = `${group.name.replace(/[^a-z0-9-_]+/gi, '-')}-expenses.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+  const exportSplitwiseCsv = () => {
+    const ledgerEntries = transactions
+      .filter((transaction) => ['EXPENSE', 'REIMBURSEMENT', 'SETTLEMENT', 'FRIEND_SETTLEMENT'].includes(transaction.type))
+      .sort((first, second) => new Date(first.createdAt) - new Date(second.createdAt));
+    const membersById = new Map((group.members || []).map((member) => [member._id, member]));
+    ledgerEntries.forEach((transaction) => {
+      [[transaction.paidBy, transaction.paidByName, transaction.paidByUsername],
+        [transaction.paidTo, transaction.paidToName, transaction.paidToUsername],
+        ...(transaction.splits || []).map((split) => [split.userId, split.fullnamae, split.username])]
+        .forEach(([userId, fullnamae, username]) => {
+          if (!userId || membersById.has(userId)) return;
+          membersById.set(userId, {
+            _id: userId,
+            username: username || userId.slice(0, 8),
+            fullnamae: fullnamae || `Former member ${userId.slice(0, 6)}`,
+          });
+        });
+    });
+    const members = [...membersById.values()];
+    const countsByName = new Map();
+    members.forEach((member) => {
+      const name = member.fullnamae || member.username;
+      countsByName.set(name, (countsByName.get(name) || 0) + 1);
+    });
+    const memberColumns = members.map((member) => {
+      const name = member.fullnamae || member.username;
+      return countsByName.get(name) > 1 ? `${name} (@${member.username})` : name;
+    });
+    const csvCell = (value, isText = false) => {
+      let text = String(value ?? '');
+      if (isText && /^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+      return `"${text.replaceAll('"', '""')}"`;
+    };
+    const cents = (value) => Math.round((Number(value) || 0) * 100);
+    const formatCents = (value) => {
+      const amount = (Math.abs(value) / 100).toFixed(2).replace(/\.?0+$/, '');
+      return `${value < 0 ? '-' : ''}${amount}`;
+    };
+    const rows = [
+      ['Date', 'Description', 'Category', 'Cost', 'Currency', ...memberColumns],
+    ];
+    const totalsByCurrency = new Map();
+
+    ledgerEntries.forEach((transaction) => {
+      const memberBalances = new Map(members.map((member) => [member._id, 0]));
+      const totalCents = cents(transaction.totalAmount);
+      if (['SETTLEMENT', 'FRIEND_SETTLEMENT'].includes(transaction.type)) {
+        memberBalances.set(transaction.paidBy, (memberBalances.get(transaction.paidBy) || 0) + totalCents);
+        memberBalances.set(transaction.paidTo, (memberBalances.get(transaction.paidTo) || 0) - totalCents);
+      } else {
+        memberBalances.set(transaction.paidBy, (memberBalances.get(transaction.paidBy) || 0) + totalCents);
+        transaction.splits?.forEach((split) => {
+          memberBalances.set(split.userId, (memberBalances.get(split.userId) || 0) - cents(split.amountOwed));
+        });
+      }
+      const currency = transaction.currency || 'INR';
+      const totals = totalsByCurrency.get(currency) || new Map(members.map((member) => [member._id, 0]));
+      memberBalances.forEach((amount, userId) => totals.set(userId, (totals.get(userId) || 0) + amount));
+      totalsByCurrency.set(currency, totals);
+      rows.push([
+        new Date(transaction.createdAt).toISOString().slice(0, 10),
+        transaction.description,
+        ['SETTLEMENT', 'FRIEND_SETTLEMENT'].includes(transaction.type) ? 'Payment' : transaction.category || 'General',
+        formatCents(totalCents),
+        currency,
+        ...members.map((member) => formatCents(memberBalances.get(member._id) || 0)),
+      ]);
+    });
+
+    // Splitwise's final summary row has no currency-aware representation for mixed-currency groups.
+    if (totalsByCurrency.size === 1) {
+      const [[currency, totals]] = totalsByCurrency;
+      rows.push([
+        new Date().toISOString().slice(0, 10),
+        'Total balance',
+        '',
+        '',
+        currency,
+        ...members.map((member) => formatCents(totals.get(member._id) || 0)),
+      ]);
+    }
+
+    const csv = rows.map((row, rowIndex) => row.map((value, index) => (
+      csvCell(value, (rowIndex === 0 && index >= 5) || (rowIndex > 0 && (index === 1 || index === 2)))
+    )).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${group.name.replace(/[^a-z0-9-_]+/gi, '-')}-splitwise.csv`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
   const openSettlementForm = () => {
     setSettlementDraft({
@@ -4904,6 +5095,79 @@ function GroupDetails({
                   {settingsError && <p className="error-message" role="alert">{settingsError}</p>}
                   <button className="group-setting-button" disabled={settingsBusy}>{settingsBusy ? 'Saving…' : 'Save group settings'}</button>
                 </form>
+                <section className="splitwise-import-panel">
+                  <h4>Import Splitwise history</h4>
+                  <p className="modal-help">
+                    Upload a Splitwise CSV export, then match every CSV member to a member of this group.
+                    Historical expense dates and payments are kept. Add any missing people to the group first.
+                    Re-importing the same file is blocked to prevent duplicate history.
+                  </p>
+                  <label>
+                    Splitwise CSV file
+                    <input
+                      ref={splitwiseFileInputRef}
+                      type="file"
+                      accept=".csv,text/csv"
+                      disabled={splitwiseBusy}
+                      onChange={(event) => void previewSplitwiseFile(event.target.files?.[0] || null)}
+                    />
+                  </label>
+                  {splitwiseBusy && <p className="modal-help">Reading or importing CSV…</p>}
+                  {splitwisePreview && (
+                    <div className="splitwise-import-preview">
+                      <p>
+                        Found {splitwisePreview.transactionCount} transactions:
+                        {' '}{splitwisePreview.expenseCount} expenses and {splitwisePreview.paymentCount} payments.
+                        {splitwisePreview.summaryRows > 0 && ` Skipping ${splitwisePreview.summaryRows} total-balance summary row.`}
+                      </p>
+                      {splitwisePreview.multiPayerExpenses > 0 && (
+                        <p className="modal-help">
+                          {splitwisePreview.multiPayerExpenses} expense(s) have multiple payers. Splitwise does not include their original individual shares, so exact pairwise balances cannot be recovered for those expenses. SplitCare estimates those shares while preserving the transaction totals and each member's net balance.
+                        </p>
+                      )}
+                      {splitwisePreview.memberNames.map((splitwiseName) => (
+                        <label className="splitwise-member-mapping" key={splitwiseName}>
+                          <span>{splitwiseName}</span>
+                          <select
+                            value={splitwiseMemberMappings[splitwiseName] || ''}
+                            onChange={(event) => setSplitwiseMemberMappings((current) => ({
+                              ...current,
+                              [splitwiseName]: event.target.value,
+                            }))}
+                          >
+                            <option value="">Choose a group member</option>
+                            {(group.members || []).map((member) => (
+                              <option
+                                key={member._id}
+                                value={member._id}
+                                disabled={Object.entries(splitwiseMemberMappings).some(
+                                  ([mappedName, userId]) => mappedName !== splitwiseName && userId === member._id,
+                                )}
+                              >
+                                {member.fullnamae || member.username} (@{member.username}) · {member._id}
+                              </option>
+                            ))}
+                          </select>
+                          {splitwiseMemberMappings[splitwiseName] && (
+                            <small>Mapped SplitCare user ID: {splitwiseMemberMappings[splitwiseName]}</small>
+                          )}
+                        </label>
+                      ))}
+                      <button
+                        className="group-setting-button"
+                        type="button"
+                        onClick={() => void submitSplitwiseImport()}
+                        disabled={splitwiseBusy
+                          || splitwisePreview.memberNames.some((name) => !splitwiseMemberMappings[name])
+                          || new Set(Object.values(splitwiseMemberMappings)).size !== splitwisePreview.memberNames.length}
+                      >
+                        Import history into group
+                      </button>
+                    </div>
+                  )}
+                  {splitwiseError && <p className="error-message" role="alert">{splitwiseError}</p>}
+                  {splitwiseMessage && <p className="success-message" role="status">{splitwiseMessage}</p>}
+                </section>
                 <div className="group-simplify-preview">
                   <button className="group-setting-button" type="button" onClick={() => {
                     setSettingsPlanVisible(true);
@@ -4926,6 +5190,7 @@ function GroupDetails({
                   )}
                 </div>
                 <label className="group-hide-toggle"><input type="checkbox" checked={hideUninvolved} onChange={(event) => setHideUninvolved(event.target.checked)} /> Hide expenses I’m not involved in</label>
+                <button className="group-setting-button" type="button" onClick={exportSplitwiseCsv}>Export data as CSV</button>
                 <button className="group-setting-button" onClick={exportTransactions}>Export expenses as CSV</button>
                 {isOwner && <button className="group-setting-button group-delete-button" disabled={settingsBusy} onClick={() => {
                   if (window.confirm('Permanently delete this group and all its expenses? This is only allowed after every balance is settled.')) onDelete();

@@ -244,6 +244,15 @@ const connectDB = async () => {
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS notification_type VARCHAR(30) NOT NULL DEFAULT 'GROUP_ACTIVITY';
     CREATE TABLE IF NOT EXISTS group_activity (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE, expense_id UUID REFERENCES expenses(id) ON DELETE SET NULL, actor_id UUID NOT NULL REFERENCES users(id), activity_type VARCHAR(40) NOT NULL, description TEXT NOT NULL, details TEXT NOT NULL, amount NUMERIC(12,2), currency VARCHAR(3), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
     CREATE INDEX IF NOT EXISTS group_activity_group_created_idx ON group_activity (group_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS splitwise_imports (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      source_hash CHAR(64) NOT NULL,
+      imported_by UUID NOT NULL REFERENCES users(id),
+      transaction_count INTEGER NOT NULL,
+      imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (group_id, source_hash)
+    );
     CREATE TABLE IF NOT EXISTS group_whiteboards (
       group_id UUID PRIMARY KEY REFERENCES groups(id) ON DELETE CASCADE,
       content TEXT NOT NULL DEFAULT '',

@@ -3,6 +3,15 @@ import { simplifyDebts } from '../services/debtSimplifier.js';
 import { recordSettlement } from '../services/settlementService.js';
 import { createPaymentRequest } from '../services/paymentRequestService.js';
 import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
+import { importSplitwiseCsv, previewSplitwiseImport } from '../services/splitwiseImportService.js';
+
+const getSplitwiseCsvText = (req) => {
+  if (!req.file) throw Object.assign(new Error('Choose a Splitwise CSV file to upload.'), { statusCode: 400 });
+  if (!req.file.originalname.toLocaleLowerCase().endsWith('.csv')) {
+    throw Object.assign(new Error('Upload a file with the .csv extension.'), { statusCode: 400 });
+  }
+  return req.file.buffer.toString('utf8');
+};
 
 export const list = async (req, res) => {
   res.json({ data: await listGroupsForUser(req.user._id) });
@@ -204,6 +213,33 @@ export const requestPayment = async (req, res) => {
       amount: req.body?.amount,
       currency: req.body?.currency,
       note: req.body?.note ?? null,
+    }),
+  });
+};
+
+export const previewSplitwise = async (req, res) => {
+  res.json({
+    data: await previewSplitwiseImport({
+      groupId: req.params.groupId,
+      userId: req.user._id,
+      csvText: getSplitwiseCsvText(req),
+    }),
+  });
+};
+
+export const importSplitwise = async (req, res) => {
+  let memberMappings;
+  try {
+    memberMappings = JSON.parse(req.body?.memberMappings || '');
+  } catch {
+    throw Object.assign(new Error('Choose a SplitCare account for every Splitwise member.'), { statusCode: 400 });
+  }
+  res.status(201).json({
+    data: await importSplitwiseCsv({
+      groupId: req.params.groupId,
+      userId: req.user._id,
+      csvText: getSplitwiseCsvText(req),
+      memberMappings,
     }),
   });
 };

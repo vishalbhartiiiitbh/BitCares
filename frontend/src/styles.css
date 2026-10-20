@@ -3189,6 +3189,55 @@ input::placeholder {
     margin: -7px 0 0;
 }
 
+.splitwise-import-panel {
+    display: grid;
+    gap: 10px;
+    padding: 16px 0;
+    border-top: 1px solid #e8e8e1;
+    border-bottom: 1px solid #e8e8e1;
+}
+
+.splitwise-import-panel h4 {
+    margin: 0;
+    color: #39453c;
+    font-size: 13px;
+}
+
+.splitwise-import-panel > label,
+.splitwise-member-mapping {
+    display: grid;
+    gap: 7px;
+    color: #52623e;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.splitwise-import-panel input[type="file"],
+.splitwise-member-mapping select {
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+}
+
+.splitwise-import-preview {
+    display: grid;
+    gap: 10px;
+}
+
+.splitwise-import-preview > p {
+    margin: 0;
+    color: #536054;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.splitwise-member-mapping small {
+    overflow-wrap: anywhere;
+    color: #7a857b;
+    font-size: 10px;
+    font-weight: 400;
+}
+
 .group-simplify-preview {
     display: grid;
     gap: 8px;
