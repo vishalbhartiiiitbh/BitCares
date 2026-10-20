@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
-const API_URL = `${import.meta.env.VITE_API_URL}/api` || "/api";
+const API_URL = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL.replace(/\/+$/, "")}/api`
+  : "/api";
 const emptyForm = { username: "", email: "", fullnamae: "", password: "" };
 const defaultEmailNotificationPreferences = {
   groupAdded: false,
@@ -27,10 +29,22 @@ async function apiRequest(path, options = {}) {
       headers: isFormData ? { ...options.headers } : { "Content-Type": "application/json", ...options.headers },
     });
   } catch {
-    throw new Error("Cannot connect to the backend. Start the API on port 5000.");
+    throw new Error("We’re having trouble connecting right now. Check your internet connection and try again.");
   }
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Something went wrong");
+  if (!response.ok) {
+    const fallbackMessages = {
+      401: "Please sign in again to continue.",
+      403: "You don’t have permission to do that.",
+      404: "That page or item couldn’t be found. Check the link and try again.",
+      413: "That request is too large. Please reduce its size and try again.",
+      429: "There have been too many attempts. Please wait a moment and try again.",
+    };
+    const message = response.status >= 500
+      ? "We couldn’t complete your request right now. Please try again in a moment."
+      : payload.error || fallbackMessages[response.status] || "We couldn’t complete that request. Please check your information and try again.";
+    throw new Error(message);
+  }
   return payload.data;
 }
 

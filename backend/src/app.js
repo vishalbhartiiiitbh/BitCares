@@ -34,6 +34,11 @@ app.use('/api/expenses', expenseRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/friends', friendRoutes);
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'That page or endpoint couldn’t be found. Check the address and try again.',
+  });
+});
 app.use(errorHandler);
 
 export default app;
