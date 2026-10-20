@@ -1869,6 +1869,10 @@ input::placeholder {
     z-index: 8;
 }
 
+.modal-backdrop.friend-expense-modal {
+    z-index: 8;
+}
+
 .group-workspace-header {
     display: grid;
     grid-template-columns: minmax(220px, 1fr) auto minmax(155px, 205px);
@@ -2979,6 +2983,19 @@ input::placeholder {
     max-height: min(420px, calc(100vh - 280px));
     gap: 8px;
     overflow-y: auto;
+}
+
+.settle-up-option-section {
+    display: grid;
+    gap: 8px;
+}
+
+.settle-up-option-section h3 {
+    margin: 8px 0 0;
+    color: #68746b;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .settle-up-option {

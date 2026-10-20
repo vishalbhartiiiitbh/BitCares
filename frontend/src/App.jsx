@@ -1360,7 +1360,7 @@ function RecentActivityPage({ transactions, notifications, friendRequests, group
   );
 }
 
-function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, onBack, onAddExpense, onRefresh, onOpenExpense, openSettlementOnLoad = false }) {
+function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, onBack, onAddExpense, onRefresh, onOpenExpense, openSettlementOnLoad = false, initialSettlementGroupId = '' }) {
   const [settlementOpen, setSettlementOpen] = useState(openSettlementOnLoad);
   const [settlementMode, setSettlementMode] = useState('one');
   const [payerId, setPayerId] = useState(userId);
@@ -1370,6 +1370,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   const [settlementBusy, setSettlementBusy] = useState(false);
   const [settlementError, setSettlementError] = useState('');
   const settlementPanelRef = useRef(null);
+  const initialSelectionAppliedRef = useRef(false);
   const defaultCurrency = history?.defaultCurrency || 'INR';
   const balanceItems = (history?.groups || []).flatMap((group) => group.balances.map((balance) => ({
     ...balance,
@@ -1402,6 +1403,17 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   useEffect(() => {
     setSettlementAmount(maxAmount > 0 ? maxAmount.toFixed(2) : '');
   }, [maxAmount]);
+
+  useEffect(() => {
+    if (!initialSettlementGroupId || !history || initialSelectionAppliedRef.current) return;
+    const initialBalances = balanceItems.filter((balance) => (
+      balance.groupId === initialSettlementGroupId && Number(balance.convertedBalance) < 0
+    ));
+    initialSelectionAppliedRef.current = true;
+    if (!initialBalances.length) return;
+    setSelectedKeys(initialBalances.map((balance) => balance.selectionKey));
+    setSettlementMode(initialBalances.length > 1 ? 'multiple' : 'one');
+  }, [history, initialSettlementGroupId, balanceItems]);
 
   useEffect(() => {
     if (settlementOpen) settlementPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1541,7 +1553,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
           <form onSubmit={saveSettlement}>
             <fieldset className="friend-settlement-modes">
               <legend>Choose what to settle</legend>
-              <label><input type="radio" checked={settlementMode === 'one'} onChange={() => changeMode('one')} /> One group balance</label>
+              <label><input type="radio" checked={settlementMode === 'one'} onChange={() => changeMode('one')} /> One balance</label>
               <label><input type="radio" checked={settlementMode === 'multiple'} onChange={() => changeMode('multiple')} /> Multiple selected balances</label>
               <label><input type="radio" checked={settlementMode === 'all'} onChange={() => changeMode('all')} /> All balances in this direction</label>
             </fieldset>
@@ -1554,7 +1566,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
                 <option value={friend._id}>{friend.fullnamae || friend.username} pays you</option>
               </select>
             </label>
-            {settlementMode !== 'all' && <p className="modal-help">Select {settlementMode === 'one' ? 'one' : 'one or more'} balances above. The payment is applied in the selected group order.</p>}
+            {settlementMode !== 'all' && <p className="modal-help">Select {settlementMode === 'one' ? 'one' : 'one or more'} balances above. The payment is applied in the selected balance order.</p>}
             <label>Amount ({defaultCurrency})
               <input
                 type="number"
@@ -1607,7 +1619,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [sentFriendRequests, setSentFriendRequests] = useState([]);
   const [friendSort, setFriendSort] = useState('alphabetical');
   const [showSettleUpChooser, setShowSettleUpChooser] = useState(false);
+  const [showGroupsChooser, setShowGroupsChooser] = useState(false);
   const [friendSettlementAutoOpen, setFriendSettlementAutoOpen] = useState(false);
+  const [friendSettlementInitialGroupId, setFriendSettlementInitialGroupId] = useState('');
   const [settleGroupAutoOpenId, setSettleGroupAutoOpenId] = useState('');
   const dashboardPageStorageKey = `splitcare-dashboard-page:${user._id}`;
   const [activePage, setActivePage] = useState(() => {
@@ -2186,10 +2200,11 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     }
   };
 
-  const openFriendDetails = async (friend, openSettlementOnLoad = false) => {
+  const openFriendDetails = async (friend, openSettlementOnLoad = false, initialSettlementGroupId = '') => {
     setSelectedFriend(friend);
     setFriendHistory(null);
     setFriendSettlementAutoOpen(openSettlementOnLoad);
+    setFriendSettlementInitialGroupId(initialSettlementGroupId);
     setActivePage('friend-detail');
     try {
       await loadFriendHistory(friend);
@@ -3039,6 +3054,24 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     }
     return { ...balance, type: 'group', target: groups.find((group) => group._id === balance.id) || null };
   });
+  const groupSettleUpOptions = settleUpOptions.filter((option) => option.type === 'group');
+  const outgoingFriendBalances = new Map(
+    (dashboardBalanceSummary?.outgoingBalances || [])
+      .filter((balance) => balance.id.startsWith('direct:'))
+      .map((balance) => [balance.id.split(':').at(-1), balance]),
+  );
+  const incomingFriendBalances = new Map(
+    (dashboardBalanceSummary?.incomingBalances || [])
+      .filter((balance) => balance.id.startsWith('direct:'))
+      .map((balance) => [balance.id.split(':').at(-1), balance]),
+  );
+  const friendSettleUpOptions = friends.map((friend) => ({
+    id: `friend:${friend._id}`,
+    type: 'friend',
+    target: friend,
+    outgoingBalance: outgoingFriendBalances.get(friend._id) || null,
+    incomingBalance: incomingFriendBalances.get(friend._id) || null,
+  }));
   const openSettleUpOption = (option) => {
     setShowSettleUpChooser(false);
     if (!option.target) {
@@ -3046,7 +3079,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       return;
     }
     if (option.type === 'friend') {
-      void openFriendDetails(option.target, true);
+      if (option.outgoingBalance) {
+        const directGroupId = option.outgoingBalance.id.split(':')[1];
+        void openFriendDetails(option.target, true, directGroupId);
+      } else {
+        void openFriendDetails(option.target);
+      }
       return;
     }
     setSettleGroupAutoOpenId(option.target._id);
@@ -3079,6 +3117,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           aria-label="Dashboard navigation"
         >
           <button aria-label="Dashboard" className={`dashboard-nav-link ${activePage === 'overview' ? 'active' : ''}`} type="button" onClick={() => { setActivePage('overview'); setShowMobileNav(false); }}><span className="mobile-nav-label">Dashboard</span></button>
+          <button aria-label="Groups" className={`dashboard-nav-link ${showGroupsChooser || selectedGroup ? 'active' : ''}`} type="button" onClick={() => { setShowGroupsChooser(true); setShowMobileNav(false); }}><span className="mobile-nav-label">Groups</span></button>
           <button aria-label="Recent activity" className={activePage === 'recent' ? 'active' : ''} type="button" onClick={() => { setActivePage('recent'); setShowMobileNav(false); }}><span className="mobile-nav-label">Recent activity</span></button>
           <button aria-label="All expenses" className={activePage === 'all-expenses' ? 'active' : ''} type="button" onClick={() => { setActivePage('all-expenses'); setShowMobileNav(false); }}><span className="mobile-nav-label">All expenses</span></button>
           <button aria-label="Personal expenses" className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => { setActivePage('personal'); setShowMobileNav(false); }}><span className="mobile-nav-label">Personal expenses</span></button>
@@ -3328,6 +3367,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   onRefresh={refreshFriendHistory}
                   onOpenExpense={setSelectedExpense}
                   openSettlementOnLoad={friendSettlementAutoOpen}
+                  initialSettlementGroupId={friendSettlementInitialGroupId}
                 />
               </section>
             </div>
@@ -3614,33 +3654,91 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           )}
           {showSettleUpChooser && (
             <Modal title="Settle up" onClose={() => setShowSettleUpChooser(false)} className="settle-up-chooser-modal">
-              <p className="modal-help">Choose someone you owe to open the payment form for their group or friend balance.</p>
+              <p className="modal-help">Choose a group balance or a friend to review personal expenses and balances.</p>
               {dashboardBalancesBusy ? (
                 <p className="empty-state">Loading your balances…</p>
-              ) : settleUpOptions.length ? (
-                <div className="settle-up-options">
-                  {settleUpOptions.map((option) => (
-                    <button
-                      className="settle-up-option"
-                      key={option.id}
-                      type="button"
-                      onClick={() => openSettleUpOption(option)}
-                    >
-                      <span>
-                        <strong>{option.target
-                          ? option.type === 'friend'
-                            ? option.target.fullnamae || option.target.username
-                            : option.target.name
-                          : option.name}</strong>
-                        <small>{option.type === 'friend' ? 'Friend balance' : 'Group balance'}</small>
-                      </span>
-                      <b>{dashboardBalanceSummary.currency} {Number(option.youOwe).toFixed(2)}</b>
-                    </button>
-                  ))}
-                </div>
               ) : (
-                <p className="empty-state">You don’t have any outstanding balances to settle.</p>
+                <div className="settle-up-options">
+                  {groupSettleUpOptions.length > 0 && (
+                    <section className="settle-up-option-section">
+                      <h3>Group balances</h3>
+                      {groupSettleUpOptions.map((option) => (
+                        <button
+                          className="settle-up-option"
+                          key={option.id}
+                          type="button"
+                          onClick={() => openSettleUpOption(option)}
+                        >
+                          <span>
+                            <strong>{option.target?.name || option.name}</strong>
+                            <small>Group balance</small>
+                          </span>
+                          <b>{dashboardBalanceSummary.currency} {Number(option.youOwe).toFixed(2)}</b>
+                        </button>
+                      ))}
+                    </section>
+                  )}
+                  {!groupSettleUpOptions.length && (
+                    <p className="empty-state">You don’t have any outstanding group balances to settle.</p>
+                  )}
+                  <section className="settle-up-option-section">
+                    <h3>Personal expenses with friends</h3>
+                    {friendSettleUpOptions.length ? friendSettleUpOptions.map((option) => (
+                      <button
+                        className="settle-up-option"
+                        key={option.id}
+                        type="button"
+                        onClick={() => openSettleUpOption(option)}
+                      >
+                        <span>
+                          <strong>{option.target.fullnamae || option.target.username}</strong>
+                          <small>
+                            {option.outgoingBalance
+                              ? `You owe · ${dashboardBalanceSummary.currency} ${Number(option.outgoingBalance.youOwe).toFixed(2)}`
+                              : option.incomingBalance
+                                ? `They owe you · ${dashboardBalanceSummary.currency} ${Number(option.incomingBalance.youAreOwed).toFixed(2)}`
+                                : 'No outstanding personal balance'}
+                          </small>
+                        </span>
+                        <b>{option.outgoingBalance ? 'Settle up' : 'View details'}</b>
+                      </button>
+                    )) : (
+                      <p className="empty-state">You haven’t added any friends yet.</p>
+                    )}
+                  </section>
+                </div>
               )}
+            </Modal>
+          )}
+          {showGroupsChooser && (
+            <Modal title="Groups" onClose={() => setShowGroupsChooser(false)} className="groups-chooser-modal">
+              <p className="modal-help">Open one of your groups or create or join a group.</p>
+              <div className="settle-up-options">
+                {groups.length ? groups.map((group) => (
+                  <button
+                    className="settle-up-option"
+                    key={group._id}
+                    type="button"
+                    onClick={() => {
+                      setShowGroupsChooser(false);
+                      void openGroupDetails(group);
+                    }}
+                  >
+                    <span><strong>{group.name}</strong><small>Open group</small></span>
+                    <b>View</b>
+                  </button>
+                )) : <p className="empty-state">You haven’t joined any groups yet.</p>}
+              </div>
+              <div className="friend-invite-actions">
+                <button className="quiet-button" type="button" onClick={() => {
+                  setShowGroupsChooser(false);
+                  setShowGroupForm(true);
+                }}>Create a group</button>
+                <button className="quiet-button" type="button" onClick={() => {
+                  setShowGroupsChooser(false);
+                  setShowJoinForm(true);
+                }}>Join with code</button>
+              </div>
             </Modal>
           )}
           {showGroupForm && (
@@ -3832,7 +3930,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           {showExpenseForm && (
             <Modal
               title={editingExpenseId ? 'Edit expense' : 'Add an expense'}
-              className={selectedGroup ? 'group-expense-modal' : ''}
+              className={selectedGroup ? 'group-expense-modal' : friendExpenseTarget ? 'friend-expense-modal' : ''}
               onClose={() => setShowExpenseForm(false)}
             >
               <form className="expense-entry-form" onSubmit={addExpense}>
@@ -4672,25 +4770,6 @@ function GroupDetails({
     reportWindow.document.close();
     reportWindow.setTimeout(() => reportWindow.print(), 300);
   };
-  const exportTransactions = () => {
-    const rows = [
-      ['Date', 'Description', 'Paid by', 'Amount', 'Currency'],
-      ...transactions.filter((transaction) => transaction.type !== 'ACTIVITY').map((transaction) => [
-        new Date(transaction.createdAt).toLocaleDateString(),
-        transaction.description,
-        transaction.paidByName || transaction.paidByUsername || 'Member',
-        transaction.totalAmount,
-        transaction.currency,
-      ]),
-    ];
-    const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${group.name.replace(/[^a-z0-9-_]+/gi, '-')}-expenses.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
   const exportSplitwiseCsv = () => {
     const ledgerEntries = transactions
       .filter((transaction) => ['EXPENSE', 'REIMBURSEMENT', 'SETTLEMENT', 'FRIEND_SETTLEMENT'].includes(transaction.type))
@@ -5191,7 +5270,6 @@ function GroupDetails({
                 </div>
                 <label className="group-hide-toggle"><input type="checkbox" checked={hideUninvolved} onChange={(event) => setHideUninvolved(event.target.checked)} /> Hide expenses I’m not involved in</label>
                 <button className="group-setting-button" type="button" onClick={exportSplitwiseCsv}>Export data as CSV</button>
-                <button className="group-setting-button" onClick={exportTransactions}>Export expenses as CSV</button>
                 {isOwner && <button className="group-setting-button group-delete-button" disabled={settingsBusy} onClick={() => {
                   if (window.confirm('Permanently delete this group and all its expenses? This is only allowed after every balance is settled.')) onDelete();
                 }}>{settingsBusy ? 'Deleting…' : 'Delete group and all its data'}</button>}
