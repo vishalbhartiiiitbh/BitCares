@@ -12,7 +12,6 @@ const createTransporter = () => {
     secure: SMTP_SECURE === 'true',
     auth: { user: SMTP_USER, pass: SMTP_PASS },
     // --- ADDED TIMEOUTS & DEBUGGING ---
-    family: 4,
     connectionTimeout: 10000, // Fails after 10 seconds instead of hanging forever
     greetingTimeout: 10000,
     socketTimeout: 10000,
