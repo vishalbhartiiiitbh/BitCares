@@ -1415,18 +1415,25 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
     const amount = Number(balance.convertedBalance);
     return payerId === userId ? amount < 0 : amount > 0;
   });
-  const maxAmount = eligibleItems.reduce((sum, balance) => sum + Math.abs(Number(balance.convertedBalance)), 0);
   const friendOwes = balanceItems.filter((balance) => Number(balance.convertedBalance) > 0)
     .reduce((sum, balance) => sum + Number(balance.convertedBalance), 0);
   const userOwes = balanceItems.filter((balance) => Number(balance.convertedBalance) < 0)
     .reduce((sum, balance) => sum + Math.abs(Number(balance.convertedBalance)), 0);
+  const netBalance = friendOwes - userOwes;
+  const netPayerId = netBalance < 0 ? userId : friend._id;
+  const maxAmount = settlementMode === 'all'
+    ? Math.abs(netBalance)
+    : eligibleItems.reduce((sum, balance) => sum + Math.abs(Number(balance.convertedBalance)), 0);
+  const hasOpposingBalances = friendOwes > 0 && userOwes > 0;
   const personalTransactions = (history?.transactions || []).filter((transaction) => (
     (transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type))
     || transaction.type === 'FRIEND_SETTLEMENT'
   ));
   useEffect(() => {
-    setSettlementAmount(maxAmount > 0 ? maxAmount.toFixed(2) : '');
-  }, [maxAmount]);
+    setSettlementAmount(maxAmount > 0 || (settlementMode === 'all' && hasOpposingBalances)
+      ? maxAmount.toFixed(2)
+      : '');
+  }, [maxAmount, settlementMode, hasOpposingBalances]);
 
   useEffect(() => {
     if (!initialSettlementGroupId || !history || initialSelectionAppliedRef.current) return;
@@ -1462,7 +1469,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({
-          payerId,
+          payerId: settlementMode === 'all' ? netPayerId : payerId,
           amount: settlementAmount,
           currency: defaultCurrency,
           mode: settlementMode === 'all' ? 'all' : 'selected',
@@ -1593,10 +1600,10 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
               <legend>Choose what to settle</legend>
               <label><input type="radio" checked={settlementMode === 'one'} onChange={() => changeMode('one')} /> One balance</label>
               <label><input type="radio" checked={settlementMode === 'multiple'} onChange={() => changeMode('multiple')} /> Multiple selected balances</label>
-              <label><input type="radio" checked={settlementMode === 'all'} onChange={() => changeMode('all')} /> All balances in this direction</label>
+              <label><input type="radio" checked={settlementMode === 'all'} onChange={() => changeMode('all')} /> Net all balances across groups</label>
             </fieldset>
             <label>Who paid?
-              <select value={payerId} onChange={(event) => {
+              <select value={settlementMode === 'all' ? netPayerId : payerId} disabled={settlementMode === 'all'} onChange={(event) => {
                 setPayerId(event.target.value);
                 setSelectedKeys([]);
               }}>
@@ -1608,7 +1615,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
             <label>Amount ({defaultCurrency})
               <input
                 type="number"
-                min="0.01"
+                min={settlementMode === 'all' && maxAmount === 0 && hasOpposingBalances ? '0' : '0.01'}
                 max={maxAmount.toFixed(2)}
                 step="0.01"
                 value={settlementAmount}
@@ -1616,13 +1623,21 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
                 required
               />
             </label>
-            <small>Up to {defaultCurrency} {maxAmount.toFixed(2)} available for this choice.</small>
+            <small>{settlementMode === 'all' && maxAmount === 0 && hasOpposingBalances
+              ? 'No payment is due after offsetting balances across groups.'
+              : `Up to ${defaultCurrency} ${maxAmount.toFixed(2)} available for this choice.`}</small>
             <label>Payment note (optional)
               <input value={settlementNote} onChange={(event) => setSettlementNote(event.target.value)} maxLength="500" placeholder="Cash, bank transfer…" />
             </label>
             {settlementError && <p className="error-message" role="alert">{settlementError}</p>}
-            <button className="primary-action" disabled={settlementBusy || maxAmount <= 0 || (settlementMode !== 'all' && !selectedKeys.length)}>
-              {settlementBusy ? 'Saving payment…' : 'Record payment'}
+            <button className="primary-action" disabled={settlementBusy
+              || (maxAmount <= 0 && !(settlementMode === 'all' && hasOpposingBalances))
+              || (settlementMode !== 'all' && !selectedKeys.length)}>
+              {settlementBusy
+                ? 'Saving payment…'
+                : settlementMode === 'all' && maxAmount === 0 && hasOpposingBalances
+                  ? 'Offset balances'
+                  : 'Record payment'}
             </button>
           </form>
         </section>}

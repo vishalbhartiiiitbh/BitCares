@@ -318,8 +318,9 @@ export const settleFriendBalances = async ({
   } catch {
     throw Object.assign(new Error('Enter a valid payment amount'), { statusCode: 400 });
   }
-  if (!paymentAmount.isFinite() || paymentAmount.lte(0) || paymentAmount.decimalPlaces() > 2) {
-    throw Object.assign(new Error('Payment amount must be positive and use at most two decimal places'), { statusCode: 400 });
+  if (!paymentAmount.isFinite() || paymentAmount.isNegative()
+    || (paymentAmount.isZero() && mode !== 'all') || paymentAmount.decimalPlaces() > 2) {
+    throw Object.assign(new Error('Payment amount must be non-negative for all balances and positive otherwise, with at most two decimal places'), { statusCode: 400 });
   }
 
   const [lowId, highId] = pairKey(userId, friendId);
@@ -347,8 +348,9 @@ export const settleFriendBalances = async ({
     : new Set(selections.map((selection) => `${selection.groupId}:${selection.currency}`));
   const directionFactor = payerId === lowId ? -1 : 1;
   const candidates = eligibleRows.rows
-    .filter((row) => (mode === 'all' || requestedKeys.has(`${row.groupId}:${row.currency}`))
-      && Math.sign(Number(row.amount)) === directionFactor)
+    .filter((row) => mode === 'all'
+      || (requestedKeys.has(`${row.groupId}:${row.currency}`)
+        && Math.sign(Number(row.amount)) === directionFactor))
     .sort((first, second) => `${first.groupName}:${first.currency}`.localeCompare(`${second.groupName}:${second.currency}`));
   if (mode === 'selected' && candidates.length !== requestedKeys.size) {
     throw Object.assign(new Error('One or more selected balances are no longer available in that payment direction'), { statusCode: 409 });
@@ -358,17 +360,32 @@ export const settleFriendBalances = async ({
   }
 
   const rates = new Map();
-  let maxPayment = new Decimal(0);
+  let signedNet = new Decimal(0);
+  let directionalTotal = new Decimal(0);
   // Convert each selected source balance to the requested payment currency before allocation.
   for (const candidate of candidates) {
     const rate = await getExchangeRate(candidate.currency, currency);
     rates.set(candidate.currency, rate);
-    maxPayment = maxPayment.plus(
-      new Decimal(candidate.amount).abs().mul(rate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
-    );
+    const convertedBalance = new Decimal(candidate.amount).mul(rate)
+      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    signedNet = signedNet.plus(convertedBalance);
+    if (Math.sign(Number(candidate.amount)) === directionFactor) {
+      directionalTotal = directionalTotal.plus(convertedBalance.abs());
+    }
+  }
+  const maxPayment = mode === 'all' ? signedNet.abs() : directionalTotal;
+  const expectedPayerId = signedNet.isNegative() ? lowId : highId;
+  if (mode === 'all' && !signedNet.isZero() && payerId !== expectedPayerId) {
+    throw Object.assign(new Error('The selected payer does not match the net balance across all groups'), { statusCode: 400 });
+  }
+  if (mode === 'all' && signedNet.isZero() && paymentAmount.gt(0)) {
+    throw Object.assign(new Error('No payment is due after offsetting balances across groups'), { statusCode: 400 });
   }
   if (paymentAmount.gt(maxPayment)) {
     throw Object.assign(new Error(`Payment cannot exceed ${currency} ${maxPayment.toFixed(2)} for the selected balances`), { statusCode: 400 });
+  }
+  if (mode === 'all' && maxPayment.gt(0) && paymentAmount.isZero()) {
+    throw Object.assign(new Error('Enter a payment amount for the remaining net balance'), { statusCode: 400 });
   }
 
   return withTransaction(async (client) => {
@@ -382,17 +399,93 @@ export const settleFriendBalances = async ({
       [groupIds, lowId, highId],
     );
     const currentRows = new Map(locked.rows.map((row) => [`${row.group_id}:${row.currency}`, row]));
-    const lockedCandidates = candidates.filter((candidate) => {
-      const current = currentRows.get(`${candidate.groupId}:${candidate.currency}`);
-      return current && Math.sign(Number(current.amount)) === directionFactor;
-    });
+    const lockedCandidates = candidates.filter((candidate) => currentRows.has(`${candidate.groupId}:${candidate.currency}`));
     if (mode === 'selected' && lockedCandidates.length !== requestedKeys.size) {
       throw Object.assign(new Error('One or more selected balances changed. Refresh and try again.'), { statusCode: 409 });
     }
+    if (mode === 'all' && locked.rows.length !== candidates.length) {
+      throw Object.assign(new Error('One or more balances changed. Refresh and try again.'), { statusCode: 409 });
+    }
+    let lockedNet = new Decimal(0);
+    let positiveTotal = new Decimal(0);
+    let negativeTotal = new Decimal(0);
+    for (const candidate of lockedCandidates) {
+      const current = currentRows.get(`${candidate.groupId}:${candidate.currency}`);
+      const converted = new Decimal(current.amount).mul(rates.get(candidate.currency))
+        .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+      lockedNet = lockedNet.plus(converted);
+      if (converted.isPositive()) positiveTotal = positiveTotal.plus(converted);
+      if (converted.isNegative()) negativeTotal = negativeTotal.plus(converted.abs());
+    }
+    const lockedMaxPayment = mode === 'all' ? lockedNet.abs() : maxPayment;
+    if (mode === 'all' && !lockedNet.isZero() && payerId !== (lockedNet.isNegative() ? lowId : highId)) {
+      throw Object.assign(new Error('The net balance changed. Refresh and try again.'), { statusCode: 409 });
+    }
+    if (paymentAmount.gt(lockedMaxPayment)) {
+      throw Object.assign(new Error('The balances changed. Refresh and try again.'), { statusCode: 409 });
+    }
+
+    const offsets = [];
+    if (mode === 'all') {
+      const offsetTarget = Decimal.min(positiveTotal, negativeTotal);
+      for (const sign of [1, -1]) {
+        let remainingOffset = offsetTarget;
+        for (const candidate of candidates) {
+          if (remainingOffset.lte(0)) break;
+          const key = `${candidate.groupId}:${candidate.currency}`;
+          const balance = currentRows.get(key);
+          if (!balance) continue;
+          const signedBalance = new Decimal(balance.amount);
+          if (Math.sign(signedBalance.toNumber()) !== sign) continue;
+          const rate = rates.get(candidate.currency);
+          const outstanding = signedBalance.abs();
+          let sourceAmount = Decimal.min(
+            outstanding,
+            remainingOffset.div(rate).toDecimalPlaces(2, Decimal.ROUND_DOWN),
+          );
+          if (sourceAmount.isZero() && outstanding.mul(rate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+            .lte(remainingOffset.plus('0.01'))) {
+            sourceAmount = outstanding;
+          }
+          if (sourceAmount.isZero()) continue;
+          const offsetValue = sourceAmount.mul(rate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+          const updatedBalance = signedBalance.minus(new Decimal(sign).mul(sourceAmount));
+          await client.query(
+            'UPDATE balances SET net_owed = $1, updated_at = NOW() WHERE group_id = $2 AND user1 = $3 AND user2 = $4 AND currency = $5',
+            [updatedBalance.toFixed(2), candidate.groupId, lowId, highId, candidate.currency],
+          );
+          currentRows.set(key, { ...balance, amount: updatedBalance.toFixed(2) });
+          offsets.push({ groupId: candidate.groupId, amount: sourceAmount.toFixed(2), currency: candidate.currency });
+          remainingOffset = Decimal.max(0, remainingOffset.minus(offsetValue));
+        }
+        if (remainingOffset.gt('0.01')) {
+          throw Object.assign(new Error('Could not offset all opposing group balances. Refresh and try again.'), { statusCode: 409 });
+        }
+      }
+      for (const offset of offsets) {
+        await client.query(
+          `INSERT INTO group_activity
+             (group_id, actor_id, activity_type, description, details, amount, currency)
+           VALUES ($1, $2, 'BALANCE_OFFSET', 'Balances offset across groups', $3, $4, $5)`,
+          [
+            offset.groupId,
+            userId,
+            `${offset.currency} ${offset.amount} was offset against another balance between these friends (${currency} equivalent).`,
+            offset.amount,
+            offset.currency,
+          ],
+        );
+      }
+    }
+
     let remaining = paymentAmount;
     const allocations = [];
     // Allocate in a stable order so one payment can settle balances from several currencies/groups.
-    for (const candidate of candidates) {
+    const paymentCandidates = candidates.filter((candidate) => {
+      const balance = currentRows.get(`${candidate.groupId}:${candidate.currency}`);
+      return balance && Math.sign(Number(balance.amount)) === directionFactor;
+    });
+    for (const candidate of paymentCandidates) {
       if (remaining.lte(0)) break;
       const balance = currentRows.get(`${candidate.groupId}:${candidate.currency}`);
       if (!balance) continue;
@@ -411,6 +504,10 @@ export const settleFriendBalances = async ({
         'UPDATE balances SET net_owed = net_owed + $1, updated_at = NOW() WHERE group_id = $2 AND user1 = $3 AND user2 = $4 AND currency = $5',
         [signedDelta.toFixed(2), candidate.groupId, lowId, highId, candidate.currency],
       );
+      currentRows.set(`${candidate.groupId}:${candidate.currency}`, {
+        ...balance,
+        amount: sourceBalance.plus(signedDelta).toFixed(2),
+      });
       allocations.push({
         groupId: candidate.groupId,
         amount: sourceAmount.toFixed(2),
@@ -420,8 +517,14 @@ export const settleFriendBalances = async ({
       });
       remaining = Decimal.max(0, remaining.minus(paidAmount));
     }
-    if (remaining.gt('0.01') || !allocations.length) {
+    if (remaining.gt('0.01') || (paymentAmount.gt(0) && !allocations.length)) {
       throw Object.assign(new Error('Payment amount could not be allocated to the current balances. Refresh and try again.'), { statusCode: 409 });
+    }
+    if (paymentAmount.isZero()) {
+      if (!offsets.length) {
+        throw Object.assign(new Error('There are no opposing balances to offset'), { statusCode: 400 });
+      }
+      return { offsetOnly: true, allocations: [], offsets };
     }
     const settlement = await client.query(
       `INSERT INTO friend_settlements (paid_by, paid_to, amount, currency, note)
