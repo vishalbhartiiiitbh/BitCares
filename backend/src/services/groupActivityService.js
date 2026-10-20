@@ -22,6 +22,7 @@ export const recordGroupActivity = async (client, {
   currency = null,
 }) => {
   if (!groupId) return;
+  // Reuse the caller's transaction so the activity, in-app alerts, and queued emails stay in sync.
   await client.query(
     `INSERT INTO group_activity
        (group_id, expense_id, actor_id, activity_type, description, details, amount, currency)

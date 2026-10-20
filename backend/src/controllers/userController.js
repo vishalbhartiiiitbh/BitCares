@@ -16,6 +16,7 @@ const hashVerificationCode = (email, purpose, salt, code) =>
   createHmac('sha256', process.env.ACCESS_TOKEN_SECRET).update(`${email}:${purpose}:${salt}:${code}`).digest('hex');
 
 const sendEmailCode = async (email, purpose) => {
+  // Store only a salted, keyed hash so a database read cannot reveal an active email code.
   const salt = randomBytes(16).toString('hex');
   const code = String(randomInt(100000, 1000000));
   const codeHash = hashVerificationCode(email, purpose, salt, code);
@@ -62,6 +63,7 @@ const sendEmailCode = async (email, purpose) => {
 const matchingCode = (row, code) => {
   const actual = Buffer.from(hashVerificationCode(row.email, row.purpose, row.code_salt, code), 'hex');
   const expected = Buffer.from(row.code_hash || '', 'hex');
+  // Constant-time comparison prevents timing from revealing how much of a code matched.
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 };
 
@@ -100,6 +102,7 @@ export const verifyRegistrationCode = async (req, res) => {
       return { error: 'Incorrect verification code' };
     }
     await client.query(
+      // Consume the one-time code and replace it with a short-lived registration token hash.
       `UPDATE account_email_codes
           SET code_hash = NULL, code_salt = NULL, code_expires_at = NULL,
               verified_token_hash = $1, verified_expires_at = NOW() + INTERVAL '10 minutes'

@@ -6,8 +6,23 @@ export const pool = new Pool({
   ssl: { rejectUnauthorized: false }, // Required for Supabase pooler connections
   connectionTimeoutMillis: 10000,    // Fail fast instead of hanging forever
 });
+
+/**
+ * Run a parameterized SQL query using the shared PostgreSQL connection pool.
+ * @param {string} text SQL statement, with positional placeholders where needed.
+ * @param {unknown[]} params Values bound to the statement placeholders.
+ * @returns {Promise<import('pg').QueryResult>} The PostgreSQL query result.
+ */
 export const query = (text, params) => pool.query(text, params);
 
+/**
+ * Execute a group of database operations atomically on one checked-out connection.
+ * The callback receives that connection; its work is committed on success and rolled
+ * back if it throws. The connection is always released before this function returns.
+ * @template T
+ * @param {(client: import('pg').PoolClient) => Promise<T>} callback Transaction work to run.
+ * @returns {Promise<T>} The value returned by the callback after the transaction commits.
+ */
 export const withTransaction = async (callback) => {
   const client = await pool.connect();
   try {
@@ -23,6 +38,13 @@ export const withTransaction = async (callback) => {
   }
 };
 
+/**
+ * Ensure the application's PostgreSQL extension, tables, indexes, and schema updates exist.
+ * The idempotent DDL supports both first-time setup and upgrades when the server starts.
+ * Database errors are allowed to reject so startup can fail visibly rather than run on an
+ * incomplete schema.
+ * @returns {Promise<void>} Resolves after all schema statements have completed.
+ */
 const connectDB = async () => {
   await query(`
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -92,6 +114,7 @@ const connectDB = async () => {
       PRIMARY KEY (user_id, month_start)
     );
 
+    -- Store each friendship once by sorting both user IDs into a canonical pair.
     CREATE TABLE IF NOT EXISTS friendships (
       user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       user_high UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -145,6 +168,7 @@ const connectDB = async () => {
       WHERE status = 'pending';
 
       
+    -- Groups also back private personal-expense and one-to-one friend ledgers.
     CREATE TABLE IF NOT EXISTS groups (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name VARCHAR(120) NOT NULL,
@@ -189,6 +213,7 @@ const connectDB = async () => {
       ADD CONSTRAINT group_members_group_id_fkey
       FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE;
 
+    -- Expense splits are stored separately so shares and itemized allocations remain queryable.
     CREATE TABLE IF NOT EXISTS expenses (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
@@ -226,6 +251,7 @@ const connectDB = async () => {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CHECK (length(content) <= 5000)
     );
+    -- Positive net_owed means user2 owes user1; a negative value reverses that direction.
     CREATE TABLE IF NOT EXISTS balances (group_id UUID REFERENCES groups(id) ON DELETE CASCADE, user1 UUID NOT NULL REFERENCES users(id), user2 UUID NOT NULL REFERENCES users(id), currency VARCHAR(3) NOT NULL DEFAULT 'INR', net_owed NUMERIC(12,2) NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (group_id, user1, user2, currency));
     ALTER TABLE balances ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'INR';
     ALTER TABLE balances DROP CONSTRAINT IF EXISTS balances_pkey;

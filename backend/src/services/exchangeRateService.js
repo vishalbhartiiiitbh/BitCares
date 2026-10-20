@@ -9,6 +9,7 @@ export const getExchangeRate = async (fromCurrency, toCurrency) => {
 
   const cacheKey = `${fromCurrency}:${toCurrency}`;
   const cached = dailyRates.get(cacheKey);
+  // Avoid repeated provider calls for the same currency pair during the cache window.
   if (cached && cached.expiresAt > Date.now()) return cached.rate;
 
   let response;

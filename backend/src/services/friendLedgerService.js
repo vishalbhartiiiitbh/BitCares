@@ -7,6 +7,7 @@ import { queueEmailNotification } from './emailNotificationService.js';
 
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
+// Friend and balance rows use the same canonical ordering for either user's perspective.
 const pairKey = (firstId, secondId) => [firstId, secondId].sort();
 const currencies = ['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD'];
 
@@ -359,6 +360,7 @@ export const settleFriendBalances = async ({
 
   const rates = new Map();
   let maxPayment = new Decimal(0);
+  // Convert each selected source balance to the requested payment currency before allocation.
   for (const candidate of candidates) {
     const rate = await getExchangeRate(candidate.currency, currency);
     rates.set(candidate.currency, rate);
@@ -390,6 +392,7 @@ export const settleFriendBalances = async ({
     }
     let remaining = paymentAmount;
     const allocations = [];
+    // Allocate in a stable order so one payment can settle balances from several currencies/groups.
     for (const candidate of candidates) {
       if (remaining.lte(0)) break;
       const balance = currentRows.get(`${candidate.groupId}:${candidate.currency}`);

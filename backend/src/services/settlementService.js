@@ -59,6 +59,7 @@ export const recordSettlement = async ({
     );
     const currentBalance = new Decimal(balanceResult.rows[0]?.amount || 0);
     if (group.rows[0].simplifyDebts) {
+      // In simplified mode, validate against members' overall net positions, not one pairwise row.
       const allBalances = await client.query(
         'SELECT user1, user2, net_owed::text AS amount FROM balances WHERE group_id = $1 AND currency = $2',
         [groupId, currency],

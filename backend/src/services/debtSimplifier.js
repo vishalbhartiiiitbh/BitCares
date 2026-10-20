@@ -29,6 +29,7 @@ export const simplifyDebts = async (groupId, userId) => {
   }
 
   const netsByCurrency = new Map();
+  // Convert pairwise debts into each member's net position, keeping currencies separate.
   for (const row of result.rows) {
     const net = netsByCurrency.get(row.currency) || new Map();
     net.set(row.user1, (net.get(row.user1) || new Decimal(0)).plus(row.amount));
@@ -38,6 +39,7 @@ export const simplifyDebts = async (groupId, userId) => {
 
   const transactions = [];
   for (const [currency, net] of netsByCurrency) {
+    // Greedily pair debtors and creditors, completing one side of each transfer at a time.
     const creditors = [...net].filter(([, amount]) => amount.gt(0)).sort((a, b) => b[1].cmp(a[1]));
     const debtors = [...net].filter(([, amount]) => amount.lt(0)).sort((a, b) => a[1].cmp(b[1]));
     let debtorIndex = 0;

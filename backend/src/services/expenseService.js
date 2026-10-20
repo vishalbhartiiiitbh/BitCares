@@ -323,6 +323,7 @@ const saveExpenseItems = async (client, expenseId, itemSplits) => {
 const applyGroupBalances = async (client, { groupId, paidBy, currency, splits, multiplier }) => {
   for (const split of splits) {
     if (split.userId === paidBy) continue;
+    // Store each debt against a sorted user pair; direction and multiplier encode its signed change.
     const [user1, user2] = [paidBy, split.userId].sort();
     const direction = user1 === paidBy ? 1 : -1;
     const delta = split.amountOwed.mul(direction * multiplier).toString();
@@ -593,6 +594,7 @@ export const updateExpense = async ({
       userId: split.userId,
       amountOwed: new Decimal(split.amountOwed),
     }));
+    // Remove the old expense's effect before applying its replacement, in the same transaction.
     await applyGroupBalances(client, {
       groupId: existing.groupId,
       paidBy: existing.paidBy,

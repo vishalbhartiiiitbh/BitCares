@@ -201,6 +201,7 @@ export const getDashboardBalanceSummary = async (userId) => {
 	}));
 	const entries = [...sharedEntries, ...directEntries];
 	const currencies = [...new Set(entries.map((entry) => entry.currency))];
+	// Present one dashboard total by converting each underlying balance to the user's preferred currency.
 	const rates = Object.fromEntries(await Promise.all(currencies.map(async (fromCurrency) => ([
 		fromCurrency,
 		await getExchangeRate(fromCurrency, currency),

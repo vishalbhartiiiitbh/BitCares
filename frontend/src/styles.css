@@ -5,6 +5,7 @@
     font-synthesis: none;
 }
 
+/* Expense form, split editor, and payment-proof modal. */
 .modal-backdrop.group-expense-modal .modal {
     width: min(690px, 100%);
     background: #fffefa;
@@ -358,6 +359,7 @@
     }
 }
 
+/* Shared page defaults and the public landing page. */
 * {
     box-sizing: border-box;
 }
@@ -998,6 +1000,7 @@ button {
     color: #19231d;
 }
 
+/* Sign-in, registration, and password recovery layout. */
 .auth-page {
     min-height: 100vh;
     display: grid;
@@ -1295,6 +1298,7 @@ input::placeholder {
     line-height: 1.5;
 }
 
+/* Signed-in dashboard and group workspace. */
 .dashboard-page {
     min-height: 100vh;
     background: #f1eee5;
@@ -1773,6 +1777,7 @@ input::placeholder {
     font-size: 12px;
 }
 
+/* Tablet layout adjustments for authentication and dashboard pages. */
 @media (max-width: 800px) {
     .auth-page {
         display: block;
@@ -1852,6 +1857,7 @@ input::placeholder {
     }
 }
 
+/* Group activity, balances, settings, and settlement workspace. */
 .group-workspace {
     width: min(1120px, 100%);
     max-height: 92vh;
@@ -3340,6 +3346,7 @@ input::placeholder {
     }
 }
 
+/* Shared dialog positioning and backdrop behavior. */
 .modal-backdrop {
     position: fixed;
     z-index: 5;
@@ -3767,6 +3774,7 @@ input::placeholder {
     background: #fff;
 }
 
+/* Dedicated friend management and friend-history views. */
 .friend-management-shell {
     display: block;
     width: min(1120px, 92%);
@@ -4759,6 +4767,7 @@ input::placeholder {
     font-weight: 800;
 }
 
+/* Friend list controls and notification panel. */
 .friend-sort-control {
     display: grid;
     gap: 4px;
@@ -6038,6 +6047,7 @@ input::placeholder {
     }
 }
 
+/* Preserve content while minimizing motion for accessibility preferences. */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,

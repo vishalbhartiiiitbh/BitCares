@@ -15,6 +15,7 @@ const defaultEmailNotificationPreferences = {
   productUpdates: false,
 };
 
+// Keep multipart uploads browser-managed so their boundary is included in the request.
 async function apiRequest(path, options = {}) {
   const isFormData = options.body instanceof FormData;
   let response;
@@ -39,6 +40,7 @@ function calculateItemizedShares(items, participants) {
     if (!assigned.length) return;
     const cents = Math.round((Number(item.amount) || 0) * 100);
     const share = Math.floor(cents / assigned.length);
+    // Hand out leftover cents in participant order so every item is fully allocated.
     let remainder = cents - share * assigned.length;
     assigned.forEach((id) => {
       totals.set(id, totals.get(id) + share + (remainder > 0 ? 1 : 0));
@@ -69,6 +71,7 @@ function getDefaultSplitValues(strategy, participants, totalAmount) {
     participants.forEach((id) => { defaults[id] = '0'; });
     return defaults;
   }
+  // Use integer cents so default equal splits don't lose fractions to floating-point rounding.
   const totalCents = Math.round((Number(totalAmount) || 0) * 100);
   const share = Math.floor(totalCents / participants.length);
   let remainder = totalCents - share * participants.length;
@@ -95,6 +98,7 @@ function SpendingInsights({ transactions, members, userId, personalOnly = false,
   ));
   const monthKeys = [...new Set(expenses.map((expense) => getExpenseMonthKey(new Date(expense.createdAt))))]
     .sort((first, second) => first.localeCompare(second));
+  // Keep the latest month selected if the previous selection disappears after refreshed data.
   const activeMonth = monthKeys.includes(monthSelection) ? monthSelection : monthKeys.at(-1) || '';
   const monthOptions = monthKeys.map((key) => {
     const [year, month] = key.split('-').map(Number);
@@ -146,6 +150,7 @@ function SpendingInsights({ transactions, members, userId, personalOnly = false,
     .map((payer) => ({ ...payer, amount: paidTotals.get(payer.id) || 0 }))
     .filter((payer) => payer.amount > 0);
   const paidTotal = paidData.reduce((total, payer) => total + payer.amount, 0);
+  // Paid totals describe who covered the bill; share totals below describe who consumed it.
   const owesPieData = personalOnly
     ? (balanceSummary?.outgoingBalances || []).map((balance) => ({
       id: balance.id,
@@ -279,6 +284,7 @@ function SpendingInsights({ transactions, members, userId, personalOnly = false,
                 <div className="spending-pie-layout">
                   <svg className="spending-pie" viewBox="0 0 160 160" role="img" aria-label={personalOnly ? 'Amount you owe by group and friend' : `Amount paid by each member for ${activeMonth}`}>
                     <circle cx="80" cy="80" r={pieRadius} fill="none" stroke="#edf0ec" strokeWidth="22" />
+                    {/* Each segment starts where the previous one ended around the ring. */}
                     {owesPieData.map((payer) => {
                       const segment = (payer.amount / (personalOnly ? owesPieTotal : paidTotal)) * pieCircumference;
                       const circle = (
@@ -1788,6 +1794,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
 
   useEffect(() => {
     let active = true;
+    // A newer refresh wins if dependencies change before an earlier balance request finishes.
     const requestId = ++dashboardBalanceRequestRef.current;
     setDashboardBalancesBusy(true);
     setDashboardBalancesError('');
@@ -2153,6 +2160,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   };
 
   const loadPersonalFriendExpenses = async (friendId) => {
+    // Ignore responses for a previously selected friend when requests finish out of order.
     const requestId = ++personalFriendRequestRef.current;
     if (!friendId) {
       setPersonalFriendExpenses([]);
@@ -2319,6 +2327,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
         if (expenseDraft.strategy === 'EQUAL') return null;
         return expenseDraft.splitValues[id] ?? getDefaultSplitValues(expenseDraft.strategy, participants, expenseDraft.totalAmount)[id];
       });
+    // Itemized expenses take their total from line items rather than a separate total field.
     const amount = expenseDraft.strategy === 'ITEMIZED'
       ? (expenseDraft.items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0)).toFixed(2)
       : expenseDraft.totalAmount;
@@ -5207,6 +5216,7 @@ function GroupActivityList({
   friendBusy = false,
   personalLedger = false,
 }) {
+  // Grouping once here lets the activity feed render a heading for each calendar month.
   const months = new Map();
   transactions.forEach((transaction) => {
     const date = new Date(transaction.createdAt);

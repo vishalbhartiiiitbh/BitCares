@@ -19,6 +19,7 @@ export const deleteImageByUrl = async (imageUrl) => {
   const cloudName = cloudinary.config().cloud_name;
   if (!cloudName) throw new Error('Cloudinary cloud name is not configured');
 
+  // Only delete assets hosted by this configured account; unrelated URLs are left untouched.
   const url = new URL(imageUrl);
   if (url.hostname !== `${cloudName}.res.cloudinary.com`) return false;
 

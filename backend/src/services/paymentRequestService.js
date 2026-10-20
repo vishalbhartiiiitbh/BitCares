@@ -33,6 +33,7 @@ export const createPaymentRequest = async ({
     throw Object.assign(new Error('Request note must be text of 1,000 characters or fewer'), { statusCode: 400 });
   }
 
+  // Match requests to the same net settlement plan users see, including simplified groups.
   const plan = await simplifyDebts(groupId, requesterId);
   const debt = plan.find((transfer) => (
     transfer.from === memberId && transfer.to === requesterId && transfer.currency === currency

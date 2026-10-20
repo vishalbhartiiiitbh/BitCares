@@ -4,6 +4,7 @@ import connectDB from './db/index.js';
 import { startEmailNotificationWorker } from './services/emailNotificationService.js';
 const port = process.env.PORT || 5000;
 
+// Do not accept requests until the database schema is ready and background work can start.
 connectDB()
   .then(() => {
     startEmailNotificationWorker();

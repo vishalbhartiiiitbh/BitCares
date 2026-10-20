@@ -33,6 +33,7 @@ const deliverBatch = async () => {
   if (workerRunning) return;
   workerRunning = true;
   try {
+    // SKIP LOCKED lets separate app instances claim different pending messages safely.
     const { rows } = await query(
       `UPDATE email_notification_outbox
           SET locked_at = NOW(), attempts = attempts + 1
@@ -64,6 +65,7 @@ const deliverBatch = async () => {
           message: error.message,
         });
         await query(
+          // Exponential delay caps retries at one hour; attempts are bounded in the claim query.
           `UPDATE email_notification_outbox
               SET locked_at = NULL,
                   next_attempt_at = NOW() + ($2 * INTERVAL '1 minute')
@@ -97,6 +99,7 @@ const queueMonthlySummaries = async () => {
   for (const recipient of recipients.rows) {
     await withTransaction(async (client) => {
       const delivery = await client.query(
+        // The unique user/month key makes this scheduled job safe to run more than once.
         `INSERT INTO email_notification_monthly_summary (user_id, month_start)
          SELECT id, $2::date
            FROM users
