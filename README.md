@@ -153,6 +153,8 @@ product announcements.
 
 ## Frontend Setup
 
+The frontend toolchain requires Node.js `^20.19.0` or `>=22.12.0`.
+
 ```bash
 cd frontend
 npm install
