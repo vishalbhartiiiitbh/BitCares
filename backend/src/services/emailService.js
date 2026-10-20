@@ -6,11 +6,17 @@ const createTransporter = () => {
     throw Object.assign(new Error('Email delivery is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS.'), { statusCode: 503 });
   }
 
-  return nodemailer.createTransport({
+ return nodemailer.createTransport({
     host: SMTP_HOST,
-    port: Number(SMTP_PORT || 587),
+    port: Number(SMTP_PORT || 465),
     secure: SMTP_SECURE === 'true',
     auth: { user: SMTP_USER, pass: SMTP_PASS },
+    // --- ADDED TIMEOUTS & DEBUGGING ---
+    connectionTimeout: 10000, // Fails after 10 seconds instead of hanging forever
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
+    logger: true,             // Prints successful/failed email attempts to Render logs
+    debug: true               // Prints full SMTP traffic to Render logs for troubleshooting
   });
 };
 
