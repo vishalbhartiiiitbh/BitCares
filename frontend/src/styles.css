@@ -6124,3 +6124,273 @@ input::placeholder {
         transition-duration: .01ms !important;
     }
 }
+
+/* Shared claymorphism finish across marketing, dashboard, forms, and workspaces. */
+:root {
+    --clay-surface: #f1eee5;
+    --clay-raised: #f8f7f1;
+    --clay-shadow: rgba(78, 88, 73, .13);
+    --clay-highlight: rgba(255, 255, 255, .92);
+}
+
+button,
+input,
+select,
+textarea {
+    border-radius: 12px;
+    transition: box-shadow .2s ease, transform .2s ease, background-color .2s ease, border-color .2s ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid rgba(76, 184, 158, .45);
+    outline-offset: 3px;
+}
+
+.dashboard-page {
+    background:
+        radial-gradient(ellipse at 12% 4%, rgba(255, 255, 255, .72), transparent 32%),
+        #e9ece4;
+}
+
+.dashboard-nav {
+    box-shadow: 0 7px 22px rgba(45, 107, 89, .14);
+}
+
+.dashboard-shell {
+    gap: 14px;
+    background: transparent;
+}
+
+.dashboard-sidebar,
+.dashboard-right-rail {
+    margin: 14px 0;
+    border: 1px solid rgba(255, 255, 255, .78);
+    border-radius: 20px;
+    background: #eef0e9;
+    box-shadow: 7px 7px 18px var(--clay-shadow), -7px -7px 18px var(--clay-highlight);
+}
+
+.dashboard-content {
+    min-width: 0;
+}
+
+.stat-card,
+.panel,
+.friend-referral-card,
+.friend-profile-card,
+.friend-requests-section,
+.recent-group-activity,
+.personal-expenses-summary,
+.personal-expense-month,
+.friend-history-balance,
+.friend-balance-group,
+.friend-history-settlement,
+.group-workspace-sidebar,
+.group-workspace-content,
+.group-simplify-plan,
+.settle-up-option-section,
+.landing-how-steps article,
+.landing-feature-grid article {
+    border: 1px solid rgba(255, 255, 255, .78);
+    border-radius: 20px;
+    background-color: var(--clay-surface);
+    box-shadow: 8px 8px 18px var(--clay-shadow), -8px -8px 18px var(--clay-highlight);
+}
+
+.stat-card {
+    padding: 26px;
+    background-image: linear-gradient(145deg, rgba(255, 255, 255, .52), rgba(231, 228, 218, .38));
+}
+
+.stat-card.highlight {
+    border-color: rgba(255, 255, 255, .62);
+    background-color: #d8ee4c;
+    background-image: linear-gradient(145deg, rgba(255, 255, 255, .32), rgba(216, 238, 76, .68));
+}
+
+.panel {
+    padding: 20px;
+}
+
+.dashboard-sidebar,
+.dashboard-right-rail {
+    padding: 18px 12px;
+}
+
+.side-link,
+.side-group,
+.side-friend {
+    border-radius: 12px;
+}
+
+.side-link.active {
+    border-left: 0;
+    background: #e5eee6;
+    box-shadow: inset 3px 3px 7px rgba(78, 88, 73, .09), inset -3px -3px 7px var(--clay-highlight);
+}
+
+.group-workspace,
+.group-details,
+.friend-history-dialog,
+.modal,
+.auth-card {
+    border: 1px solid rgba(255, 255, 255, .84);
+    border-radius: 26px;
+    background-color: var(--clay-surface);
+    box-shadow: 18px 18px 42px rgba(16, 23, 19, .18), -8px -8px 26px rgba(255, 255, 255, .24);
+}
+
+.group-workspace,
+.group-details,
+.friend-history-dialog {
+    padding: 30px;
+}
+
+.modal {
+    padding: 32px;
+}
+
+.auth-card {
+    padding: 36px;
+}
+
+.group-id-card,
+.settle-up-option,
+.friend-balance-row,
+.group-activity-row,
+.transaction-row,
+.expense-category-trigger,
+.expense-category-options,
+.expense-comment,
+.profile-menu,
+.friend-balance-group-title,
+.group-setting-button,
+.group-inline-action {
+    border: 1px solid rgba(255, 255, 255, .9);
+    border-radius: 14px;
+    background-color: var(--clay-raised);
+    box-shadow: 4px 4px 10px rgba(78, 88, 73, .08), -4px -4px 10px var(--clay-highlight);
+}
+
+.settle-up-option {
+    padding: 14px;
+}
+
+.settle-up-option:hover,
+.group-setting-button:hover,
+.group-inline-action:hover {
+    transform: translateY(-2px);
+    box-shadow: 6px 7px 14px rgba(78, 88, 73, .12), -4px -4px 10px var(--clay-highlight);
+}
+
+.friend-history-balance,
+.friend-history-settlement,
+.friend-balance-group {
+    padding: 18px;
+}
+
+.friend-profile-card,
+.friend-referral-card {
+    padding: 20px;
+}
+
+.landing-balance-card,
+.landing-float-note,
+.settlement-card {
+    border: 1px solid rgba(255, 255, 255, .68);
+    border-radius: 24px;
+    box-shadow: 14px 14px 30px rgba(8, 12, 9, .22), -7px -7px 22px rgba(255, 255, 255, .05);
+}
+
+.landing-how-steps article,
+.landing-feature-grid article {
+    padding: 24px;
+}
+
+.primary-action,
+.submit-button,
+.landing-signup,
+.group-workspace-actions .group-add-expense,
+.group-workspace-actions .group-settle-button,
+.friend-history-actions .primary-action {
+    border: 1px solid rgba(255, 255, 255, .36);
+    border-radius: 14px;
+    box-shadow: 5px 5px 12px rgba(25, 35, 29, .17), -3px -3px 9px rgba(255, 255, 255, .16);
+}
+
+.quiet-button,
+.group-workspace-actions button,
+.group-setting-button,
+.group-inline-action,
+.friend-history-back,
+.modal-close {
+    border-radius: 12px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+select,
+textarea {
+    border: 1px solid #d8ddd3;
+    border-radius: 12px;
+    background: #f6f6f0;
+    box-shadow: inset 3px 3px 7px rgba(78, 88, 73, .09), inset -3px -3px 7px rgba(255, 255, 255, .92);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]) {
+    padding: 11px 13px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: #73c7ae;
+    box-shadow: inset 2px 2px 5px rgba(78, 88, 73, .07), 0 0 0 3px rgba(76, 184, 158, .14);
+}
+
+.expense-entry-form input[type="file"] {
+    border-radius: 10px;
+}
+
+.avatar,
+.group-icon,
+.group-workspace-avatar,
+.group-friend-avatar,
+.friend-history-person img,
+.friend-history-person > span,
+.mini-group-icon {
+    box-shadow: 3px 3px 7px rgba(25, 35, 29, .14), -2px -2px 6px rgba(255, 255, 255, .48);
+}
+
+.modal-backdrop,
+.friend-history-backdrop,
+.group-details-backdrop {
+    backdrop-filter: blur(5px);
+}
+
+@media (max-width: 760px) {
+    .dashboard-sidebar,
+    .dashboard-right-rail {
+        border-radius: 16px;
+    }
+
+    .stat-card,
+    .panel,
+    .friend-profile-card,
+    .friend-referral-card,
+    .recent-group-activity,
+    .personal-expense-month {
+        border-radius: 16px;
+    }
+
+    .group-workspace,
+    .group-details,
+    .friend-history-dialog,
+    .modal,
+    .auth-card {
+        border-radius: 20px;
+    }
+}
