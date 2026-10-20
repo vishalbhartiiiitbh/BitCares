@@ -1240,6 +1240,9 @@ function ExpenseLedger({
   onFriendChange,
   friendExpensesError = '',
   friendExpensesBusy = false,
+  oneToOneExpenses = false,
+  balanceSummary = null,
+  balanceSummaryBusy = false,
 }) {
   const [search, setSearch] = useState('');
   const searchTerms = search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -1257,6 +1260,12 @@ function ExpenseLedger({
   expenses.forEach((expense) => {
     totalByCurrency.set(expense.currency, (totalByCurrency.get(expense.currency) || 0) + Number(expense.totalAmount));
   });
+  const directBalances = oneToOneExpenses
+    ? [...(balanceSummary?.outgoingBalances || []), ...(balanceSummary?.incomingBalances || [])]
+      .filter((balance) => balance.id.startsWith('direct:'))
+    : [];
+  const amountOwed = directBalances.reduce((total, balance) => total + Number(balance.youOwe), 0);
+  const amountOwedToYou = directBalances.reduce((total, balance) => total + Number(balance.youAreOwed), 0);
   return (
     <div className="personal-expenses-page">
       <div className="welcome-row">
@@ -1266,7 +1275,7 @@ function ExpenseLedger({
           <p className="lede">{description}</p>
         </div>
         <button className="primary-action" type="button" onClick={onAddExpense}>
-          {groupExpenses ? '＋ Add an expense' : selectedFriendId ? '＋ Add expense with friend' : '＋ Add personal expense'}
+          {groupExpenses ? '＋ Add an expense' : oneToOneExpenses ? '＋ Choose a friend' : selectedFriendId ? '＋ Add expense with friend' : '＋ Add personal expense'}
         </button>
       </div>
       {onFriendChange && (
@@ -1285,7 +1294,22 @@ function ExpenseLedger({
       {friendExpensesError && <p className="error-message" role="alert">{friendExpensesError}</p>}
       <div className="personal-expenses-summary">
         <strong>{expenses.length} {expenses.length === 1 ? 'expense' : 'expenses'}</strong>
-        <span>{[...totalByCurrency].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ') || 'No spending recorded'}</span>
+        {oneToOneExpenses ? (
+          <span>
+            {balanceSummaryBusy
+              ? 'Loading outstanding balances…'
+              : !balanceSummary
+                ? 'Outstanding balances unavailable'
+                : amountOwed === 0 && amountOwedToYou === 0
+                  ? 'No outstanding balances'
+                  : [
+                    amountOwed > 0 && `You owe ${balanceSummary.currency} ${amountOwed.toFixed(2)}`,
+                    amountOwedToYou > 0 && `Owed to you ${balanceSummary.currency} ${amountOwedToYou.toFixed(2)}`,
+                  ].filter(Boolean).join(' · ')}
+          </span>
+        ) : (
+          <span>{[...totalByCurrency].map(([currency, total]) => `${currency} ${total.toFixed(2)}`).join(' · ') || 'No spending recorded'}</span>
+        )}
       </div>
       <div className="expense-ledger-tools">
         <label className="group-activity-search">
@@ -1299,14 +1323,14 @@ function ExpenseLedger({
         </label>
         {search.trim() && <span>{visibleExpenses.length} of {expenses.length} expenses</span>}
       </div>
-      {friendExpensesBusy ? <p className="empty-state">Loading expenses with your friend…</p> : expenses.length ? (
+      {friendExpensesBusy ? <p className="empty-state">{oneToOneExpenses ? 'Loading one-to-one expenses from your friends…' : 'Loading expenses with your friend…'}</p> : expenses.length ? (
         visibleExpenses.length ? (
           <GroupActivityList
             transactions={visibleExpenses}
             userId={userId}
             onOpenExpense={onOpenExpense}
-            personalLedger={!groupExpenses && !selectedFriendId}
-            showGroupName={groupExpenses}
+            personalLedger={!groupExpenses && !selectedFriendId && !oneToOneExpenses}
+            showGroupName={groupExpenses || oneToOneExpenses}
           />
         ) : <p className="empty-state">No expenses match your search. Try a description or amount.</p>
       ) : (
@@ -1315,11 +1339,15 @@ function ExpenseLedger({
           <h2>No {groupExpenses ? 'group' : 'personal'} expenses yet</h2>
           <p>{groupExpenses
             ? 'Expenses you and your group members add will appear here, organized by month.'
-            : selectedFriendId
+            : oneToOneExpenses
+              ? friends.length
+                ? 'One-to-one expenses you share with friends will appear here. They are kept separate from group expenses.'
+                : 'Add a friend first to start sharing one-to-one expenses outside groups.'
+              : selectedFriendId
               ? 'Direct expenses you share with this friend will appear here. Group expenses are shown in All expenses.'
               : 'Add an expense just for yourself. It will be saved in your private Personal Expenses group and shown under its month.'}</p>
           <button className="primary-action" type="button" onClick={onAddExpense}>
-            {groupExpenses ? 'Add your first group expense' : 'Add your first personal expense'}
+            {groupExpenses ? 'Add your first group expense' : oneToOneExpenses ? (friends.length ? 'Choose a friend' : 'Find a friend') : 'Add your first personal expense'}
           </button>
         </div>
       )}
@@ -1396,11 +1424,6 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
     (transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type))
     || transaction.type === 'FRIEND_SETTLEMENT'
   ));
-  const personalExpenseTotal = (history?.groups || [])
-    .filter((group) => group.isDirect)
-    .flatMap((group) => group.expenseTotals || [])
-    .reduce((total, expenseTotal) => total + Number(expenseTotal.convertedAmount), 0);
-
   useEffect(() => {
     setSettlementAmount(maxAmount > 0 ? maxAmount.toFixed(2) : '');
   }, [maxAmount]);
@@ -1502,9 +1525,23 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
                   {group.isDirect && <small>One-to-one</small>}
                 </div>
                 <span>
-                  <small>Total expenses</small>
-                  <strong>{defaultCurrency} {(group.expenseTotals || [])
-                    .reduce((total, item) => total + Number(item.convertedAmount), 0).toFixed(2)}</strong>
+                  {(() => {
+                    const owedToYou = (group.balances || [])
+                      .reduce((total, balance) => total + Math.max(0, Number(balance.convertedBalance)), 0);
+                    const youOwe = (group.balances || [])
+                      .reduce((total, balance) => total + Math.max(0, -Number(balance.convertedBalance)), 0);
+                    return (
+                      <>
+                        <small>Outstanding</small>
+                        <strong>{owedToYou || youOwe
+                          ? [
+                            owedToYou > 0 && `Owed ${defaultCurrency} ${owedToYou.toFixed(2)}`,
+                            youOwe > 0 && `You owe ${defaultCurrency} ${youOwe.toFixed(2)}`,
+                          ].filter(Boolean).join(' · ')
+                          : 'Settled up'}</strong>
+                      </>
+                    );
+                  })()}
                 </span>
               </div>
               {group.balances.length ? group.balances.map((balance) => {
@@ -1534,7 +1571,7 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
           <section className="friend-history-personal-spend">
             <div className="friend-history-section-heading">
               <div><p className="eyebrow">ONE-TO-ONE LEDGER</p><h2>Personal spend with {friend.fullnamae || friend.username}</h2></div>
-              <span>{personalTransactions.length} records · {defaultCurrency} {personalExpenseTotal.toFixed(2)}</span>
+              <span>{personalTransactions.length} records</span>
             </div>
             {busy ? <p className="empty-state">Loading personal expenses…</p>
               : personalTransactions.length
@@ -1604,6 +1641,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const [personalGroup, setPersonalGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [friendActivities, setFriendActivities] = useState([]);
+  const [nonGroupExpensesBusy, setNonGroupExpensesBusy] = useState(false);
+  const [nonGroupExpensesError, setNonGroupExpensesError] = useState('');
   const [personalExpenses, setPersonalExpenses] = useState([]);
   const [personalFriendId, setPersonalFriendId] = useState('');
   const [personalFriendExpenses, setPersonalFriendExpenses] = useState([]);
@@ -1627,7 +1666,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const dashboardPageStorageKey = `splitcare-dashboard-page:${user._id}`;
   const [activePage, setActivePage] = useState(() => {
     const savedPage = window.sessionStorage.getItem(dashboardPageStorageKey);
-    return ['overview', 'recent', 'all-expenses', 'personal', 'friends'].includes(savedPage)
+    return ['overview', 'recent', 'all-expenses', 'non-group-expenses', 'personal', 'friends'].includes(savedPage)
       ? savedPage
       : 'overview';
   });
@@ -1812,18 +1851,34 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       apiRequest("/groups", { headers: authHeaders }),
       apiRequest("/expenses?history=true", { headers: authHeaders }),
       apiRequest("/expenses/personal", { headers: authHeaders }),
-      apiRequest("/friends/activity", { headers: authHeaders }),
     ])
-      .then(([groupData, expenseData, personalExpenseData, friendActivityData]) => {
+      .then(([groupData, expenseData, personalExpenseData]) => {
         const loadedGroups = groupData || [];
         setGroups(loadedGroups.filter((group) => !group.isPersonal));
         setPersonalGroup(loadedGroups.find((group) => group.isPersonal) || null);
         setExpenses(expenseData || []);
         setPersonalExpenses(personalExpenseData || []);
-        setFriendActivities(friendActivityData || []);
       })
       .catch((error) => setFormMessage(error.message));
   }, [accessToken]);
+
+  useEffect(() => {
+    if (activePage !== 'non-group-expenses') return undefined;
+    let active = true;
+    setNonGroupExpensesBusy(true);
+    setNonGroupExpensesError('');
+    apiRequest('/friends/activity', { headers: authHeaders })
+      .then((activity) => {
+        if (active) setFriendActivities(activity || []);
+      })
+      .catch((error) => {
+        if (active) setNonGroupExpensesError(error.message);
+      })
+      .finally(() => {
+        if (active) setNonGroupExpensesBusy(false);
+      });
+    return () => { active = false; };
+  }, [activePage, accessToken]);
 
   useEffect(() => {
     let active = true;
@@ -3067,6 +3122,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
       transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type)
     )),
   ].sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
+  const nonGroupExpenses = friendActivities
+    .filter((transaction) => transaction.isDirect && ['EXPENSE', 'REIMBURSEMENT'].includes(transaction.type))
+    .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
   const recentActivity = [...groupActivity, ...friendActivities]
     .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
   const dashboardSpendingTransactions = [
@@ -3151,6 +3209,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           <button aria-label="Groups" className={`dashboard-nav-link ${showGroupsChooser || selectedGroup ? 'active' : ''}`} type="button" onClick={() => { setShowGroupsChooser(true); setShowMobileNav(false); }}><span className="mobile-nav-label">Groups</span></button>
           <button aria-label="Recent activity" className={activePage === 'recent' ? 'active' : ''} type="button" onClick={() => { setActivePage('recent'); setShowMobileNav(false); }}><span className="mobile-nav-label">Recent activity</span></button>
           <button aria-label="All expenses" className={activePage === 'all-expenses' ? 'active' : ''} type="button" onClick={() => { setActivePage('all-expenses'); setShowMobileNav(false); }}><span className="mobile-nav-label">All expenses</span></button>
+          <button aria-label="Non-group expenses" className={activePage === 'non-group-expenses' ? 'active' : ''} type="button" onClick={() => { setActivePage('non-group-expenses'); setShowMobileNav(false); }}><span className="mobile-nav-label">Non-group expenses</span></button>
           <button aria-label="Personal expenses" className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => { setActivePage('personal'); setShowMobileNav(false); }}><span className="mobile-nav-label">Personal expenses</span></button>
           <button aria-label="Friends" className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => { setActivePage('friends'); setShowMobileNav(false); }}><span className="mobile-nav-label">Friends</span></button>
         </nav>
@@ -3310,6 +3369,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             </button>
             <button className={`side-link ${activePage === 'all-expenses' ? 'active' : ''}`} onClick={() => setActivePage('all-expenses')} type="button">
               ▤ <span>All expenses</span>
+            </button>
+            <button className={`side-link ${activePage === 'non-group-expenses' ? 'active' : ''}`} onClick={() => setActivePage('non-group-expenses')} type="button">
+              ↔ <span>Non-group expenses</span>
             </button>
             <button className={`side-link ${activePage === 'personal' ? 'active' : ''}`} onClick={() => setActivePage('personal')} type="button">
               ☷ <span>Personal expenses</span>
@@ -3511,6 +3573,21 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 ) : <p className="friends-request-empty">No friend requests yet.</p>}
               </section>
             </div>
+          ) : activePage === 'non-group-expenses' ? (
+            <ExpenseLedger
+              expenses={nonGroupExpenses}
+              title="Non-group expenses"
+              description="One-to-one expenses you share with friends, separate from group expenses."
+              onAddExpense={() => setActivePage('friends')}
+              onOpenExpense={setSelectedExpense}
+              userId={user._id}
+              friends={friends}
+              friendExpensesBusy={nonGroupExpensesBusy}
+              friendExpensesError={nonGroupExpensesError}
+              oneToOneExpenses
+              balanceSummary={dashboardBalanceSummary}
+              balanceSummaryBusy={dashboardBalancesBusy}
+            />
           ) : activePage === 'personal' ? (
             <ExpenseLedger
               expenses={personalFriendId ? personalFriendExpenses : personalExpenses}
@@ -3535,7 +3612,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             <ExpenseLedger
               expenses={allExpenses}
               title="All expenses"
-              description="Every expense from all the groups you belong to, organized by month."
+              description="Expenses from your groups and one-to-one expenses with friends, organized by month."
               onAddExpense={() => openExpenseForm('')}
               onOpenExpense={setSelectedExpense}
               userId={user._id}
@@ -5618,6 +5695,7 @@ function GroupActivityList({
   onRespondToFriendRequest,
   friendBusy = false,
   personalLedger = false,
+  showGroupName = false,
 }) {
   // Grouping once here lets the activity feed render a heading for each calendar month.
   const months = new Map();
@@ -5803,7 +5881,7 @@ function GroupActivityList({
                   <strong>{transaction.description || `${payerName} paid ${transaction.paidToName || 'a friend'}`}</strong>
                   {(transaction.note || transaction.comments?.length > 0) && <span className="group-activity-comment" aria-label="Has a note or comments">●</span>}
                   <small>
-                    {transaction.groupName && !personalLedger ? `${transaction.groupName} · ` : ''}
+                    {transaction.groupName && (!personalLedger || showGroupName) ? `${transaction.groupName} · ` : ''}
                     {transaction.category || 'Uncategorized'}
                     {transaction.subcategory ? ` · ${transaction.subcategory}` : ''}
                     {isSettlement ? ` · ${payerName} paid ${transaction.paidToName || 'a member'}` : ''}

@@ -169,8 +169,31 @@ export const listExpenses = async (groupId, userId, unlimited = false, includeFr
        ORDER BY s.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
       [userId],
     );
+    const friendSettlements = await query(
+      `SELECT a.id AS "_id", a.group_id AS "groupId", g.name AS "groupName",
+              FALSE AS "isPersonal",
+              'Settlement to ' || recipient.fullnamae AS description,
+              a.amount::text AS "totalAmount", a.currency, 'SETTLEMENT' AS type,
+              'Settlement' AS category, NULL::text AS subcategory,
+              'SETTLEMENT' AS "splitStrategy", s.paid_by AS "paidBy",
+              s.created_at AS "createdAt", s.note,
+              NULL::text AS "paymentProofUrl",
+              payer.username AS "paidByUsername", payer.fullnamae AS "paidByName",
+              ARRAY[s.paid_by::text, s.paid_to::text] AS "participantIds",
+              '[]'::json AS items, s.paid_to AS "paidTo",
+              recipient.username AS "paidToUsername", recipient.fullnamae AS "paidToName",
+              '[]'::json AS splits
+       FROM friend_settlement_allocations a
+       JOIN friend_settlements s ON s.id = a.settlement_id
+       JOIN groups g ON g.id = a.group_id AND NOT g.is_personal AND NOT g.is_friend_ledger
+       JOIN group_members gm ON gm.group_id = a.group_id AND gm.user_id = $1
+       JOIN users payer ON payer.id = s.paid_by
+       JOIN users recipient ON recipient.id = s.paid_to
+       ORDER BY s.created_at DESC${unlimited ? '' : ' LIMIT 100'}`,
+      [userId],
+    );
     const transactions = [...result.rows, ...activity.rows]
-      .concat(settlements.rows)
+      .concat(settlements.rows, friendSettlements.rows)
       .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
       .slice(0, unlimited ? undefined : 100);
     return transactions;
@@ -206,7 +229,28 @@ export const listExpenses = async (groupId, userId, unlimited = false, includeFr
      WHERE s.group_id = $1`,
     [groupId],
   );
-  const transactions = [...result.rows, ...settlements.rows, ...activityResult.rows]
+  const friendSettlements = await query(
+    `SELECT a.id AS "_id", a.group_id AS "groupId",
+            'Settlement to ' || recipient.fullnamae AS description,
+            a.amount::text AS "totalAmount", a.currency, 'SETTLEMENT' AS type,
+            'Settlement' AS category, NULL::text AS subcategory,
+            'SETTLEMENT' AS "splitStrategy", s.paid_by AS "paidBy",
+            s.created_at AS "createdAt", s.note,
+            NULL::text AS "paymentProofUrl",
+            payer.username AS "paidByUsername", payer.fullnamae AS "paidByName",
+            ARRAY[s.paid_by::text, s.paid_to::text] AS "participantIds",
+            '[]'::json AS items, s.paid_to AS "paidTo",
+            recipient.username AS "paidToUsername", recipient.fullnamae AS "paidToName",
+            '[]'::json AS splits
+     FROM friend_settlement_allocations a
+     JOIN friend_settlements s ON s.id = a.settlement_id
+     JOIN groups g ON g.id = a.group_id AND NOT g.is_friend_ledger
+     JOIN users payer ON payer.id = s.paid_by
+     JOIN users recipient ON recipient.id = s.paid_to
+     WHERE a.group_id = $1`,
+    [groupId],
+  );
+  const transactions = [...result.rows, ...settlements.rows, ...friendSettlements.rows, ...activityResult.rows]
     .sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt))
     .slice(0, unlimited ? undefined : 100);
   return transactions;
