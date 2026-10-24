@@ -149,6 +149,38 @@ const connectDB = async () => {
       ON billing_subscriptions (user_id, created_at DESC);
     ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS plan_amount INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'INR';
+    CREATE TABLE IF NOT EXISTS billing_coupons (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      code VARCHAR(40) NOT NULL UNIQUE,
+      discount_type VARCHAR(20) NOT NULL CHECK (discount_type IN ('percentage', 'fixed_inr')),
+      discount_value NUMERIC(10, 2) NOT NULL CHECK (discount_value > 0),
+      application VARCHAR(20) NOT NULL CHECK (application IN ('single_use', 'forever')),
+      razorpay_offer_id TEXT,
+      max_redemptions INTEGER NOT NULL CHECK (max_redemptions > 0),
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE billing_coupons
+      ALTER COLUMN razorpay_offer_id DROP NOT NULL;
+    CREATE TABLE IF NOT EXISTS billing_coupon_redemptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      coupon_id UUID NOT NULL REFERENCES billing_coupons(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider_subscription_id TEXT NOT NULL UNIQUE
+        REFERENCES billing_subscriptions(provider_subscription_id) ON DELETE CASCADE,
+      status VARCHAR(20) NOT NULL DEFAULT 'reserved'
+        CHECK (status IN ('reserved', 'redeemed', 'released')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      redeemed_at TIMESTAMPTZ
+    );
+    ALTER TABLE billing_coupon_redemptions
+      ALTER COLUMN provider_subscription_id DROP NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS billing_coupon_redemptions_once_per_user_idx
+      ON billing_coupon_redemptions (coupon_id, user_id)
+      WHERE status IN ('reserved', 'redeemed');
+    CREATE INDEX IF NOT EXISTS billing_coupon_redemptions_coupon_status_idx
+      ON billing_coupon_redemptions (coupon_id, status);
     CREATE UNIQUE INDEX IF NOT EXISTS billing_subscriptions_one_open_per_user
       ON billing_subscriptions (user_id)
       WHERE status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused');
@@ -169,6 +201,63 @@ const connectDB = async () => {
     );
     CREATE INDEX IF NOT EXISTS billing_payments_user_created_idx
       ON billing_payments (user_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS contact_reports (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      full_name VARCHAR(160) NOT NULL,
+      email TEXT NOT NULL,
+      phone VARCHAR(30) NOT NULL DEFAULT '',
+      purpose VARCHAR(120) NOT NULL,
+      message TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'in_progress', 'closed')),
+      admin_notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE contact_reports DROP CONSTRAINT IF EXISTS contact_reports_status_check;
+    UPDATE contact_reports
+       SET status = CASE status
+         WHEN 'new' THEN 'open'
+         WHEN 'resolved' THEN 'closed'
+         ELSE status
+       END
+     WHERE status IN ('new', 'resolved');
+    ALTER TABLE contact_reports ALTER COLUMN status SET DEFAULT 'open';
+    ALTER TABLE contact_reports
+      ADD CONSTRAINT contact_reports_status_check
+      CHECK (status IN ('open', 'in_progress', 'closed'));
+    CREATE INDEX IF NOT EXISTS contact_reports_created_idx
+      ON contact_reports (created_at DESC);
+    CREATE TABLE IF NOT EXISTS contact_report_attachments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      report_id UUID NOT NULL REFERENCES contact_reports(id) ON DELETE CASCADE,
+      filename VARCHAR(180) NOT NULL,
+      content_type VARCHAR(100) NOT NULL,
+      file_size INTEGER NOT NULL,
+      content BYTEA NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS contact_report_updates (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      report_id UUID NOT NULL REFERENCES contact_reports(id) ON DELETE CASCADE,
+      status VARCHAR(20) NOT NULL CHECK (status IN ('open', 'in_progress', 'closed')),
+      note TEXT NOT NULL,
+      updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+      updater_name VARCHAR(160) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS contact_report_updates_history_idx
+      ON contact_report_updates (report_id, created_at ASC);
+    INSERT INTO contact_report_updates (report_id, status, note, updater_name, created_at)
+    SELECT r.id, r.status,
+           COALESCE(NULLIF(BTRIM(r.admin_notes), ''), 'Enquiry submitted'),
+           'System', r.created_at
+      FROM contact_reports r
+     WHERE NOT EXISTS (
+       SELECT 1 FROM contact_report_updates u WHERE u.report_id = r.id
+     );
+    UPDATE contact_reports SET admin_notes = '' WHERE admin_notes <> '';
     CREATE TABLE IF NOT EXISTS billing_webhook_events (
       event_id TEXT PRIMARY KEY,
       event_type TEXT NOT NULL,

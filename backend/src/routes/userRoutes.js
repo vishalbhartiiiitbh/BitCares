@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { accessToken, changeEmail, checkUsernameAvailability, currentUser, deleteAccount, forgotPassword, getEmailNotificationSettings, getFeatureAccess, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, sendAccountDeletionCode, sendEmailChangeCodes, sendRegistrationCode, updateEmailNotificationSettings, updateProfile, verifyCurrentPassword, verifyRegistrationCode } from '../controllers/userController.js';
-import { submitContactReport } from '../controllers/contactController.js';
+import { listMyContactReports, reopenMyContactReport, submitContactReport } from '../controllers/contactController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import multer from 'multer';
@@ -40,6 +40,8 @@ router.post('/logout', requireAuth, asyncHandler(logout));
 router.get('/access-token', requireAuth, asyncHandler(accessToken));
 router.get('/me', requireAuth, asyncHandler(currentUser));
 router.get('/feature-access', requireAuth, asyncHandler(getFeatureAccess));
+router.get('/enquiries', requireAuth, asyncHandler(listMyContactReports));
+router.patch('/enquiries/:reportId/reopen', requireAuth, asyncHandler(reopenMyContactReport));
 router.post('/contact', requireAuth, contactUpload.array('attachments', 3), asyncHandler(submitContactReport));
 router.get('/notifications', requireAuth, asyncHandler(listNotifications));
 router.patch('/notifications/read', requireAuth, asyncHandler(markNotificationsRead));

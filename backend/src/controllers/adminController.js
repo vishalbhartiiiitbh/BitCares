@@ -80,6 +80,94 @@ export const listAdminUsers = async (_req, res) => {
   res.json({ data: result.rows });
 };
 
+export const listBillingCoupons = async (_req, res) => {
+  const result = await query(
+    `SELECT c.id, c.code, c.discount_type AS "discountType",
+            c.discount_value AS "discountValue", c.application,
+            c.razorpay_offer_id AS "razorpayOfferId",
+            c.max_redemptions AS "maxRedemptions", c.active,
+            c.created_at AS "createdAt",
+            COUNT(r.id) FILTER (WHERE r.status = 'redeemed')::integer AS "usedCount",
+            COUNT(r.id) FILTER (WHERE r.status = 'reserved')::integer AS "pendingCount"
+       FROM billing_coupons c
+       LEFT JOIN billing_coupon_redemptions r ON r.coupon_id = c.id
+      GROUP BY c.id
+      ORDER BY c.created_at DESC`,
+  );
+  res.json({ data: result.rows });
+};
+
+export const createBillingCoupon = async (req, res) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
+  const discountType = req.body?.discountType;
+  const discountValue = Number(req.body?.discountValue);
+  const application = req.body?.application;
+  const razorpayOfferId = typeof req.body?.razorpayOfferId === 'string'
+    ? req.body.razorpayOfferId.trim()
+    : '';
+  const maxRedemptions = Number(req.body?.maxRedemptions);
+
+  if (!/^[A-Z0-9_-]{3,40}$/.test(code)) {
+    throw Object.assign(new Error('Coupon code must be 3-40 letters, numbers, hyphens, or underscores'), { statusCode: 400 });
+  }
+  if (!['percentage', 'fixed_inr'].includes(discountType)) {
+    throw Object.assign(new Error('Choose a percentage or fixed INR discount'), { statusCode: 400 });
+  }
+  if (!Number.isFinite(discountValue) || discountValue <= 0
+    || (discountType === 'percentage' && discountValue > 100)
+    || Math.abs(discountValue * 100 - Math.round(discountValue * 100)) > 1e-8) {
+    throw Object.assign(new Error('Enter a valid discount amount; percentage discounts may be up to 100% and INR values may use up to 2 decimals'), { statusCode: 400 });
+  }
+  if (!['single_use', 'forever'].includes(application)) {
+    throw Object.assign(new Error('Choose whether the discount applies to the first payment or every renewal'), { statusCode: 400 });
+  }
+  const isFreeGrant = discountType === 'percentage' && discountValue === 100;
+  if (isFreeGrant && application !== 'single_use') {
+    throw Object.assign(new Error('A 100% coupon grants one selected billing period for free and cannot apply to every renewal'), { statusCode: 400 });
+  }
+  if (!isFreeGrant && !/^offer_[A-Za-z0-9]+$/.test(razorpayOfferId)) {
+    throw Object.assign(new Error('Enter a valid Razorpay Subscription Offer ID'), { statusCode: 400 });
+  }
+  if (!Number.isSafeInteger(maxRedemptions) || maxRedemptions < 1) {
+    throw Object.assign(new Error('Set a redemption limit of at least 1'), { statusCode: 400 });
+  }
+
+  try {
+    const result = await query(
+      `INSERT INTO billing_coupons (
+         code, discount_type, discount_value, application,
+         razorpay_offer_id, max_redemptions, created_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, code, discount_type AS "discountType",
+                 discount_value AS "discountValue", application,
+                 razorpay_offer_id AS "razorpayOfferId",
+                 max_redemptions AS "maxRedemptions", active,
+                 created_at AS "createdAt"`,
+      [code, discountType, discountValue, application, isFreeGrant ? null : razorpayOfferId, maxRedemptions, req.user._id],
+    );
+    res.status(201).json({ data: { ...result.rows[0], usedCount: 0, pendingCount: 0 } });
+  } catch (error) {
+    if (error.code === '23505') {
+      throw Object.assign(new Error('That coupon code already exists'), { statusCode: 409 });
+    }
+    throw error;
+  }
+};
+
+export const updateBillingCoupon = async (req, res) => {
+  if (typeof req.body?.active !== 'boolean') {
+    throw Object.assign(new Error('Coupon active status must be true or false'), { statusCode: 400 });
+  }
+  const result = await query(
+    `UPDATE billing_coupons SET active = $2
+      WHERE id = $1
+      RETURNING id, code, active`,
+    [req.params.couponId, req.body.active],
+  );
+  if (!result.rowCount) throw Object.assign(new Error('Coupon not found'), { statusCode: 404 });
+  res.json({ data: result.rows[0] });
+};
+
 export const listSubAdmins = async (_req, res) => {
   const result = await query(
     `SELECT id AS "_id", username, email, fullnamae, role, created_at AS "createdAt"

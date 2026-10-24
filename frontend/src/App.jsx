@@ -634,8 +634,171 @@ const expenseCategories = [
   { name: 'Utilities', icon: '💡', subcategories: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'] },
 ];
 
+function ContactPage({ user = null, onBack, onSignIn }) {
+  const nameParts = (user?.fullnamae || '').trim().split(/\s+/).filter(Boolean);
+  const [details, setDetails] = useState({
+    firstName: nameParts[0] || '',
+    lastName: nameParts.slice(1).join(' '),
+    email: user?.email || '',
+    phone: user?.phone || '',
+    purpose: '',
+    message: '',
+  });
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentInputKey, setAttachmentInputKey] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [ticketId, setTicketId] = useState('');
+
+  useEffect(() => {
+    setDetails((current) => ({
+      ...current,
+      firstName: nameParts[0] || '',
+      lastName: nameParts.slice(1).join(' '),
+      email: user?.email || '',
+      phone: user?.phone || current.phone,
+    }));
+  }, [user]);
+
+  const updateDetails = (event) => {
+    setDetails((current) => ({ ...current, [event.target.name]: event.target.value }));
+    setError('');
+    setSuccess('');
+  };
+
+  const selectAttachments = (event) => {
+    const selected = Array.from(event.target.files || []);
+    const allowedTypes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+    if (selected.length > 3) {
+      setError('You can attach up to 3 files.');
+      return;
+    }
+    if (selected.some((file) => !allowedTypes.has(file.type))) {
+      setError('Attach PDF, JPEG, PNG, GIF, or WebP files only.');
+      return;
+    }
+    if (selected.some((file) => file.size > 5 * 1024 * 1024)) {
+      setError('Each attachment must be 5 MB or smaller.');
+      return;
+    }
+    if (selected.reduce((total, file) => total + file.size, 0) > 10 * 1024 * 1024) {
+      setError('Attachments must total 10 MB or less.');
+      return;
+    }
+    setAttachments(selected);
+    setError('');
+    setSuccess('');
+  };
+
+  const submitReport = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    setTicketId('');
+    const data = new FormData();
+    Object.entries(details).forEach(([key, value]) => data.append(key, value));
+    attachments.forEach((file) => data.append('attachments', file));
+    try {
+      const result = await apiRequest('/users/contact', { method: 'POST', body: data });
+      setSuccess(result.message);
+      setTicketId(result.ticketId);
+      setDetails((current) => ({ ...current, purpose: '', message: '' }));
+      setAttachments([]);
+      setAttachmentInputKey((current) => current + 1);
+    } catch (submitError) {
+      setError(submitError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="contact-page">
+      <header className="contact-page-header">
+        <Brand />
+        <button className="contact-back-link" type="button" onClick={onBack}>← {user ? 'Back to dashboard' : 'Back to home'}</button>
+      </header>
+      <section className="contact-card">
+        <header className="contact-heading">
+          <p className="landing-eyebrow">WE’RE HERE TO HELP</p>
+          <h1>Contact Us</h1>
+          <p>Send us a message or report an issue. Enquiries are saved securely for our team to review.</p>
+        </header>
+        {!user ? (
+          <div className="contact-login-prompt">
+            <p>Please sign in to submit an enquiry. This lets our team follow up with you and keeps your request connected to your account.</p>
+            <button className="contact-submit" type="button" onClick={onSignIn}>Sign in to continue</button>
+          </div>
+        ) : (
+        <form className="contact-form" onSubmit={submitReport}>
+          <div className="contact-fields-grid">
+            <label className="contact-field">
+              <span>First name</span>
+              <input name="firstName" value={details.firstName} readOnly autoComplete="given-name" />
+            </label>
+            <label className="contact-field">
+              <span>Last name</span>
+              <input name="lastName" value={details.lastName} readOnly autoComplete="family-name" />
+            </label>
+            <label className="contact-field">
+              <span>Email</span>
+              <input name="email" type="email" value={details.email} readOnly autoComplete="email" />
+            </label>
+            <label className="contact-field">
+              <span>Phone (optional)</span>
+              <input name="phone" type="tel" value={details.phone} onChange={updateDetails} maxLength={30} autoComplete="tel" />
+            </label>
+          </div>
+          <label className="contact-field">
+            <span>Purpose</span>
+            <input name="purpose" value={details.purpose} onChange={updateDetails} maxLength={120} placeholder="e.g., Report a bug, billing question" required />
+          </label>
+          <label className="contact-field">
+            <span>Message</span>
+            <textarea name="message" value={details.message} onChange={updateDetails} maxLength={5000} rows={6} placeholder="Tell us what happened and how we can help..." required />
+          </label>
+          <label className="contact-field">
+            <span>Attachments (optional)</span>
+            <input
+              key={attachmentInputKey}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp"
+              multiple
+              onChange={selectAttachments}
+            />
+            <small>Up to 3 image or PDF files; 5 MB per file and 10 MB total.</small>
+          </label>
+          {attachments.length > 0 && (
+            <ul className="contact-attachments" aria-label="Selected attachments">
+              {attachments.map((file, index) => (
+                <li key={`${file.name}-${file.lastModified}`}>
+                  <span>{file.name} · {(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                  <button type="button" onClick={() => setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Remove ${file.name}`}>Remove</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && <p className="error-message" role="alert">{error}</p>}
+          {success && (
+            <p className="success-message" role="status">
+              {success}{ticketId ? ` Your ticket ID is ${ticketId}. Track it from My Enquiries in your profile menu.` : ''}
+            </p>
+          )}
+          <button className="contact-submit" type="submit" disabled={busy}>
+            {busy ? 'Submitting…' : 'Submit Enquiry'}
+          </button>
+        </form>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function App() {
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken") || "");
+  const [isContactPage, setIsContactPage] = useState(() => window.location.pathname.replace(/\/+$/, '') === '/contact');
   const [friendInviteCode, setFriendInviteCode] = useState(() => new URLSearchParams(window.location.search).get("friendCode") || "");
   const [referralCode, setReferralCode] = useState(() => new URLSearchParams(window.location.search).get("referralCode") || "");
   const [referrerUsername, setReferrerUsername] = useState(() => new URLSearchParams(window.location.search).get("referrerUsername") || "");
@@ -654,16 +817,28 @@ function App() {
 
   useEffect(() => {
     const isPrivateView = Boolean(user || showAuth);
-    document.title = user
-      ? "Splitpayerly | Shared expenses"
-      : showAuth
-        ? `${mode === "reset" ? "Reset your password" : mode === "register" ? "Create an account" : "Sign in"} | Splitpayerly`
-        : "Splitpayerly | Shared expenses, handled";
+    document.title = isContactPage
+      ? "Contact Us | Splitpayerly"
+      : user
+        ? "Splitpayerly | Shared expenses"
+        : showAuth
+          ? `${mode === "reset" ? "Reset your password" : mode === "register" ? "Create an account" : "Sign in"} | Splitpayerly`
+          : "Splitpayerly | Shared expenses, handled";
     document.querySelector('meta[name="robots"]')?.setAttribute(
       "content",
       isPrivateView ? "noindex, nofollow" : "index, follow, max-image-preview:large",
     );
-  }, [mode, showAuth, user]);
+  }, [isContactPage, mode, showAuth, user]);
+
+  useEffect(() => {
+    const syncContactPage = () => {
+      const contactPath = window.location.pathname.replace(/\/+$/, '') === '/contact';
+      setIsContactPage(contactPath);
+      if (contactPath) setShowAuth(false);
+    };
+    window.addEventListener('popstate', syncContactPage);
+    return () => window.removeEventListener('popstate', syncContactPage);
+  }, []);
 
   const markFriendInviteHandled = () => {
     setFriendInviteCode('');
@@ -677,9 +852,30 @@ function App() {
   };
 
   const openAuth = (nextMode) => {
+    setIsContactPage(false);
     setMode(nextMode);
     setMessage("");
     setShowAuth(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const openContact = () => {
+    if (window.location.pathname.replace(/\/+$/, '') !== '/contact') {
+      const url = new URL(window.location.href);
+      url.pathname = '/contact';
+      window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+    setIsContactPage(true);
+    setShowAuth(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const returnFromContact = () => {
+    const url = new URL(window.location.href);
+    url.pathname = '/';
+    window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    setIsContactPage(false);
+    setShowAuth(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -697,6 +893,10 @@ function App() {
           headers: { Authorization: `Bearer ${data.accessToken}` },
         });
         setUser(current.user);
+        if (window.location.pathname.replace(/\/+$/, '') === '/contact') {
+          setIsContactPage(true);
+          setShowAuth(false);
+        }
       })
       .catch(() => {});
   }, []);
@@ -792,6 +992,10 @@ function App() {
       });
       setUser(data.user);
       setAccessToken(data.accessToken);
+      if (window.location.pathname.replace(/\/+$/, '') === '/contact') {
+        setIsContactPage(true);
+        setShowAuth(false);
+      }
       if (mode === "register" && data.referralMessage) {
         setRegistrationReferralMessage(data.referralMessage);
       }
@@ -833,6 +1037,9 @@ function App() {
     setMessage("Your account and associated data have been permanently deleted.");
     setMessageIsSuccess(true);
   };
+
+  if (isContactPage)
+    return <ContactPage user={user} onBack={returnFromContact} onSignIn={() => openAuth('login')} />;
 
   if (user)
     return (
@@ -965,6 +1172,7 @@ function App() {
         <footer className="landing-footer">
           <Brand />
           <span>Shared money, less friction.</span>
+          <button type="button" onClick={openContact}>Contact Us</button>
           <button type="button" onClick={() => openAuth("login")}>Log in to Splitpayerly <span aria-hidden="true">↗</span></button>
         </footer>
       </main>
@@ -1009,7 +1217,10 @@ function App() {
           <div className="mobile-brand">
             <Brand />
           </div>
-          {mode !== "reset" && <button className="auth-back-home" type="button" onClick={() => setShowAuth(false)}>← Back to home</button>}
+          {mode !== "reset" && <button className="auth-back-home" type="button" onClick={() => {
+            if (window.location.pathname.replace(/\/+$/, '') === '/contact') returnFromContact();
+            else setShowAuth(false);
+          }}>← Back to home</button>}
           {(friendInviteCode || referralCode) && <p className="friend-page-message" role="status">
             {referralCode
               ? `You were invited by ${referrerUsername || 'a Splitpayerly user'}. Create an account to receive 10 referral points and add them as a friend.`
@@ -1056,6 +1267,7 @@ function App() {
                   ? "Enter your email and we’ll send a password reset link if an account is registered."
                   : "Choose a new password. This link can only be used once and expires after 10 minutes."}
           </p>
+          <button className="auth-contact-link" type="button" onClick={openContact}>Contact Us (sign-in required)</button>
           <form onSubmit={submit}>
             {mode === "register" && (
               <>
@@ -1728,17 +1940,175 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
   );
 }
 
+function MyEnquiriesPage({ accessToken }) {
+  const [enquiries, setEnquiries] = useState([]);
+  const [busy, setBusy] = useState(true);
+  const [reopeningId, setReopeningId] = useState('');
+  const [reopenTarget, setReopenTarget] = useState(null);
+  const [reopenComment, setReopenComment] = useState('');
+  const [error, setError] = useState('');
+
+  const loadEnquiries = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await apiRequest('/users/enquiries', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      setEnquiries(result);
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reopenEnquiry = async (event) => {
+    event.preventDefault();
+    if (!reopenTarget || !reopenComment.trim()) return;
+    setReopeningId(reopenTarget._id);
+    setError('');
+    try {
+      const update = await apiRequest(`/users/enquiries/${reopenTarget._id}/reopen`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ comment: reopenComment.trim() }),
+      });
+      setEnquiries((current) => current.map((item) => item._id === reopenTarget._id
+        ? {
+          ...item,
+          status: update.status,
+          statusHistory: [...item.statusHistory, update],
+        }
+        : item));
+      setReopenTarget(null);
+      setReopenComment('');
+    } catch (reopenError) {
+      setError(reopenError.message);
+    } finally {
+      setReopeningId('');
+    }
+  };
+
+  useEffect(() => { void loadEnquiries(); }, [accessToken]);
+
+  return (
+    <section className="my-enquiries-page">
+      <header className="my-enquiries-heading">
+        <div>
+          <p className="eyebrow">ACCOUNT SUPPORT</p>
+          <h1>My Enquiries</h1>
+          <p>Track your submitted enquiries and see the latest updates from our team.</p>
+        </div>
+        <button className="quiet-button" type="button" onClick={() => void loadEnquiries()} disabled={busy}>Refresh</button>
+      </header>
+      {error && <p className="error-message" role="alert">{error}</p>}
+      {busy ? <p className="my-enquiries-empty">Loading your enquiries…</p>
+        : enquiries.length ? enquiries.map((enquiry) => (
+          <article className="my-enquiry-card" key={enquiry._id}>
+            <header>
+              <div>
+                <p className="my-enquiry-ticket">Ticket {enquiry.ticketId}</p>
+                <h2>{enquiry.purpose}</h2>
+                <time dateTime={enquiry.createdAt}>Submitted {new Date(enquiry.createdAt).toLocaleString()}</time>
+              </div>
+              <span className={`admin-enquiry-status ${enquiry.status}`}>
+                {enquiry.status === 'in_progress' ? 'In progress' : enquiry.status === 'closed' ? 'Closed' : 'Open'}
+              </span>
+            </header>
+            <p className="my-enquiry-message">{enquiry.message}</p>
+            {enquiry.status === 'closed' && (
+              <button
+                className="my-enquiry-reopen"
+                type="button"
+                onClick={() => {
+                  setError('');
+                  setReopenComment('');
+                  setReopenTarget(enquiry);
+                }}
+                disabled={reopeningId === enquiry._id}
+              >
+                Reopen issue
+              </button>
+            )}
+            <section className="my-enquiry-history">
+              <h3>Updates</h3>
+              {enquiry.statusHistory.map((entry) => (
+                <article className="my-enquiry-history-entry" key={entry.id}>
+                  <div>
+                    <strong>{entry.status === 'in_progress' ? 'In progress' : entry.status === 'closed' ? 'Closed' : 'Open'}</strong>
+                    <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
+                  </div>
+                  <p>{entry.note}</p>
+                </article>
+              ))}
+            </section>
+          </article>
+        ))
+          : <p className="my-enquiries-empty">You haven’t submitted any enquiries yet.</p>}
+      {reopenTarget && (
+        <Modal title={`Reopen ticket ${reopenTarget.ticketId}?`} onClose={() => {
+          if (reopeningId) return;
+          setReopenTarget(null);
+          setReopenComment('');
+        }}>
+          <p className="my-enquiry-reopen-help">
+            This will reopen the issue and notify our support team. Add a comment explaining why it needs more attention; it will be saved to the ticket history.
+          </p>
+          <form className="my-enquiry-reopen-form" onSubmit={reopenEnquiry}>
+            <label>
+              Comment
+              <textarea
+                autoFocus
+                rows="4"
+                maxLength={5000}
+                value={reopenComment}
+                onChange={(event) => setReopenComment(event.target.value)}
+                placeholder="Tell us what still needs attention…"
+                required
+              />
+            </label>
+            {error && <p className="error-message" role="alert">{error}</p>}
+            <div>
+              <button className="admin-plan" type="button" onClick={() => {
+                setReopenTarget(null);
+                setReopenComment('');
+              }} disabled={Boolean(reopeningId)}>Cancel</button>
+              <button className="admin-save" type="submit" disabled={Boolean(reopeningId) || !reopenComment.trim()}>
+                {reopeningId ? 'Reopening…' : 'Confirm reopen'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
 function AdminPanel({ user, accessToken, onLogout }) {
   const [dashboard, setDashboard] = useState(null);
   const [users, setUsers] = useState([]);
+  const [enquiries, setEnquiries] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [enquiryStatusFilter, setEnquiryStatusFilter] = useState('all');
+  const [enquiryTimeSort, setEnquiryTimeSort] = useState('newest');
   const [subAdmins, setSubAdmins] = useState([]);
   const [subAdminForm, setSubAdminForm] = useState({ username: '', email: '', fullnamae: '', password: '' });
   const [settings, setSettings] = useState(null);
   const [broadcast, setBroadcast] = useState({ subject: '', message: '' });
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(true);
+  const [couponSaving, setCouponSaving] = useState(false);
   const [userSearch, setUserSearch] = useState('');
   const [premiumDuration, setPremiumDuration] = useState('monthly');
+  const [couponForm, setCouponForm] = useState({
+    code: '',
+    discountType: 'percentage',
+    discountValue: '',
+    application: 'single_use',
+    razorpayOfferId: '',
+    maxRedemptions: '',
+  });
 
   const load = async () => {
     setBusy(true);
@@ -1748,11 +2118,22 @@ function AdminPanel({ user, accessToken, onLogout }) {
         apiRequest('/admin/users', { headers: { Authorization: `Bearer ${accessToken}` } }),
       ];
       if (user.role === 'admin') requests.push(apiRequest('/admin/sub-admins', { headers: { Authorization: `Bearer ${accessToken}` } }));
-      const [summary, accounts, administratorAccounts] = await Promise.all(requests);
+      requests.splice(2, 0, apiRequest('/admin/enquiries', { headers: { Authorization: `Bearer ${accessToken}` } }));
+      if (user.role !== 'admin') requests.push(Promise.resolve(null));
+      requests.push(apiRequest('/admin/coupons', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }));
+      const [summary, accounts, contactEnquiries, administratorAccounts, billingCoupons] = await Promise.all(requests);
       setDashboard(summary);
       setSettings(summary.settings);
       setUsers(accounts);
+      setEnquiries((contactEnquiries || []).map((enquiry) => ({
+        ...enquiry,
+        statusDraft: enquiry.status,
+        noteDraft: '',
+      })));
       setSubAdmins(administratorAccounts || []);
+      setCoupons(billingCoupons || []);
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -1784,6 +2165,45 @@ function AdminPanel({ user, accessToken, onLogout }) {
       });
       await load();
       setStatus(plan === 'premium' ? `Premium granted for ${premiumDuration.replace('_', ' ')}.` : 'Premium access deactivated.');
+    } catch (error) { setStatus(error.message); }
+  };
+
+  const createCoupon = async (event) => {
+    event.preventDefault();
+    setCouponSaving(true);
+    try {
+      await apiRequest('/admin/coupons', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({
+          ...couponForm,
+          code: couponForm.code.trim().toUpperCase(),
+          discountValue: Number(couponForm.discountValue),
+          maxRedemptions: Number(couponForm.maxRedemptions),
+        }),
+      });
+      setCouponForm({
+        code: '',
+        discountType: 'percentage',
+        discountValue: '',
+        application: 'single_use',
+        razorpayOfferId: '',
+        maxRedemptions: '',
+      });
+      await load();
+      setStatus('Coupon created.');
+    } catch (error) { setStatus(error.message); } finally { setCouponSaving(false); }
+  };
+
+  const setCouponActive = async (coupon, active) => {
+    try {
+      await apiRequest(`/admin/coupons/${coupon.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ active }),
+      });
+      setCoupons((current) => current.map((item) => item.id === coupon.id ? { ...item, active } : item));
+      setStatus(`Coupon ${coupon.code} ${active ? 'activated' : 'deactivated'}.`);
     } catch (error) { setStatus(error.message); }
   };
 
@@ -1822,6 +2242,54 @@ function AdminPanel({ user, accessToken, onLogout }) {
     } catch (error) { setStatus(error.message); }
   };
 
+  const updateEnquiry = async (enquiry) => {
+    try {
+      const updated = await apiRequest(`/admin/enquiries/${enquiry._id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ status: enquiry.statusDraft, note: enquiry.noteDraft }),
+      });
+      setEnquiries((current) => current.map((item) => item._id === enquiry._id
+        ? {
+          ...item,
+          status: updated.status,
+          statusDraft: updated.status,
+          noteDraft: '',
+          statusHistory: [...item.statusHistory, updated],
+        }
+        : item));
+      setStatus('Enquiry update added to history.');
+    } catch (error) { setStatus(error.message); }
+  };
+
+  const downloadEnquiryAttachment = async (enquiry, attachment) => {
+    try {
+      const response = await fetch(`${API_URL}/admin/enquiries/${enquiry._id}/attachments/${attachment.id}`, {
+        credentials: 'include',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || 'Could not download this attachment.');
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = attachment.filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) { setStatus(error.message); }
+  };
+
+  const visibleEnquiries = enquiries
+    .filter((enquiry) => enquiryStatusFilter === 'all' || enquiry.status === enquiryStatusFilter)
+    .sort((first, second) => {
+      const difference = new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime();
+      return enquiryTimeSort === 'oldest' ? difference : -difference;
+    });
+
   if (busy || !settings) return <main className="admin-shell"><p>Loading admin workspace…</p></main>;
   return (
     <main className="admin-shell">
@@ -1852,6 +2320,84 @@ function AdminPanel({ user, accessToken, onLogout }) {
         </form>
       </div>
       <section className="admin-section admin-users">
+        <div className="admin-section-heading">
+          <div><p className="admin-kicker">CUSTOMER SUPPORT</p><h2>Enquiries</h2></div>
+          <span>{enquiries.filter((enquiry) => enquiry.status === 'open').length} open</span>
+        </div>
+        <div className="admin-enquiry-filters">
+          <label>Filter by status
+            <select value={enquiryStatusFilter} onChange={(event) => setEnquiryStatusFilter(event.target.value)}>
+              <option value="all">All statuses</option>
+              <option value="open">Open</option>
+              <option value="in_progress">In progress</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
+          <label>Sort by submission time
+            <select value={enquiryTimeSort} onChange={(event) => setEnquiryTimeSort(event.target.value)}>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+          </label>
+          <span>{visibleEnquiries.length} {visibleEnquiries.length === 1 ? 'enquiry' : 'enquiries'}</span>
+        </div>
+        <div className="admin-enquiry-list" aria-label="Enquiry tickets">
+          {visibleEnquiries.length ? visibleEnquiries.map((enquiry) => (
+            <article className="admin-enquiry-card" key={enquiry._id}>
+              <div className="admin-enquiry-heading">
+                <div>
+                  <p className="admin-kicker">{new Date(enquiry.createdAt).toLocaleString()}</p>
+                  <h3>{enquiry.purpose}</h3>
+                  <p className="admin-enquiry-ticket">Ticket {enquiry.ticketId}</p>
+                  <p>{enquiry.fullName} · <a href={`mailto:${enquiry.email}`}>{enquiry.email}</a>{enquiry.phone ? ` · ${enquiry.phone}` : ''}</p>
+                </div>
+                <p className={`admin-enquiry-status ${enquiry.status}`}>
+                  {enquiry.status === 'in_progress' ? 'In progress' : enquiry.status === 'closed' ? 'Closed' : 'Open'}
+                </p>
+              </div>
+              <p className="admin-enquiry-message">{enquiry.message}</p>
+              <div className="admin-enquiry-history">
+                <h4>Update history</h4>
+                {enquiry.statusHistory.map((entry) => (
+                  <div className="admin-enquiry-history-entry" key={entry.id}>
+                    <div>
+                      <strong>{entry.status === 'in_progress' ? 'In progress' : entry.status === 'closed' ? 'Closed' : 'Open'}</strong>
+                      <small>{new Date(entry.createdAt).toLocaleString()} · {entry.updatedBy}</small>
+                    </div>
+                    <p>{entry.note}</p>
+                  </div>
+                ))}
+              </div>
+              {enquiry.attachments.length > 0 && (
+                <div className="admin-enquiry-attachments">
+                  <strong>Attachments</strong>
+                  {enquiry.attachments.map((attachment) => (
+                    <button className="admin-plan" type="button" key={attachment.id} onClick={() => void downloadEnquiryAttachment(enquiry, attachment)}>
+                      {attachment.filename} · {(attachment.size / (1024 * 1024)).toFixed(2)} MB
+                    </button>
+                  ))}
+                </div>
+              )}
+              <form className="admin-enquiry-update" onSubmit={(event) => { event.preventDefault(); void updateEnquiry(enquiry); }}>
+                <label>Update status
+                  <select value={enquiry.statusDraft} onChange={(event) => setEnquiries((current) => current.map((item) => item._id === enquiry._id ? { ...item, statusDraft: event.target.value } : item))}>
+                    <option value="open">Open</option>
+                    <option value="in_progress">In progress</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </label>
+                <label>Update note
+                  <textarea rows="3" maxLength="5000" value={enquiry.noteDraft} onChange={(event) => setEnquiries((current) => current.map((item) => item._id === enquiry._id ? { ...item, noteDraft: event.target.value } : item))} placeholder="Describe the action taken or next steps…" required />
+                </label>
+                <button className="admin-save" type="submit">Add update</button>
+              </form>
+            </article>
+          )) : <p className="admin-empty-state">
+            {enquiries.length ? 'No enquiries match these filters.' : 'No enquiries have been submitted.'}
+          </p>}
+        </div>
+      </section>
+      <section className="admin-section admin-users">
         <div className="admin-section-heading"><div><p className="admin-kicker">ACCOUNTS</p><h2>Premium access</h2></div></div>
         <div className="admin-premium-tools">
           <label>Find account by email
@@ -1875,41 +2421,134 @@ function AdminPanel({ user, accessToken, onLogout }) {
           This panel only grants manual Premium access to eligible users; it cannot deactivate Premium or alter Razorpay billing.
           Users with Premium access or a Razorpay subscription in progress are not eligible for a manual grant.
         </p>
-        {users.filter((account) => {
-          const search = userSearch.trim().toLocaleLowerCase();
-          return !search || account.email.toLocaleLowerCase().includes(search)
-            || account.username.toLocaleLowerCase().includes(search)
-            || (account.fullnamae || '').toLocaleLowerCase().includes(search);
-        }).map((account) => (
-          <div className="admin-user-row" key={account._id}>
-            <div>
-              <strong>{account.fullnamae || account.username}</strong>
-              <small>{account.email}</small>
-              <small>
-                {account.plan === 'premium'
-                  ? `Premium${account.premiumUntil ? ` until ${new Date(account.premiumUntil).toLocaleDateString()}` : ' · no expiry set'}`
-                  : account.hasOpenRazorpaySubscription
-                    ? `Razorpay subscription in progress${account.razorpaySubscriptionStatus ? ` · ${account.razorpaySubscriptionStatus}` : ''}`
-                    : 'Free'}
-              </small>
+        <div className="admin-premium-list">
+          {users.filter((account) => {
+            const search = userSearch.trim().toLocaleLowerCase();
+            return !search || account.email.toLocaleLowerCase().includes(search)
+              || account.username.toLocaleLowerCase().includes(search)
+              || (account.fullnamae || '').toLocaleLowerCase().includes(search);
+          }).map((account) => (
+            <div className="admin-user-row" key={account._id}>
+              <div>
+                <strong>{account.fullnamae || account.username}</strong>
+                <small>{account.email}</small>
+                <small>
+                  {account.plan === 'premium'
+                    ? `Premium${account.premiumUntil ? ` until ${new Date(account.premiumUntil).toLocaleDateString()}` : ' · no expiry set'}`
+                    : account.hasOpenRazorpaySubscription
+                      ? `Razorpay subscription in progress${account.razorpaySubscriptionStatus ? ` · ${account.razorpaySubscriptionStatus}` : ''}`
+                      : 'Free'}
+                </small>
+              </div>
+              {account.plan !== 'premium' && !account.hasOpenRazorpaySubscription && (
+                <button
+                  className="admin-plan"
+                  type="button"
+                  onClick={() => void changePlan(account._id, 'premium')}
+                >
+                  Grant Premium
+                </button>
+              )}
             </div>
-            {account.plan !== 'premium' && !account.hasOpenRazorpaySubscription && (
-              <button
-                className="admin-plan"
-                type="button"
-                onClick={() => void changePlan(account._id, 'premium')}
-              >
-                Grant Premium
+          ))}
+          {!users.some((account) => {
+            const search = userSearch.trim().toLocaleLowerCase();
+            return !search || account.email.toLocaleLowerCase().includes(search)
+              || account.username.toLocaleLowerCase().includes(search)
+              || (account.fullnamae || '').toLocaleLowerCase().includes(search);
+          }) && <p className="admin-empty-state">No account matches that email or name.</p>}
+        </div>
+      </section>
+      <section className="admin-section admin-users">
+        <div className="admin-section-heading"><div><p className="admin-kicker">PROMOTIONS</p><h2>Coupon codes</h2></div></div>
+        <p className="admin-premium-note">
+          Create a code and set its discount and total redemption limit. Discounts below 100% need a matching Subscription Offer from the Razorpay Dashboard. A 100% code grants the selected billing period for free without checkout or automatic renewal.
+        </p>
+        <form className="admin-coupon-form" onSubmit={createCoupon}>
+          <label>Coupon code
+            <input
+              required
+              minLength="3"
+              maxLength="40"
+              pattern="[A-Za-z0-9_-]+"
+              value={couponForm.code}
+              onChange={(event) => setCouponForm({ ...couponForm, code: event.target.value.toUpperCase() })}
+              placeholder="e.g. WELCOME20"
+            />
+          </label>
+          <label>Discount type
+            <select value={couponForm.discountType} onChange={(event) => setCouponForm({ ...couponForm, discountType: event.target.value })}>
+              <option value="percentage">Percentage</option>
+              <option value="fixed_inr">Fixed INR amount</option>
+            </select>
+          </label>
+          <label>{couponForm.discountType === 'percentage' ? 'Discount (%)' : 'Discount (₹)'}
+            <input
+              required
+              type="number"
+              min="0.01"
+              max={couponForm.discountType === 'percentage' ? '100' : undefined}
+              step="0.01"
+              value={couponForm.discountValue}
+              onChange={(event) => setCouponForm({
+                ...couponForm,
+                discountValue: event.target.value,
+                ...(couponForm.discountType === 'percentage' && Number(event.target.value) === 100
+                  ? { application: 'single_use' }
+                  : {}),
+              })}
+            />
+          </label>
+          <label>Discount applies
+            <select
+              value={couponForm.application}
+              disabled={couponForm.discountType === 'percentage' && Number(couponForm.discountValue) === 100}
+              onChange={(event) => setCouponForm({ ...couponForm, application: event.target.value })}
+            >
+              <option value="single_use">First payment only</option>
+              <option value="forever">Every renewal</option>
+            </select>
+          </label>
+          {couponForm.discountType === 'percentage' && Number(couponForm.discountValue) === 100 ? (
+            <p className="admin-premium-note">This coupon grants one free billing period; it does not need a Razorpay Offer ID.</p>
+          ) : (
+            <label>Razorpay Offer ID
+              <input
+                required
+                value={couponForm.razorpayOfferId}
+                onChange={(event) => setCouponForm({ ...couponForm, razorpayOfferId: event.target.value.trim() })}
+                placeholder="offer_..."
+              />
+            </label>
+          )}
+          <label>Maximum redemptions
+            <input
+              required
+              type="number"
+              min="1"
+              step="1"
+              value={couponForm.maxRedemptions}
+              onChange={(event) => setCouponForm({ ...couponForm, maxRedemptions: event.target.value })}
+            />
+          </label>
+          <button className="admin-save" type="submit" disabled={couponSaving}>{couponSaving ? 'Creating…' : 'Create coupon'}</button>
+        </form>
+        <div className="admin-coupon-list">
+          {coupons.length ? coupons.map((coupon) => (
+            <div className="admin-user-row" key={coupon.id}>
+              <div>
+                <strong>{coupon.code} · {coupon.discountType === 'percentage' ? `${coupon.discountValue}%` : `₹${coupon.discountValue}`}</strong>
+                <small>{coupon.discountType === 'percentage' && Number(coupon.discountValue) === 100
+                  ? 'One selected billing period free · No automatic renewal'
+                  : `${coupon.application === 'single_use' ? 'First payment only' : 'Every renewal'} · Offer ${coupon.razorpayOfferId}`}</small>
+                <small>{coupon.usedCount} / {coupon.maxRedemptions} redeemed{coupon.pendingCount ? ` · ${coupon.pendingCount} pending` : ''} · {coupon.active ? 'Active' : 'Inactive'}</small>
+              </div>
+              <button className="admin-plan" type="button" onClick={() => void setCouponActive(coupon, !coupon.active)}>
+                {coupon.active ? 'Deactivate' : 'Activate'}
               </button>
-            )}
-          </div>
-        ))}
-        {!users.some((account) => {
-          const search = userSearch.trim().toLocaleLowerCase();
-          return !search || account.email.toLocaleLowerCase().includes(search)
-            || account.username.toLocaleLowerCase().includes(search)
-            || (account.fullnamae || '').toLocaleLowerCase().includes(search);
-        }) && <p className="admin-empty-state">No account matches that email or name.</p>}
+            </div>
+          )) : <p className="admin-empty-state">No coupon codes have been created.</p>}
+        </div>
       </section>
       {user.role === 'admin' && <section className="admin-section admin-users"><div className="admin-section-heading"><div><p className="admin-kicker">ADMINISTRATION</p><h2>Sub-admin access</h2></div></div>
         <form className="sub-admin-form" onSubmit={createSubAdmin}>
@@ -1932,6 +2571,9 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponBusy, setCouponBusy] = useState(false);
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
   const loadBilling = async () => {
@@ -1959,6 +2601,12 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
   useEffect(() => {
     void loadBilling();
   }, [accessToken]);
+
+  const changeBillingPeriod = (period) => {
+    setSelectedPeriod(period);
+    setAppliedCoupon(null);
+    setCouponInput('');
+  };
 
   const launchCheckout = (created) => {
     try {
@@ -2017,6 +2665,27 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
     }
   };
 
+  const applyCoupon = async () => {
+    if (!selectedPeriod || !couponInput.trim()) return;
+    setCouponBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const coupon = await apiRequest('/billing/coupons/validate', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ code: couponInput.trim(), period: selectedPeriod }),
+      });
+      setAppliedCoupon(coupon);
+      setCouponInput(coupon.code);
+    } catch (requestError) {
+      setAppliedCoupon(null);
+      setError(requestError.message);
+    } finally {
+      setCouponBusy(false);
+    }
+  };
+
   const startSubscription = async () => {
     setBusy(true);
     setError('');
@@ -2025,10 +2694,29 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
       const created = await apiRequest('/billing/subscriptions', {
         method: 'POST',
         headers: authHeaders,
-        body: JSON.stringify({ period: selectedPeriod }),
+        body: JSON.stringify({
+          period: selectedPeriod,
+          ...(appliedCoupon ? { couponCode: appliedCoupon.code } : {}),
+        }),
       });
+      if (created.freeAccessGranted) {
+        setAppliedCoupon(null);
+        setCouponInput('');
+        setMessage(
+          `100% coupon applied. Premium is free until ${new Date(created.premiumUntil).toLocaleDateString()}. No payment or automatic renewal was started; subscribe manually after this period ends.`,
+        );
+        await loadBilling();
+        setBusy(false);
+        return;
+      }
       await loadBilling();
-      launchCheckout(created);
+      launchCheckout({
+        ...created,
+        plan: {
+          ...created.plan,
+          label: `${created.plan.label}${created.coupon ? ` · ${created.coupon.code} applied` : ''}`,
+        },
+      });
     } catch (requestError) {
       setBusy(false);
       setError(requestError.message);
@@ -2176,13 +2864,44 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
           <div className="billing-plan-options">
             {plans.map((plan) => (
               <label className={`billing-plan-option ${selectedPeriod === plan.period ? 'selected' : ''} ${!plan.configured ? 'unavailable' : ''}`} key={plan.period}>
-                <input type="radio" name="billing-period" value={plan.period} checked={selectedPeriod === plan.period} disabled={!plan.configured} onChange={() => setSelectedPeriod(plan.period)} />
+                <input type="radio" name="billing-period" value={plan.period} checked={selectedPeriod === plan.period} disabled={!plan.configured || couponBusy} onChange={() => changeBillingPeriod(plan.period)} />
                 <span><strong>{plan.label}</strong><small>{plan.configured ? `Automatically billed ${plan.period === 'six_month' ? 'every 6 months' : `per ${plan.period}`}` : plan.configurationError || 'Not configured yet'}</small></span>
                 <b>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: plan.currency, maximumFractionDigits: 2 }).format(plan.amount / 100)}</b>
               </label>
             ))}
           </div>
-          <button className="primary-action" type="button" disabled={busy || !selectedPeriod || !plans.some((plan) => plan.period === selectedPeriod && plan.configured)} onClick={() => void startSubscription()}>
+          <div className="billing-coupon">
+            <label htmlFor="billing-coupon-code">Coupon code</label>
+            <div className="billing-coupon-row">
+              <input
+                id="billing-coupon-code"
+                type="text"
+                value={couponInput}
+                onChange={(event) => {
+                  setCouponInput(event.target.value.toUpperCase());
+                  setAppliedCoupon(null);
+                }}
+                placeholder="Enter coupon code"
+                maxLength="40"
+                autoComplete="off"
+              />
+              <button className="quiet-button" type="button" disabled={couponBusy || !couponInput.trim() || !selectedPeriod} onClick={() => void applyCoupon()}>
+                {couponBusy ? 'Checking…' : appliedCoupon ? 'Apply again' : 'Apply code'}
+              </button>
+            </div>
+            {appliedCoupon && (
+              <div className="billing-coupon-success" role="status">
+                <p>{appliedCoupon.code} applied{appliedCoupon.isFreeGrant ? ' for one free billing period' : ` to ${appliedCoupon.application === 'single_use' ? 'the first payment' : 'every renewal'}`}.</p>
+                <dl>
+                  <div><dt>Plan price</dt><dd>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format((plans.find((plan) => plan.period === selectedPeriod)?.amount || 0) / 100)}</dd></div>
+                  <div><dt>Coupon discount</dt><dd>−{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(appliedCoupon.discountAmount / 100)}</dd></div>
+                  <div className="billing-coupon-balance"><dt>Balance due now</dt><dd>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2 }).format(appliedCoupon.finalAmount / 100)}</dd></div>
+                </dl>
+                {appliedCoupon.isFreeGrant && <small>No payment or automatic renewal; subscribe manually after this free period ends.</small>}
+              </div>
+            )}
+          </div>
+          <button className="primary-action" type="button" disabled={busy || couponBusy || !selectedPeriod || !plans.some((plan) => plan.period === selectedPeriod && plan.configured)} onClick={() => void startSubscription()}>
             {busy ? 'Please wait…' : `Subscribe ${selectedPeriod ? `· ${selectedPeriod}` : ''}`}
           </button>
           {plans.some((plan) => !plan.configured) && <p className="billing-muted">A plan must have a matching Razorpay Plan ID and billing interval. For example, the yearly plan must be INR 500 per year. Automatic billing starts only after completing Razorpay Checkout.</p>}
@@ -2251,7 +2970,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const dashboardPageStorageKey = `splitcare-dashboard-page:${user._id}`;
   const [activePage, setActivePage] = useState(() => {
     const savedPage = window.sessionStorage.getItem(dashboardPageStorageKey);
-    return ['overview', 'recent', 'all-expenses', 'non-group-expenses', 'personal', 'friends', 'billing'].includes(savedPage)
+    return ['overview', 'recent', 'all-expenses', 'non-group-expenses', 'personal', 'friends', 'billing', 'contact', 'enquiries'].includes(savedPage)
       ? savedPage
       : 'overview';
   });
@@ -3824,6 +4543,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           <button aria-label="Personal expenses" className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => { setActivePage('personal'); setShowMobileNav(false); }}><span className="mobile-nav-label">Personal expenses</span></button>
           <button aria-label="Friends" className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => { setActivePage('friends'); setShowMobileNav(false); }}><span className="mobile-nav-label">Friends</span></button>
           <button aria-label="Billing" className={activePage === 'billing' ? 'active' : ''} type="button" onClick={() => { setActivePage('billing'); setShowMobileNav(false); }}><span className="mobile-nav-label">Billing</span></button>
+          <button aria-label="Contact Us" className={activePage === 'contact' ? 'active' : ''} type="button" onClick={() => { setActivePage('contact'); setShowMobileNav(false); }}><span className="mobile-nav-label">Contact Us</span></button>
         </nav>
         <button
           className="theme-toggle"
@@ -3973,6 +4693,14 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               >
                 My friend code
               </button>
+              <button
+                onClick={() => {
+                  setActivePage('enquiries');
+                  setShowProfileMenu(false);
+                }}
+              >
+                My Enquiries
+              </button>
               <button className="logout-menu-button" onClick={onLogout}>
                 Log out
               </button>
@@ -4000,6 +4728,9 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             </button>
             <button className={`side-link ${activePage === 'billing' ? 'active' : ''}`} onClick={() => setActivePage('billing')} type="button">
               ◈ <span>Billing</span>
+            </button>
+            <button className={`side-link ${activePage === 'contact' ? 'active' : ''}`} onClick={() => setActivePage('contact')} type="button">
+              ✉ <span>Contact Us</span>
             </button>
           </div>
           <div className="side-section">
@@ -4198,6 +4929,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 ) : <p className="friends-request-empty">No friend requests yet.</p>}
               </section>
             </div>
+          ) : activePage === 'enquiries' ? (
+            <MyEnquiriesPage accessToken={accessToken} />
+          ) : activePage === 'contact' ? (
+            <ContactPage user={user} onBack={() => setActivePage('overview')} />
           ) : activePage === 'billing' ? (
             <BillingPage user={user} accessToken={accessToken} onProfileUpdated={onProfileUpdated} />
           ) : activePage === 'non-group-expenses' ? (

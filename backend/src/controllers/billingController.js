@@ -78,6 +78,92 @@ const paidThroughDate = (subscription, payment) => {
   return addBillingInterval(new Date(start * 1000), period === 'six_month' ? 'monthly' : period, interval);
 };
 
+const couponCode = (value) => typeof value === 'string' ? value.trim().toUpperCase() : '';
+
+export const couponQuote = (coupon, period) => {
+  const plan = premiumPlans[period];
+  const value = Number(coupon.discountValue);
+  const discountAmount = coupon.discountType === 'percentage'
+    ? Math.round(plan.amount * value / 100)
+    : Math.round(value * 100);
+  const finalAmount = plan.amount - discountAmount;
+  const isFreeGrant = coupon.discountType === 'percentage'
+    && value === 100
+    && coupon.application === 'single_use';
+  if (finalAmount < 0 || (finalAmount <= 100 && !isFreeGrant)) {
+    throw Object.assign(new Error('This coupon discount is too large for the selected plan'), { statusCode: 400 });
+  }
+  return {
+    code: coupon.code,
+    discountType: coupon.discountType,
+    discountValue: value,
+    application: coupon.application,
+    discountAmount,
+    finalAmount,
+    isFreeGrant,
+  };
+};
+
+export const addFreePremiumPeriod = (start, period) => {
+  const expiry = new Date(start);
+  if (period === 'weekly') {
+    expiry.setUTCDate(expiry.getUTCDate() + 7);
+    return expiry;
+  }
+  const months = period === 'six_month' ? 6 : period === 'yearly' ? 12 : 1;
+  const day = expiry.getUTCDate();
+  expiry.setUTCDate(1);
+  expiry.setUTCMonth(expiry.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth() + 1, 0)).getUTCDate();
+  expiry.setUTCDate(Math.min(day, lastDay));
+  return expiry;
+};
+
+const findAvailableCoupon = async (client, code, userId, period, lock = false) => {
+  const couponResult = await client.query(
+    `SELECT id, code, discount_type AS "discountType",
+            discount_value AS "discountValue", application,
+            razorpay_offer_id AS "razorpayOfferId",
+            max_redemptions AS "maxRedemptions"
+       FROM billing_coupons
+      WHERE code = $1 AND active = TRUE
+      ${lock ? 'FOR UPDATE' : ''}`,
+    [code],
+  );
+  const coupon = couponResult.rows[0];
+  if (!coupon) throw Object.assign(new Error('This coupon code is invalid or inactive'), { statusCode: 400 });
+  const redemptionResult = await client.query(
+    `SELECT COUNT(*) FILTER (WHERE status IN ('reserved', 'redeemed'))::integer AS "usedCount",
+            BOOL_OR(user_id = $2 AND status IN ('reserved', 'redeemed')) AS "alreadyUsed"
+       FROM billing_coupon_redemptions
+      WHERE coupon_id = $1`,
+    [coupon.id, userId],
+  );
+  const redemption = redemptionResult.rows[0];
+  if (redemption.alreadyUsed) {
+    throw Object.assign(new Error('You have already used or started checkout with this coupon'), { statusCode: 409 });
+  }
+  if (redemption.usedCount >= coupon.maxRedemptions) {
+    throw Object.assign(new Error('This coupon has reached its redemption limit'), { statusCode: 409 });
+  }
+  return { coupon, quote: couponQuote(coupon, period) };
+};
+
+const releaseUnredeemedCoupon = async (client, subscriptionId) => {
+  await client.query(
+    `UPDATE billing_coupon_redemptions r
+        SET status = 'released'
+      WHERE r.provider_subscription_id = $1
+        AND r.status = 'reserved'
+        AND NOT EXISTS (
+          SELECT 1 FROM billing_payments p
+           WHERE p.provider_subscription_id = r.provider_subscription_id
+             AND p.status = 'captured'
+        )`,
+    [subscriptionId],
+  );
+};
+
 const planIdFor = (period) => process.env[`RAZORPAY_PLAN_ID_${period.toUpperCase()}`]?.trim();
 
 const unavailablePlan = (period, planId, reason) => ({
@@ -159,7 +245,8 @@ const saveSubscriptionSnapshot = async (client, subscription) => {
             cancel_at_cycle_end = COALESCE($10, cancel_at_cycle_end),
             updated_at = NOW()
       WHERE provider_subscription_id = $1
-      RETURNING user_id AS "userId", current_end AS "currentEnd",
+      RETURNING provider_subscription_id AS "providerSubscriptionId",
+                user_id AS "userId", current_end AS "currentEnd",
                 current_start AS "currentStart", billing_period AS "billingPeriod",
                 billing_interval AS "billingInterval"`,
     [
@@ -218,6 +305,12 @@ const savePayment = async (client, payment, userId, status) => {
 const applySubscriptionPayment = async (client, payment, subscriptionRow) => {
   if (!payment || !subscriptionRow) return;
   await savePayment(client, payment, subscriptionRow.userId, 'captured');
+  await client.query(
+    `UPDATE billing_coupon_redemptions
+        SET status = 'redeemed', redeemed_at = COALESCE(redeemed_at, NOW())
+      WHERE provider_subscription_id = $1 AND status = 'reserved'`,
+    [subscriptionRow.providerSubscriptionId || payment.subscription_id],
+  );
   const premiumUntil = paidThroughDate(subscriptionRow, payment);
   if (!premiumUntil) return;
   await client.query(
@@ -259,6 +352,19 @@ export const listSubscriptionPlans = async (_req, res) => {
   res.json({ data: { plans } });
 };
 
+export const validatePremiumCoupon = async (req, res) => {
+  const period = req.body?.period;
+  const code = couponCode(req.body?.code);
+  if (!billingPeriods.includes(period)) {
+    throw Object.assign(new Error('Choose a valid billing interval'), { statusCode: 400 });
+  }
+  if (!/^[A-Z0-9_-]{3,40}$/.test(code)) {
+    throw Object.assign(new Error('Enter a valid coupon code'), { statusCode: 400 });
+  }
+  const result = await findAvailableCoupon({ query }, code, req.user._id, period);
+  res.json({ data: result.quote });
+};
+
 export const createPremiumOrder = async (req, res) => {
   const amount = Number(process.env.PREMIUM_PRICE_INR || 499) * 100;
   if (!Number.isInteger(amount) || amount < 100) {
@@ -279,8 +385,67 @@ export const createPremiumOrder = async (req, res) => {
 
 export const createPremiumSubscription = async (req, res) => {
   const period = req.body?.period;
+  const code = couponCode(req.body?.couponCode);
   if (!billingPeriods.includes(period)) {
     throw Object.assign(new Error('Choose a configured billing interval'), { statusCode: 400 });
+  }
+  if (req.body?.couponCode && !/^[A-Z0-9_-]{3,40}$/.test(code)) {
+    throw Object.assign(new Error('Enter a valid coupon code'), { statusCode: 400 });
+  }
+  if (code) {
+    const couponPreview = await findAvailableCoupon({ query }, code, req.user._id, period);
+    if (couponPreview.quote.isFreeGrant) {
+      const grant = await withTransaction(async (client) => {
+        const userResult = await client.query(
+          `SELECT premium_until AS "premiumUntil",
+                  (plan = 'premium' AND (premium_until IS NULL OR premium_until > NOW())) AS "hasPremiumAccess"
+             FROM users WHERE id = $1 FOR UPDATE`,
+          [req.user._id],
+        );
+        if (!userResult.rowCount) {
+          throw Object.assign(new Error('User not found'), { statusCode: 404 });
+        }
+        const openSubscriptions = await client.query(
+          `SELECT provider_subscription_id FROM billing_subscriptions
+            WHERE user_id = $1 AND status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused')
+            LIMIT 1`,
+          [req.user._id],
+        );
+        if (openSubscriptions.rowCount) {
+          throw Object.assign(new Error('You already have a subscription in progress. Manage it from Billing.'), { statusCode: 409 });
+        }
+        const coupon = await findAvailableCoupon(client, code, req.user._id, period, true);
+        if (!coupon.quote.isFreeGrant) {
+          throw Object.assign(new Error('This coupon no longer grants a free billing period. Apply it again.'), { statusCode: 409 });
+        }
+        const currentExpiry = userResult.rows[0].premiumUntil;
+        if (userResult.rows[0].hasPremiumAccess && !currentExpiry) {
+          throw Object.assign(new Error('Your account already has permanent Premium access'), { statusCode: 409 });
+        }
+        const now = new Date();
+        const start = currentExpiry && new Date(currentExpiry) > now ? new Date(currentExpiry) : now;
+        const premiumUntil = addFreePremiumPeriod(start, period);
+        await client.query(
+          `UPDATE users SET plan = 'premium', premium_until = $1 WHERE id = $2`,
+          [premiumUntil, req.user._id],
+        );
+        await client.query(
+          `INSERT INTO billing_coupon_redemptions (
+             coupon_id, user_id, provider_subscription_id, status, redeemed_at
+           ) VALUES ($1, $2, NULL, 'redeemed', NOW())`,
+          [coupon.coupon.id, req.user._id],
+        );
+        return { premiumUntil, coupon: coupon.quote };
+      });
+      return res.status(201).json({
+        data: {
+          freeAccessGranted: true,
+          premiumUntil: grant.premiumUntil,
+          coupon: grant.coupon,
+          plan: { period, label: premiumPlans[period].label },
+        },
+      });
+    }
   }
   const plan = await fetchPlan(period);
   if (!plan.configured) {
@@ -290,7 +455,7 @@ export const createPremiumSubscription = async (req, res) => {
     );
   }
   const totalCount = period === 'weekly' ? 520 : period === 'yearly' ? 10 : period === 'six_month' ? 20 : 120;
-  const subscription = await withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     await client.query('SELECT id FROM users WHERE id = $1 FOR UPDATE', [req.user._id]);
     const openSubscriptions = await client.query(
       `SELECT provider_subscription_id FROM billing_subscriptions
@@ -301,13 +466,18 @@ export const createPremiumSubscription = async (req, res) => {
     if (openSubscriptions.rowCount) {
       throw Object.assign(new Error('You already have a subscription in progress. Manage it from Billing.'), { statusCode: 409 });
     }
-    const created = await razorpayClient().subscriptions.create({
+    const coupon = code
+      ? await findAvailableCoupon(client, code, req.user._id, period, true)
+      : null;
+    const createOptions = {
       plan_id: plan.id,
       total_count: totalCount,
       quantity: 1,
       customer_notify: true,
       notes: { userId: req.user._id, billingPeriod: period },
-    });
+    };
+    if (coupon) createOptions.offer_id = coupon.coupon.razorpayOfferId;
+    const created = await razorpayClient().subscriptions.create(createOptions);
     const snapshot = safeSubscription(created);
     await client.query(
       `INSERT INTO billing_subscriptions (
@@ -338,12 +508,22 @@ export const createPremiumSubscription = async (req, res) => {
         snapshot.cancelAtCycleEnd ?? false,
       ],
     );
-    return created;
+    if (coupon) {
+      await client.query(
+        `INSERT INTO billing_coupon_redemptions (
+           coupon_id, user_id, provider_subscription_id, status
+         ) VALUES ($1, $2, $3, 'reserved')`,
+        [coupon.coupon.id, req.user._id, created.id],
+      );
+    }
+    return { subscription: created, coupon: coupon?.quote || null };
   });
+  const { subscription } = result;
   res.status(201).json({
     data: {
       keyId: process.env.RAZORPAY_KEY_ID,
       subscriptionId: subscription.id,
+      coupon: result.coupon,
       plan: {
         period: plan.period,
         interval: plan.interval,
@@ -482,7 +662,10 @@ export const changePremiumSubscription = async (req, res) => {
     throw error;
   }
   if (['cancelled', 'completed', 'expired'].includes(subscription.status)) {
-    await withTransaction((client) => saveSubscriptionSnapshot(client, subscription));
+    await withTransaction(async (client) => {
+      await saveSubscriptionSnapshot(client, subscription);
+      await releaseUnredeemedCoupon(client, subscriptionId);
+    });
     return res.json({ data: { changed: true, effective: 'immediate', status: subscription.status } });
   }
   if (subscriptionRow.cancelAtCycleEnd) {
@@ -501,6 +684,9 @@ export const changePremiumSubscription = async (req, res) => {
   }
   const result = await withTransaction(async (client) => {
     await saveSubscriptionSnapshot(client, subscription);
+    if (['cancelled', 'completed', 'expired'].includes(subscription.status)) {
+      await releaseUnredeemedCoupon(client, subscriptionId);
+    }
     if (!immediate && !['cancelled', 'completed', 'expired'].includes(subscription.status)) {
       await client.query(
         `UPDATE billing_subscriptions
@@ -533,7 +719,8 @@ const applyWebhookEvent = async (client, eventType, payload) => {
 
   if (!subscriptionRow && subscriptionId) {
     const { rows } = await client.query(
-      `SELECT user_id AS "userId", current_end AS "currentEnd",
+      `SELECT provider_subscription_id AS "providerSubscriptionId",
+              user_id AS "userId", current_end AS "currentEnd",
               current_start AS "currentStart", billing_period AS "billingPeriod",
               billing_interval AS "billingInterval"
          FROM billing_subscriptions WHERE provider_subscription_id = $1 FOR UPDATE`,
@@ -568,6 +755,12 @@ const applyWebhookEvent = async (client, eventType, payload) => {
   }
 
   if (eventType === 'subscription.charged' && subscriptionRow) {
+    await client.query(
+      `UPDATE billing_coupon_redemptions
+          SET status = 'redeemed', redeemed_at = COALESCE(redeemed_at, NOW())
+        WHERE provider_subscription_id = $1 AND status = 'reserved'`,
+      [subscriptionRow.providerSubscriptionId],
+    );
     const premiumUntil = paidThroughDate(subscriptionRow, payment);
     if (!premiumUntil) return;
     await client.query(
@@ -577,6 +770,9 @@ const applyWebhookEvent = async (client, eventType, payload) => {
         WHERE id = $1`,
       [subscriptionRow.userId, premiumUntil],
     );
+  }
+  if (subscriptionId && ['subscription.cancelled', 'subscription.completed'].includes(eventType)) {
+    await releaseUnredeemedCoupon(client, subscriptionId);
   }
 };
 

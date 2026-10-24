@@ -55,6 +55,21 @@ account. The dashboard Billing page uses authenticated
 `POST /api/billing/subscriptions/verify`, `GET /api/billing/summary`, and
 `POST /api/billing/subscriptions/:subscriptionId/cancel`. Cancellation is
 scheduled for the end of the paid period, so access is not revoked immediately.
+Coupon entry is checked with `POST /api/billing/coupons/validate`; admins manage
+codes through `GET` and `POST /api/admin/coupons`, plus
+`PATCH /api/admin/coupons/:couponId`.
+Admins can manage coupon codes under **Coupon codes**. Each code has a percentage
+or fixed INR discount, applies to the first payment or every renewal, and has a
+global redemption limit; each account can redeem a code once. Discounts below
+100% require a matching Subscription Offer created in the Razorpay Dashboard.
+Configure the same discount and duration, set the offer to fail checkout when
+the payment method is not eligible, and ensure any Razorpay offer-level usage
+limit is not lower than the app limit. A 100% first-payment coupon instead grants
+the selected billing period directly, without a Razorpay checkout or automatic
+renewal; the user can subscribe manually after free access expires. The app
+reserves a paid coupon redemption while checkout is in progress, counts it as
+used after a successful payment, and releases it if the unpaid subscription is
+canceled.
 The previous one-time checkout endpoints remain available at
 `POST /api/billing/premium/order` and `POST /api/billing/premium/verify`.
 
@@ -107,6 +122,18 @@ an app password (with 2-Step Verification enabled), not your regular Gmail
 password. Set `EMAIL_FROM` to the sender address and `FRONTEND_URL` to the
 frontend origin used in reset links. Reset links expire after 10 minutes and
 are invalidated after a successful password change.
+
+The **Contact Us** page is available at `/contact` and requires a signed-in
+account to submit an enquiry. Enquiries and their optional attachments (up to
+three PDF or image files, 5 MB each and 10 MB total) are saved in PostgreSQL.
+Administrators and sub-administrators can review enquiries, download
+attachments, update their status, and save resolution notes in the admin
+workspace. Users can choose **My Enquiries** below **My friend code** in the
+profile menu to view each ticket ID, current status, and update history.
+Users can add a comment and confirm before reopening a closed enquiry. The
+comment and status change are recorded in the ticket history for the support team.
+Enquiry APIs are `POST /api/users/contact` to submit and `GET /api/users/enquiries`
+to list the signed-in user's enquiries.
 
 The recovery endpoints are `POST /api/users/forgot-password` with
 `{"email":"person@example.com"}` and `POST /api/users/reset-password` with
