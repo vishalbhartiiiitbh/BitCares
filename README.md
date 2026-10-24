@@ -108,6 +108,12 @@ password. Set `EMAIL_FROM` to the sender address and `FRONTEND_URL` to the
 frontend origin used in reset links. Reset links expire after 10 minutes and
 are invalidated after a successful password change.
 
+Signed-in users can open **Contact Us** in the dashboard to report an issue and
+attach up to three PDF or image files (5 MB per file, 10 MB total). Configure
+`CONTACT_EMAIL_TO` in `backend/.env` with the Gmail address that should receive
+reports. The backend sends reports using the SMTP settings above; restart it
+after changing environment values.
+
 The recovery endpoints are `POST /api/users/forgot-password` with
 `{"email":"person@example.com"}` and `POST /api/users/reset-password` with
 `{"token":"token-from-email","password":"new-password"}`. Reset requests
