@@ -65,7 +65,8 @@
 .billing-message { padding: 12px 14px; border-left: 3px solid #466d4c; background: #eff5ec; color: #34443a; }
 .billing-status { display: inline-flex; align-items: center; width: max-content; padding: 5px 9px; border: 1px solid #d5ded4; border-radius: 99px; color: #53645a; font-size: 11px; font-weight: 700; text-transform: capitalize; }
 .billing-status.captured, .billing-status.active, .billing-status.resumed { border-color: #bdd4bb; background: #eff8ed; color: #3e6743; }
-.billing-status.failed, .billing-status.halted, .billing-status.cancelled { border-color: #f2c5a9; background: #fff0e7; color: #9d4b2c; }
+.billing-status.failed, .billing-status.halted { border-color: #f2c5a9; background: #fff0e7; color: #9d4b2c; }
+.billing-status.cancelled { border-color: #d5ded4; background: #f3f5f1; color: #718078; }
 .billing-plan-options { display: grid; gap: 9px; margin: 16px 0; }
 .billing-coupon { max-width: 620px; margin: 22px 0 16px; color: #4d5d53; font-size: 12px; font-weight: 700; }
 .billing-coupon-row { display: flex; gap: 10px; margin-top: 7px; }

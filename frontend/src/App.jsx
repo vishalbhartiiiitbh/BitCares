@@ -2768,9 +2768,6 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
 
   const dateLabel = (value) => value ? new Date(value).toLocaleDateString() : '—';
   const currentSubscription = summary?.subscription;
-  const hasSuccessfulCurrentPayment = currentSubscription && summary?.payments.some(
-    (payment) => payment.subscriptionId === currentSubscription.subscriptionId && payment.status === 'captured',
-  );
   const terminalStatuses = ['cancelled', 'completed', 'expired'];
   const canCancel = currentSubscription && !terminalStatuses.includes(currentSubscription.status);
   const paidPeriodEnded = summary?.premiumUntil
@@ -2800,17 +2797,14 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
       <section className="billing-card">
         <div className="billing-card-header">
           <div><p className="eyebrow">CURRENT PLAN</p><h2>{summary?.plan === 'premium' ? 'Premium' : 'Free'}</h2></div>
-          {currentSubscription && <span className={`billing-status ${currentSubscription.status}`}>{currentSubscription.status}</span>}
+          {currentSubscription
+            && !(currentSubscription.status === 'cancelled' && summary?.plan === 'premium')
+            && <span className={`billing-status ${currentSubscription.status}`}>
+              {currentSubscription.status === 'cancelled' ? 'Cancelled' : currentSubscription.status}
+            </span>}
         </div>
         {currentSubscription ? (
           <>
-            {currentSubscription.status === 'cancelled'
-              && summary?.plan !== 'premium'
-              && !hasSuccessfulCurrentPayment && (
-                <p className="billing-muted" role="status">
-                  Payment was not completed. This subscription was canceled, and your account remains on the Free plan.
-                </p>
-              )}
             <dl className="billing-details">
               <div><dt>Billing interval</dt><dd>{periodLabels[currentSubscription.billingPeriod] || currentSubscription.billingPeriod}</dd></div>
               <div><dt>Plan price</dt><dd>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: currentSubscription.currency, maximumFractionDigits: 2 }).format(currentSubscription.planAmount / 100)}</dd></div>
