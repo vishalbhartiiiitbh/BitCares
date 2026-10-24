@@ -2,6 +2,7 @@ const dailyRates = new Map();
 let currencyCodesCache = null;
 let currencyCodesExpiresAt = 0;
 
+/** Fetch all latest conversion rates for a base currency from the configured provider. */
 const getLatestRates = async (baseCurrency) => {
   const apiKey = process.env.EXCHANGE_RATE_API_KEY;
   if (!apiKey) {
@@ -43,6 +44,7 @@ const getLatestRates = async (baseCurrency) => {
   return data;
 };
 
+/** Return the supported currency codes reported by the exchange-rate provider. */
 export const getAvailableCurrencies = async () => {
   if (currencyCodesCache && currencyCodesExpiresAt > Date.now()) return currencyCodesCache;
   const data = await getLatestRates('USD');
@@ -54,6 +56,7 @@ export const getAvailableCurrencies = async () => {
   return currencies;
 };
 
+/** Return a cached or freshly fetched conversion rate between two currencies. */
 export const getExchangeRate = async (fromCurrency, toCurrency) => {
   if (!/^[A-Z]{3}$/.test(fromCurrency) || !/^[A-Z]{3}$/.test(toCurrency)) {
     throw Object.assign(new Error('Enter valid three-letter currency codes'), { statusCode: 400 });

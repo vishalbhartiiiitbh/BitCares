@@ -9,9 +9,11 @@ import {
   validateSplitwiseMemberMappings,
 } from './splitwiseCsv.js';
 
+/** Check that a database identifier is UUID-shaped before processing an import. */
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 
+/** Map a Splitwise category label to the closest supported app category. */
 const categoryForSplitpayerly = (category) => {
   const normalized = category.trim().toLocaleLowerCase();
   if (['groceries', 'dining out', 'food', 'liquor'].includes(normalized)) return 'Food and drink';
@@ -22,8 +24,10 @@ const categoryForSplitpayerly = (category) => {
   return 'Uncategorized';
 };
 
+/** Convert integer cents to a fixed two-decimal database amount. */
 const centsToAmount = (cents) => (cents / 100).toFixed(2);
 
+/** Insert large import collections in bounded batches to stay within query limits. */
 const insertRowsInBatches = async (client, table, columns, rows) => {
   const batchSize = 500;
   for (let offset = 0; offset < rows.length; offset += batchSize) {
@@ -43,6 +47,7 @@ const insertRowsInBatches = async (client, table, columns, rows) => {
   }
 };
 
+/** Accumulate one signed pairwise balance change for the import summary. */
 const addBalanceDelta = (deltas, groupId, firstId, secondId, currency, cents) => {
   const [user1, user2] = [firstId, secondId].sort();
   const key = `${user1}:${user2}:${currency}`;
@@ -54,6 +59,7 @@ const addBalanceDelta = (deltas, groupId, firstId, secondId, currency, cents) =>
   });
 };
 
+/** Replace CSV member names with app accounts and combine duplicate mapped shares. */
 const mergeMemberBalances = (transaction, memberMappings) => {
   const balances = new Map();
   for (const balance of transaction.balances) {
@@ -67,6 +73,7 @@ const mergeMemberBalances = (transaction, memberMappings) => {
  * Check that a requester belongs to the target group and return a validated CSV preview.
  * @param {{ groupId: string, userId: string, csvText: string }} input Upload preview details.
  */
+/** Validate import eligibility and return a balance-aware preview without writing data. */
 export const previewSplitwiseImport = async ({ groupId, userId, csvText }) => {
   if (!validId(groupId) || !validId(userId)) {
     throw Object.assign(new Error('Choose a valid group.'), { statusCode: 400 });
@@ -100,6 +107,7 @@ export const previewSplitwiseImport = async ({ groupId, userId, csvText }) => {
  * Mappings associate each Splitwise member column with a current member's Splitpayerly user ID.
  * @param {{ groupId: string, userId: string, csvText: string, memberMappings: Record<string, string> }} input Import request details.
  */
+/** Import mapped Splitwise transactions and recalculate group balances atomically. */
 export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappings }) => {
   const parsed = parseSplitwiseCsv(csvText);
   if (!validId(groupId) || !validId(userId)) {

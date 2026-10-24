@@ -6,13 +6,16 @@ import { getExchangeRate } from './exchangeRateService.js';
 import { recordGroupActivity } from './groupActivityService.js';
 import { normalizeGroupBalances, normalizeGroupBalancesInTransaction } from './groupCurrencyService.js';
 
+/** Generate a short, uppercase invite code for a newly created group. */
 const groupCode = () => crypto.randomBytes(4).toString('hex').toUpperCase();
+/** Add the group's member records to a database group row. */
 const hydrate = async (row, client = null) => {
 	const runQuery = client ? client.query.bind(client) : query;
 	const members = await runQuery('SELECT u.id AS "_id", u.username, u.email, u.fullnamae, u.coverimage FROM users u JOIN group_members gm ON gm.user_id = u.id WHERE gm.group_id = $1 ORDER BY u.fullnamae', [row._id]);
 	return { ...row, members: members.rows };
 };
 
+/** Return the user's private expense group, creating it when it does not exist. */
 export const ensurePersonalExpenseGroup = async (userId) => withTransaction(async (client) => {
 	const result = await client.query(
 		`INSERT INTO groups (name, group_code, created_by, is_personal)
@@ -36,6 +39,7 @@ export const ensurePersonalExpenseGroup = async (userId) => withTransaction(asyn
 	return hydrate(group, client);
 });
 
+/** Create a shared group, resolve invitees, add memberships, and record its creation activity. */
 export const createGroup = async ({ name, createdBy, memberIds = [], memberIdentifiers = [], simplifyDebts = false, coverImageUrl = null, currency = 'INR' }) => withTransaction(async (client) => {
 	const identifiers = [...new Set(memberIdentifiers.map((identifier) => identifier.trim().toLowerCase()).filter(Boolean))];
 	const resolvedMemberIds = [];
@@ -84,7 +88,9 @@ export const createGroup = async ({ name, createdBy, memberIds = [], memberIdent
 	});
 	return hydrate(created.rows[0], client);
 });
+/** List the user's groups with member details attached. */
 export const listGroupsForUser = async (userId) => { const result = await query('SELECT g.id AS "_id", g.name, g.group_code AS "groupCode", g.created_by AS "createdBy", g.is_personal AS "isPersonal", g.cover_image_url AS "coverImageUrl", g.simplify_debts AS "simplifyDebts", g.currency, g.created_at AS "createdAt" FROM groups g JOIN group_members gm ON gm.group_id = g.id WHERE gm.user_id = $1 AND NOT g.is_friend_ledger ORDER BY g.created_at DESC', [userId]); return Promise.all(result.rows.map((row) => hydrate(row))); };
+/** Resolve an account identifier and add that account to a group transactionally. */
 export const addGroupMember = async ({ groupId, requesterId, identifier }) => withTransaction(async (client) => {
 	const groupResult = await client.query(
 		'SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy", is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger", currency, created_at AS "createdAt" FROM groups WHERE id = $1',
@@ -132,6 +138,7 @@ export const addGroupMember = async ({ groupId, requesterId, identifier }) => wi
 	});
 	return hydrate(group, client);
 });
+/** Return the signed-in member's simplified amounts owed to or by group members. */
 export const getGroupBalances = async (groupId, userId) => {
 	await normalizeGroupBalances(groupId, userId);
 	const group = await query(
@@ -163,6 +170,7 @@ export const getGroupBalances = async (groupId, userId) => {
 		};
 	});
 };
+/** Aggregate group and direct-friend balances in the user's preferred currency. */
 export const getDashboardBalanceSummary = async (userId) => {
 	const userResult = await query(
 		'SELECT default_currency AS "defaultCurrency" FROM users WHERE id = $1',
@@ -228,6 +236,7 @@ export const getDashboardBalanceSummary = async (userId) => {
 	}));
 	const youOwe = balances.reduce((total, balance) => total.plus(balance.youOwe), new Decimal(0));
 	const youAreOwed = balances.reduce((total, balance) => total.plus(balance.youAreOwed), new Decimal(0));
+	/** Select the highest balances for one direction of the dashboard summary. */
 	const sortByAmount = (field) => balances
 		.filter((balance) => new Decimal(balance[field]).greaterThan(0))
 		.sort((first, second) => new Decimal(second[field]).minus(first[field]).toNumber());
@@ -240,6 +249,7 @@ export const getDashboardBalanceSummary = async (userId) => {
 		incomingBalances: sortByAmount('youAreOwed'),
 	};
 };
+/** Update group settings and convert existing balances atomically when currency changes. */
 export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts, currency, coverImageUrl, removeCoverImage = false }) => withTransaction(async (client) => {
 	const membership = await client.query(
 		`SELECT g.id, g.name, g.group_code AS "groupCode", g.created_by AS "createdBy",
@@ -293,6 +303,7 @@ export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts
 			sourceCurrency,
 			sourceCurrency === currency ? 1 : await getExchangeRate(sourceCurrency, currency),
 		])));
+		/** Convert a positive ledger amount while retaining cent-level precision. */
 		const convertPositiveAmount = (amount, rate) => {
 			const converted = new Decimal(amount).mul(rate).toDecimalPlaces(2);
 			if (converted.lte(0)) {
@@ -405,6 +416,7 @@ export const updateGroupSettings = async ({ groupId, userId, name, simplifyDebts
 	return hydrate(result.rows[0], client);
 });
 
+/** Remove a group member only when permissions and unsettled-balance rules allow it. */
 export const removeGroupMember = async ({ groupId, requesterId, memberId }) => withTransaction(async (client) => {
 	const group = await client.query(
 		'SELECT id, created_by AS "createdBy", is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger" FROM groups WHERE id = $1 FOR UPDATE',
@@ -452,6 +464,7 @@ export const removeGroupMember = async ({ groupId, requesterId, memberId }) => w
 		)).rows[0]),
 	}, client);
 });
+/** Add a user to the group identified by an invite code and record the join activity. */
 export const joinGroupByCode = async ({ groupCode: code, userId }) => withTransaction(async (client) => {
 	const result = await client.query(
 		`SELECT id AS "_id", name, group_code AS "groupCode", created_by AS "createdBy",
@@ -480,6 +493,7 @@ export const joinGroupByCode = async ({ groupCode: code, userId }) => withTransa
 	}
 	return hydrate(group, client);
 });
+/** Reject operations that would remove a group while members still owe balances. */
 const ensureGroupIsSettled = async (client, groupId) => {
 	const unsettled = await client.query(
 		'SELECT 1 FROM balances WHERE group_id = $1 AND net_owed <> 0 LIMIT 1',
@@ -490,6 +504,7 @@ const ensureGroupIsSettled = async (client, groupId) => {
 	}
 };
 
+/** Remove the current member from a group after checking outstanding balances. */
 export const leaveGroup = async (groupId, userId) => withTransaction(async (client) => {
 	const group = await client.query('SELECT id, is_personal, is_friend_ledger FROM groups WHERE id = $1 FOR UPDATE', [groupId]);
 	if (!group.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
@@ -520,6 +535,7 @@ export const leaveGroup = async (groupId, userId) => withTransaction(async (clie
 	return { groupId, removed: true, groupDeleted: false };
 });
 
+/** Delete a group and its data when the requester owns a settled group. */
 export const deleteGroup = async (groupId, userId) => withTransaction(async (client) => {
 	const group = await client.query(
 		'SELECT id, is_personal, is_friend_ledger FROM groups WHERE id = $1 AND created_by = $2 FOR UPDATE',
@@ -538,6 +554,7 @@ export const deleteGroup = async (groupId, userId) => withTransaction(async (cli
 	return { groupId, deleted: true };
 });
 
+/** Retrieve whiteboard content only for a current group member. */
 export const getGroupWhiteboard = async (groupId, userId) => {
 	const result = await query(
 		`SELECT wb.content, wb.updated_at AS "updatedAt",
@@ -558,6 +575,7 @@ export const getGroupWhiteboard = async (groupId, userId) => {
 	};
 };
 
+/** Save or clear a member's group whiteboard and record the change in activity. */
 export const saveGroupWhiteboard = async ({ groupId, userId, content }) => withTransaction(async (client) => {
 	const membership = await client.query(
 		`SELECT g.name AS "groupName", g.is_friend_ledger AS "isFriendLedger",

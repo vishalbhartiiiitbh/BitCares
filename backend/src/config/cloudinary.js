@@ -6,6 +6,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+/** Upload an in-memory image buffer and resolve to its secure Cloudinary URL. */
 export const uploadImageBuffer = (buffer, folder = 'splitcare/profiles') =>
   new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream({ folder, resource_type: 'image' }, (error, result) => {
@@ -15,6 +16,7 @@ export const uploadImageBuffer = (buffer, folder = 'splitcare/profiles') =>
     stream.end(buffer);
   });
 
+/** Delete a Cloudinary image only when its URL belongs to this configured account. */
 export const deleteImageByUrl = async (imageUrl) => {
   const cloudName = cloudinary.config().cloud_name;
   if (!cloudName) throw new Error('Cloudinary cloud name is not configured');

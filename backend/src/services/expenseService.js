@@ -19,6 +19,7 @@ const expenseSubcategories = {
   Utilities: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'],
 };
 
+/** Convert a money amount using decimal arithmetic and round to currency precision. */
 const convertMoney = (amount, rate) => {
   let decimal;
   try {
@@ -36,6 +37,7 @@ const convertMoney = (amount, rate) => {
   return converted.toFixed(2);
 };
 
+/** Convert strategy inputs and adjust the final participant to preserve the total. */
 const convertSplitValues = (values, splitStrategy, rate) => {
   if (!Array.isArray(values) || !['EXACT', 'REIMBURSEMENT', 'ADJUSTMENT'].includes(splitStrategy)) return values;
   const converted = values.map((value) => {
@@ -55,11 +57,13 @@ const convertSplitValues = (values, splitStrategy, rate) => {
   return converted.map((value) => value.toFixed(2));
 };
 
+/** Sum decimal amounts without introducing binary floating-point rounding errors. */
 const sumAmounts = (amounts) => amounts
   .reduce((total, amount) => total.plus(amount), new Decimal(0))
   .toDecimalPlaces(2)
   .toFixed(2);
 
+/** Return accessible expenses and relevant activity, honoring group/member visibility. */
 export const listExpenses = async (groupId, userId, unlimited = false, includeFriendLedger = false) => {
   if (groupId) {
     const membership = await query(
@@ -257,6 +261,7 @@ export const listExpenses = async (groupId, userId, unlimited = false, includeFr
   return transactions;
 };
 
+/** Load expenses from the user's private personal ledger. */
 export const listPersonalExpenses = async (userId) => {
   const personalGroup = await query(
     'SELECT id FROM groups WHERE created_by = $1 AND is_personal = TRUE',
@@ -266,6 +271,7 @@ export const listPersonalExpenses = async (userId) => {
   return listExpenses(personalGroup.rows[0].id, userId, true);
 };
 
+/** Add a comment after checking access to the expense's group or friend ledger. */
 export const addExpenseComment = async ({ expenseId, userId, content }) => withTransaction(async (client) => {
   const expense = await client.query(
     `SELECT e.group_id AS "groupId", g.is_personal AS "isPersonal",
@@ -310,6 +316,7 @@ export const addExpenseComment = async ({ expenseId, userId, content }) => withT
   return { ...result.rows[0], authorName: author.rows[0].authorName };
 });
 
+/** Delete a comment only when the caller is authorized for its associated expense. */
 export const deleteExpenseComment = async ({ commentId, userId }) => withTransaction(async (client) => {
   const comment = await client.query(
     `SELECT ec.expense_id AS "expenseId", e.group_id AS "groupId", e.description,
@@ -356,10 +363,12 @@ export const deleteExpenseComment = async ({ commentId, userId }) => withTransac
   return { _id: result.rows[0]._id, deleted: true };
 });
 
+/** Calculate participant and item shares, preserving the expense total in cents. */
 const calculateExpenseShares = ({
   paidBy, totalAmount, splitStrategy, participants, values, items = [],
   description, currency, category, subcategory, note,
 }) => {
+  /** Raise a consistent client validation error for malformed share inputs. */
   const invalid = (message) => { throw Object.assign(new Error(message), { statusCode: 400 }); };
   if (typeof description !== 'string' || !description.trim()) invalid('Expense description is required');
   if (!Number.isFinite(Number(totalAmount)) || Number(totalAmount) <= 0) invalid('Expense amount must be greater than zero');
@@ -411,6 +420,7 @@ const calculateExpenseShares = ({
   return { splits, itemSplits };
 };
 
+/** Persist itemized expense lines and their participant allocations. */
 const saveExpenseItems = async (client, expenseId, itemSplits) => {
   for (const item of itemSplits) {
     const createdItem = await client.query(
@@ -426,6 +436,7 @@ const saveExpenseItems = async (client, expenseId, itemSplits) => {
   }
 };
 
+/** Apply signed balance deltas for expense creation, edits, or deletion. */
 const applyGroupBalances = async (client, { groupId, paidBy, currency, splits, multiplier }) => {
   for (const split of splits) {
     if (split.userId === paidBy) continue;
@@ -442,6 +453,7 @@ const applyGroupBalances = async (client, { groupId, paidBy, currency, splits, m
   }
 };
 
+/** Validate, save, and distribute a new expense while enforcing access and usage limits. */
 export const addExpense = async ({
   groupId = null,
   friendId = null,
@@ -699,6 +711,7 @@ export const addExpense = async ({
   };
 };
 
+/** Replace an expense and reconcile its old and new split effects atomically. */
 export const updateExpense = async ({
   expenseId,
   editorId,
@@ -905,6 +918,7 @@ export const updateExpense = async ({
   return updated;
 };
 
+/** Delete an accessible expense and reverse its balance and activity effects. */
 export const deleteExpense = async ({ expenseId, userId, friendId = null }) => {
   const expenseContext = await query(
     `SELECT e.group_id AS "groupId", g.is_personal AS "isPersonal",

@@ -10,6 +10,7 @@ import { deleteExpense, updateExpense } from '../services/expenseService.js';
 import { queueEmailNotification } from '../services/emailNotificationService.js';
 import { validateExpenseOptions } from './expenseController.js';
 
+/** Accept an array or decode the JSON representation sent by multipart requests. */
 const parseArray = (value, label) => {
   if (Array.isArray(value)) return value;
   if (typeof value !== 'string') throw Object.assign(new Error(`${label} must be a list`), { statusCode: 400 });
@@ -22,8 +23,10 @@ const parseArray = (value, label) => {
   throw Object.assign(new Error(`${label} must be a valid list`), { statusCode: 400 });
 };
 
+/** Put two user IDs in a stable order for friendship-pair queries. */
 const friendKey = (firstId, secondId) => [firstId, secondId].sort();
 
+/** List the signed-in user's accepted friends and their current relationship data. */
 export const listFriends = async (req, res) => {
   const result = await query(
     `SELECT u.id AS "_id", u.username, u.fullnamae, u.email, u.coverimage, f.created_at AS "addedAt"
@@ -35,14 +38,17 @@ export const listFriends = async (req, res) => {
   res.json({ data: result.rows });
 };
 
+/** Return expenses and settlements for the requested friend relationship. */
 export const friendHistory = async (req, res) => {
   res.json({ data: await getFriendHistory(req.user._id, req.params.friendId) });
 };
 
+/** Return the chronological activity feed for a friend ledger. */
 export const friendActivity = async (req, res) => {
   res.json({ data: await getFriendActivity(req.user._id) });
 };
 
+/** Create an expense shared by the signed-in user and an accepted friend. */
 export const createFriendExpense = async (req, res) => {
   validateExpenseOptions(req.body);
   const expense = await addFriendExpense({
@@ -64,6 +70,7 @@ export const createFriendExpense = async (req, res) => {
   res.status(201).json({ data: expense });
 };
 
+/** Edit a friend-ledger expense while recalculating its balance effects. */
 export const updateFriendExpense = async (req, res) => {
   validateExpenseOptions(req.body);
   const expense = await updateExpense({
@@ -83,6 +90,7 @@ export const updateFriendExpense = async (req, res) => {
   res.json({ data: expense });
 };
 
+/** Remove an expense from a friend ledger and restore the prior balance. */
 export const deleteFriendExpense = async (req, res) => {
   res.json({
     data: await deleteExpense({
@@ -93,6 +101,7 @@ export const deleteFriendExpense = async (req, res) => {
   });
 };
 
+/** Record a payment between friends against their outstanding ledger balance. */
 export const settleFriend = async (req, res) => {
   res.status(201).json({
     data: await settleFriendBalances({
@@ -109,6 +118,7 @@ export const settleFriend = async (req, res) => {
 };
 
 
+/** List incoming pending friend requests for the signed-in user. */
 export const listFriendRequests = async (req, res) => {
   const result = await query(
     `SELECT r.id AS "_id", r.status, r.created_at AS "createdAt", r.updated_at AS "updatedAt",
@@ -123,6 +133,7 @@ export const listFriendRequests = async (req, res) => {
   res.json({ data: result.rows   });
 };
 
+/** List friend requests sent by the signed-in user. */
 export const listSentFriendRequests = async (req, res) => {
   const result = await query(
     `SELECT r.id AS "_id", r.status, r.created_at AS "createdAt", r.updated_at AS "updatedAt",
@@ -138,6 +149,7 @@ export const listSentFriendRequests = async (req, res) => {
   res.json({ data: result.rows });
 };
 
+/** Resolve a recipient identifier and create a non-duplicate friend request. */
 export const sendFriendRequest = async (req, res) => {
   const { userId, username, email } = req.body || {};
   const hasUserId = typeof userId === 'string';
@@ -218,8 +230,10 @@ export const sendFriendRequest = async (req, res) => {
   }
 };
 
+/** Generate a URL-safe invite token with sufficient random entropy. */
 const newFriendInviteCode = () => randomBytes(24).toString('base64url');
 
+/** Return the signed-in user's referral code and referral reward history. */
 export const getReferralDetails = async (req, res) => {
   const referral = await withTransaction(async (client) => {
     await client.query(
@@ -243,6 +257,7 @@ export const getReferralDetails = async (req, res) => {
   res.json({ data: referral });
 };
 
+/** Return the user's existing invite code or create one if it does not exist. */
 export const getFriendInviteCode = async (req, res) => {
   const code = await withTransaction(async (client) => {
     await client.query(
@@ -260,6 +275,7 @@ export const getFriendInviteCode = async (req, res) => {
   res.json({ data: { code } });
 };
 
+/** Replace the signed-in user's friend invite code with a fresh token. */
 export const rotateFriendInviteCode = async (req, res) => {
   const result = await query(
     `INSERT INTO friend_invite_codes (user_id, code)
@@ -271,6 +287,7 @@ export const rotateFriendInviteCode = async (req, res) => {
   res.json({ data: { code: result.rows[0].code } });
 };
 
+/** Validate an invite code and create the friendship and referral records. */
 export const acceptFriendInviteCode = async (req, res) => {
   const code = typeof req.body?.code === 'string' ? req.body.code : '';
   if (!/^[A-Za-z0-9_-]{32}$/.test(code)) {
@@ -310,6 +327,7 @@ export const acceptFriendInviteCode = async (req, res) => {
   res.status(201).json({ data: friend });
 };
 
+/** Accept or decline an incoming request, creating friendship data on acceptance. */
 export const respondToFriendRequest = async (req, res) => {
   const { action } = req.body || {};
   if (!['accept', 'decline'].includes(action)) {
@@ -348,6 +366,7 @@ export const respondToFriendRequest = async (req, res) => {
   res.json({ data: result });
 };
 
+/** Remove an accepted friend relationship and its associated friend ledger. */
 export const removeFriend = async (req, res) => {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.friendId)) {
     throw Object.assign(new Error('Friend not found'), { statusCode: 404 });

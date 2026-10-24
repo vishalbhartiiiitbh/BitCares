@@ -5,8 +5,10 @@ const MAX_TRANSACTIONS = 5000;
 const MAX_CENTS = 999999999999;
 const UUID_PATTERN = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
+/** Create a client-facing validation error for malformed Splitwise exports. */
 const invalidCsv = (message) => Object.assign(new Error(message), { statusCode: 400 });
 
+/** Parse CSV text into rows while respecting quoted commas, escaped quotes, and newlines. */
 const parseCsvRows = (text) => {
   const rows = [];
   let row = [];
@@ -60,6 +62,7 @@ const parseCsvRows = (text) => {
   return rows.filter((values) => values.some((value) => value.trim() !== ''));
 };
 
+/** Parse a decimal amount into integer cents and reject invalid signs or precision. */
 const parseCents = (value, label, rowNumber, allowNegative = false) => {
   const normalized = value.trim();
   const pattern = allowNegative ? /^-?\d+(?:\.\d{1,2})?$/ : /^\d+(?:\.\d{1,2})?$/;
@@ -73,6 +76,7 @@ const parseCents = (value, label, rowNumber, allowNegative = false) => {
   return cents.toNumber();
 };
 
+/** Parse a supported Splitwise date value into a stable ISO date. */
 const parseDate = (value, rowNumber) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
   if (!match) throw invalidCsv(`Row ${rowNumber}: Date must use YYYY-MM-DD format.`);

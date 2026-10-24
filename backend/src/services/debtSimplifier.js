@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import { query } from '../db/index.js';
 
+/** Calculate a minimum-transfer settlement plan from a group's current balances. */
 export const simplifyDebts = async (groupId, userId) => {
   const membership = await query(
     `SELECT g.simplify_debts AS "simplifyDebts"

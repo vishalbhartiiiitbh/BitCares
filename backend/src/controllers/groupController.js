@@ -8,6 +8,7 @@ import { getAvailableCurrencies } from '../services/exchangeRateService.js';
 import { normalizeGroupBalances } from '../services/groupCurrencyService.js';
 import { getUserFeatureAccess } from '../services/featureAccessService.js';
 
+/** Read a CSV upload from memory or a temporary file and return its UTF-8 text. */
 const getSplitwiseCsvText = (req) => {
   if (!req.file) throw Object.assign(new Error('Choose a Splitwise CSV file to upload.'), { statusCode: 400 });
   if (!req.file.originalname.toLocaleLowerCase().endsWith('.csv')) {
@@ -16,10 +17,12 @@ const getSplitwiseCsvText = (req) => {
   return req.file.buffer.toString('utf8');
 };
 
+/** List the signed-in user's groups, excluding personal friend ledgers. */
 export const list = async (req, res) => {
   res.json({ data: await listGroupsForUser(req.user._id) });
 };
 
+/** Validate group fields and create a group with its requested members. */
 export const create = async (req, res) => {
   const { name, simplifyDebts = 'false' } = req.body || {};
   const currency = typeof req.body?.currency === 'string'
@@ -31,6 +34,7 @@ export const create = async (req, res) => {
   if (!(await getAvailableCurrencies()).includes(currency)) {
     throw Object.assign(new Error('Choose a currency supported by the exchange-rate provider'), { statusCode: 400 });
   }
+  /** Decode and validate one request field that accepts a list of member values. */
   const parseList = (field, label) => {
     const value = req.body?.[field] ?? [];
     if (Array.isArray(value)) return value;
@@ -89,33 +93,40 @@ export const create = async (req, res) => {
   res.status(201).json({ data: group });
 };
 
+/** Join a group using its invite code. */
 export const join = async (req, res) => {
   const { groupCode } = req.body || {};
   if (!groupCode) throw Object.assign(new Error('Group code is required'), { statusCode: 400 });
   res.json({ data: await joinGroupByCode({ groupCode, userId: req.user._id }) });
 };
 
+/** Leave a group when its balance and membership rules permit it. */
 export const leave = async (req, res) => {
   const group = await leaveGroup(req.params.groupId, req.user._id);
   res.json({ data: group });
 };
 
+/** Delete a group when the signed-in user is authorized to remove it. */
 export const remove = async (req, res) => {
   res.json({ data: await deleteGroup(req.params.groupId, req.user._id) });
 };
 
+/** Return the selected group's member balances to an authorized member. */
 export const balances = async (req, res) => {
   res.json({ data: await getGroupBalances(req.params.groupId, req.user._id) });
 };
 
+/** Aggregate the signed-in user's outstanding balances across their groups. */
 export const dashboardBalances = async (req, res) => {
   res.json({ data: await getDashboardBalanceSummary(req.user._id) });
 };
 
+/** Read a group's shared whiteboard after confirming membership. */
 export const getWhiteboard = async (req, res) => {
   res.json({ data: await getGroupWhiteboard(req.params.groupId, req.user._id) });
 };
 
+/** Save or clear the group's shared whiteboard as an activity-tracked update. */
 export const saveWhiteboard = async (req, res) => {
   const { content } = req.body || {};
   if (typeof content !== 'string') {
@@ -133,6 +144,7 @@ export const saveWhiteboard = async (req, res) => {
   });
 };
 
+/** Update group settings and manage any replacement or removal of its cover image. */
 export const update = async (req, res) => {
   const { name, simplifyDebts, currency } = req.body || {};
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
@@ -194,6 +206,7 @@ export const update = async (req, res) => {
   res.json({ data: cleanupWarning ? { ...group, warning: cleanupWarning } : group });
 };
 
+/** Add a member to a group using an account identifier. */
 export const addMember = async (req, res) => {
   const { identifier } = req.body || {};
   if (typeof identifier !== 'string' || !identifier.trim()) {
@@ -208,6 +221,7 @@ export const addMember = async (req, res) => {
   });
 };
 
+/** Remove a member while preserving the group's balance and membership rules. */
 export const removeMember = async (req, res) => {
   res.json({
     data: await removeGroupMember({
@@ -218,6 +232,7 @@ export const removeMember = async (req, res) => {
   });
 };
 
+/** Record a payment that settles some or all of a group balance. */
 export const settle = async (req, res) => {
   res.status(201).json({
     data: await recordSettlement({
@@ -232,6 +247,7 @@ export const settle = async (req, res) => {
   });
 };
 
+/** Create a payment request for an outstanding amount owed in the group. */
 export const requestPayment = async (req, res) => {
   res.status(201).json({
     data: await createPaymentRequest({
@@ -245,6 +261,7 @@ export const requestPayment = async (req, res) => {
   });
 };
 
+/** Parse and summarize a Splitwise CSV before the user confirms its import. */
 export const previewSplitwise = async (req, res) => {
   res.json({
     data: await previewSplitwiseImport({
@@ -255,6 +272,7 @@ export const previewSplitwise = async (req, res) => {
   });
 };
 
+/** Import validated Splitwise transactions using the submitted member mappings. */
 export const importSplitwise = async (req, res) => {
   let memberMappings;
   try {
@@ -272,6 +290,7 @@ export const importSplitwise = async (req, res) => {
   });
 };
 
+/** Calculate a lower-transfer settlement plan for a group's current balances. */
 export const simplify = async (req, res) => {
   await normalizeGroupBalances(req.params.groupId, req.user._id);
   res.json({ data: await simplifyDebts(req.params.groupId, req.user._id) });

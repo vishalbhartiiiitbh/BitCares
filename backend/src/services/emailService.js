@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 
+/** Configure the SMTP transport and optionally enable diagnostic logging. */
 const createTransporter = ({ debug = true } = {}) => {
   const { SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
@@ -20,6 +21,7 @@ const createTransporter = ({ debug = true } = {}) => {
   });
 };
 
+/** Email a time-limited link for setting a new account password. */
 export const sendPasswordResetEmail = async (email, resetUrl) => {
   const transporter = createTransporter();
   await transporter.sendMail({
@@ -31,6 +33,7 @@ export const sendPasswordResetEmail = async (email, resetUrl) => {
   });
 };
 
+/** Send the account welcome message after successful registration. */
 export const sendWelcomeEmail = async (email, fullName) => {
   const transporter = createTransporter();
   const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -44,6 +47,7 @@ export const sendWelcomeEmail = async (email, fullName) => {
   });
 };
 
+/** Send a plain-text notification message to one recipient. */
 export const sendNotificationEmail = async (email, subject, text) => {
   const transporter = createTransporter();
   await transporter.sendMail({
@@ -54,6 +58,7 @@ export const sendNotificationEmail = async (email, subject, text) => {
   });
 };
 
+/** Send an enquiry notification with reply routing and any verified attachments. */
 export const sendContactReportEmail = async ({ recipient, replyTo, subject, text, attachments }) => {
   const transporter = createTransporter({ debug: false });
   await transporter.sendMail({
@@ -66,6 +71,7 @@ export const sendContactReportEmail = async ({ recipient, replyTo, subject, text
   });
 };
 
+/** Email a one-time code with wording appropriate to the requested account action. */
 export const sendEmailVerificationCode = async (email, code, purpose) => {
   const transporter = createTransporter();
   const isDeletion = purpose === 'delete_account';

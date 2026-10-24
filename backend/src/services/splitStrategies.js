@@ -3,7 +3,9 @@ import Decimal from 'decimal.js';
 Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
 
 const MONEY_SCALE = new Decimal(100);
+/** Build a consistent client error for unsupported or invalid split values. */
 const invalidInput = (message) => Object.assign(new Error(message), { statusCode: 400 });
+/** Parse a supported input as Decimal and reject non-finite or negative amounts. */
 const asDecimal = (value, label = 'amount') => {
   try {
     const decimal = new Decimal(value);
@@ -14,16 +16,20 @@ const asDecimal = (value, label = 'amount') => {
   }
 };
 
+/** Round a validated value to the app's two-decimal currency precision. */
 const toMoney = (value) => asDecimal(value).toDecimalPlaces(2);
+/** Convert currency amounts to integer minor units for exact split arithmetic. */
 const toMinorUnits = (value) => toMoney(value).mul(MONEY_SCALE).toDecimalPlaces(0);
 
 export class SplitStrategy {
+  /** Define the common interface implemented by each expense split strategy. */
   calculateSplits() {
     throw new Error('calculateSplits must be implemented');
   }
 }
 
 export class EqualSplitStrategy extends SplitStrategy {
+  /** Divide a total evenly and distribute leftover cents in participant order. */
   calculateSplits(totalAmount, participants) {
     if (!Array.isArray(participants) || participants.length === 0) throw invalidInput('At least one participant is required');
     const total = toMinorUnits(totalAmount);
@@ -39,6 +45,7 @@ export class EqualSplitStrategy extends SplitStrategy {
 }
 
 export class ExactSplitStrategy extends SplitStrategy {
+  /** Use explicit participant amounts after confirming they sum to the total. */
   calculateSplits(totalAmount, participants, values) {
     if (!Array.isArray(values) || values.length !== participants.length) throw invalidInput('Exact values must match participants');
     const amounts = values.map((value) => toMoney(asDecimal(value, 'exact amount')));
@@ -49,6 +56,7 @@ export class ExactSplitStrategy extends SplitStrategy {
 }
 
 export class PercentageSplitStrategy extends SplitStrategy {
+  /** Allocate the total by percentages that must sum exactly to 100. */
   calculateSplits(totalAmount, participants, values) {
     if (!Array.isArray(values) || values.length !== participants.length) throw invalidInput('Percentages must match participants');
     const percentages = values.map((value) => asDecimal(value, 'percentage'));
@@ -64,6 +72,7 @@ export class PercentageSplitStrategy extends SplitStrategy {
 }
 
 export class SharesSplitStrategy extends SplitStrategy {
+  /** Allocate the total proportionally to positive participant share counts. */
   calculateSplits(totalAmount, participants, values) {
     if (!Array.isArray(values) || values.length !== participants.length) throw invalidInput('Share values must match participants');
     const shares = values.map((value) => {
@@ -87,6 +96,7 @@ export class SharesSplitStrategy extends SplitStrategy {
 }
 
 export class AdjustmentSplitStrategy extends SplitStrategy {
+  /** Apply zero-sum adjustments to an even split without creating negative shares. */
   calculateSplits(totalAmount, participants, values) {
     if (!Array.isArray(values) || values.length !== participants.length) throw invalidInput('Adjustment values must match participants');
     const adjustments = values.map((value) => {
@@ -129,6 +139,7 @@ const strategies = {
 };
 
 export class SplitStrategyFactory {
+  /** Instantiate the registered strategy for an expense's strategy key. */
   static get(strategy) {
     const Strategy = strategies[strategy];
     if (!Strategy) throw new Error(`Unsupported split strategy: ${strategy}`);

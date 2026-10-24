@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { query } from '../db/index.js';
 
+/** Read a bearer token first, falling back to the browser's access-token cookie. */
 const getAccessToken = (req) => {
   const authorization = req.headers.authorization;
   // Prefer an explicit bearer token, while retaining cookie auth for browser requests.
@@ -8,6 +9,7 @@ const getAccessToken = (req) => {
   return req.cookies?.accessToken;
 };
 
+/** Authenticate the request and attach the account's current database record. */
 export const requireAuth = async (req, _res, next) => {
   try {
     const token = getAccessToken(req);
@@ -29,6 +31,7 @@ export const requireAuth = async (req, _res, next) => {
   }
 };
 
+/** Allow only primary admins and sub-admins to continue to protected admin routes. */
 export const requireAdmin = (req, _res, next) => {
   if (!['admin', 'sub_admin'].includes(req.user?.role)) {
     return next(Object.assign(new Error('Administrator access is required'), { statusCode: 403 }));
@@ -36,6 +39,7 @@ export const requireAdmin = (req, _res, next) => {
   next();
 };
 
+/** Restrict administrator-account management to the primary admin role. */
 export const requirePrimaryAdmin = (req, _res, next) => {
   if (req.user?.role !== 'admin') {
     return next(Object.assign(new Error('Only the primary administrator can manage administrators'), { statusCode: 403 }));

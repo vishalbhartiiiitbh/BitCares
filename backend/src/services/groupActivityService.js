@@ -12,6 +12,7 @@ const emailPreferencesByActivity = {
   COMMENT_DELETED: 'expenseComment',
 };
 
+/** Insert an attributed event in a group's activity timeline within its transaction. */
 export const recordGroupActivity = async (client, {
   groupId,
   expenseId = null,

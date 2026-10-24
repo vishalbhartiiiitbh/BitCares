@@ -4,9 +4,11 @@ import { uploadImageBuffer } from '../config/cloudinary.js';
 import { queueEmailNotification } from './emailNotificationService.js';
 import { normalizeGroupBalances } from './groupCurrencyService.js';
 
+/** Validate a participant UUID before running settlement queries. */
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 
+/** Record a group settlement, update net balances, and preserve proof and activity data. */
 export const recordSettlement = async ({
   groupId,
   payerId,

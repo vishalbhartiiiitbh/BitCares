@@ -5,11 +5,14 @@ import { addExpense, listExpenses } from './expenseService.js';
 import { getExchangeRate } from './exchangeRateService.js';
 import { queueEmailNotification } from './emailNotificationService.js';
 
+/** Check that an identifier is a canonical UUID before passing it to a query. */
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 // Friend and balance rows use the same canonical ordering for either user's perspective.
+/** Canonically order friend IDs so either user pair resolves to the same ledger. */
 const pairKey = (firstId, secondId) => [firstId, secondId].sort();
 
+/** Ensure both users have an accepted friendship before friend-ledger operations. */
 const assertFriends = async (client, firstId, secondId) => {
   if (!validId(firstId) || !validId(secondId) || firstId === secondId) {
     throw Object.assign(new Error('Choose a valid friend'), { statusCode: 400 });
@@ -23,6 +26,7 @@ const assertFriends = async (client, firstId, secondId) => {
   return [lowId, highId];
 };
 
+/** Find the direct ledger group for a canonically ordered friend pair. */
 const findFriendLedger = async (client, lowId, highId) => {
   const result = await client.query(
     `SELECT g.id AS "_id", g.name
@@ -33,6 +37,7 @@ const findFriendLedger = async (client, lowId, highId) => {
   return result.rows[0] || null;
 };
 
+/** Return or create the private ledger group shared by an accepted friend pair. */
 const ensureFriendLedger = async (lowId, highId) => withTransaction(async (client) => {
   await assertFriends(client, lowId, highId);
   const existing = await findFriendLedger(client, lowId, highId);
@@ -59,6 +64,7 @@ const ensureFriendLedger = async (lowId, highId) => withTransaction(async (clien
   return group.rows[0];
 });
 
+/** Create a shared expense in the private ledger for two accepted friends. */
 export const createFriendExpense = async ({ userId, friendId, expense }) => {
   const [lowId, highId] = pairKey(userId, friendId);
   const participants = expense.participants;
@@ -72,6 +78,7 @@ export const createFriendExpense = async ({ userId, friendId, expense }) => {
   return addExpense({ ...expense, groupId: group._id, friendId, actorId: userId });
 };
 
+/** Collect expenses and settlements across all friend ledgers for the activity feed. */
 export const listFriendActivity = async (userId) => {
   const ledgers = await query(
     `SELECT f.user_low AS "userLow", f.user_high AS "userHigh",
@@ -138,6 +145,7 @@ export const listFriendActivity = async (userId) => {
   return transactions.sort((first, second) => new Date(second.createdAt) - new Date(first.createdAt));
 };
 
+/** Build a friend history with shared-group activity and balances converted to account currency. */
 export const getFriendHistory = async (userId, friendId) => {
   if (!validId(userId) || !validId(friendId) || userId === friendId) {
     throw Object.assign(new Error('Choose a valid friend'), { statusCode: 400 });
@@ -281,6 +289,7 @@ export const getFriendHistory = async (userId, friendId) => {
   };
 };
 
+/** Apply a friend payment across eligible ledger balances with currency-safe allocations. */
 export const settleFriendBalances = async ({
   userId,
   friendId,

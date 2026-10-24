@@ -1,6 +1,7 @@
 import { query, withTransaction } from '../db/index.js';
 import { sendNotificationEmail } from './emailService.js';
 
+/** Canonical notification preference keys used by account settings and email delivery. */
 export const EMAIL_NOTIFICATION_PREFERENCES = Object.freeze({
   groupAdded: false,
   whiteboardUpdated: false,
@@ -14,6 +15,7 @@ export const EMAIL_NOTIFICATION_PREFERENCES = Object.freeze({
   productUpdates: false,
 });
 
+/** Queue an email only when the account opted into the named preference. */
 export const queueEmailNotification = async (client, userId, preference, subject, body) => {
   if (!Object.hasOwn(EMAIL_NOTIFICATION_PREFERENCES, preference)) {
     throw new Error(`Unknown email notification preference: ${preference}`);
@@ -30,6 +32,7 @@ export const queueEmailNotification = async (client, userId, preference, subject
 
 let workerRunning = false;
 
+/** Claim and send a batch of pending emails, updating retry state on failures. */
 const deliverBatch = async () => {
   if (workerRunning) return;
   workerRunning = true;
@@ -82,6 +85,7 @@ const deliverBatch = async () => {
   }
 };
 
+/** Queue one monthly summary per eligible user for the previous calendar month. */
 const queueMonthlySummaries = async () => {
   const period = await query(
     `SELECT date_trunc('month', NOW())::date - INTERVAL '1 month' AS "monthStart",
@@ -142,6 +146,7 @@ const queueMonthlySummaries = async () => {
 };
 
 let monthlySummaryRunning = false;
+/** Run monthly summary scheduling when the calendar enters a new month. */
 const runMonthlySummary = async () => {
   if (monthlySummaryRunning) return;
   monthlySummaryRunning = true;
@@ -154,6 +159,7 @@ const runMonthlySummary = async () => {
   }
 };
 
+/** Start periodic workers for queued emails and monthly account summaries. */
 export const startEmailNotificationWorker = () => {
   const interval = setInterval(() => void deliverBatch(), 5000);
   const summaryInterval = setInterval(() => void runMonthlySummary(), 60 * 60 * 1000);

@@ -2,6 +2,7 @@ import pg from "pg";
 import bcrypt from 'bcrypt';
 
 const { Pool } = pg;
+// Share one bounded connection pool across API requests and background workers.
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }, // Required for Supabase pooler connections
@@ -50,7 +51,7 @@ const connectDB = async () => {
   await query(`
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-    
+    -- Account identity, authentication state, verification codes, and admin settings.
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       username VARCHAR(40) NOT NULL UNIQUE,
@@ -111,6 +112,8 @@ const connectDB = async () => {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     INSERT INTO platform_settings (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
+
+    -- Payment orders, recurring subscriptions, coupon rules, redemptions, and payment history.
     CREATE TABLE IF NOT EXISTS billing_orders (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -201,6 +204,8 @@ const connectDB = async () => {
     );
     CREATE INDEX IF NOT EXISTS billing_payments_user_created_idx
       ON billing_payments (user_id, created_at DESC);
+
+    -- Customer enquiries, uploaded files, and append-only status/update history.
     CREATE TABLE IF NOT EXISTS contact_reports (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -258,6 +263,8 @@ const connectDB = async () => {
        SELECT 1 FROM contact_report_updates u WHERE u.report_id = r.id
      );
     UPDATE contact_reports SET admin_notes = '' WHERE admin_notes <> '';
+
+    -- Idempotent webhook processing and durable queues for user email notifications.
     CREATE TABLE IF NOT EXISTS billing_webhook_events (
       event_id TEXT PRIMARY KEY,
       event_type TEXT NOT NULL,
@@ -292,6 +299,7 @@ const connectDB = async () => {
       PRIMARY KEY (user_id, month_start)
     );
 
+    -- Friendships, invite/referral codes, referral rewards, and pending requests.
     -- Store each friendship once by sorting both user IDs into a canonical pair.
     CREATE TABLE IF NOT EXISTS friendships (
       user_low UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -345,7 +353,6 @@ const connectDB = async () => {
       ON friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id))
       WHERE status = 'pending';
 
-      
     -- Groups also back private personal-expense and one-to-one friend ledgers.
     CREATE TABLE IF NOT EXISTS groups (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -374,6 +381,7 @@ const connectDB = async () => {
       ON groups (created_by)
       WHERE is_personal = TRUE;
 
+    -- Group membership and the private ledger joining each friend pair.
     CREATE TABLE IF NOT EXISTS group_members (
       group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -394,7 +402,7 @@ const connectDB = async () => {
       ADD CONSTRAINT group_members_group_id_fkey
       FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE;
 
-    -- Expense splits are stored separately so shares and itemized allocations remain queryable.
+    -- Expenses, participant shares, itemized allocations, comments, and group activity.
     CREATE TABLE IF NOT EXISTS expenses (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
@@ -510,6 +518,7 @@ const connectDB = async () => {
             AND n.message = payer.fullnamae || ' paid ' || payee.fullnamae || ' ' || s.currency || ' ' || to_char(s.amount, 'FM999999999990.00') || '.'
        );
   `);
+  // Provision or retain the configured primary admin without resetting its password on restart.
   if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
     const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12);
     await query(

@@ -9,14 +9,21 @@ import { getAvailableCurrencies } from '../services/exchangeRateService.js';
 import { getUserFeatureAccess } from '../services/featureAccessService.js';
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' };
+/** Remove credentials and secrets before returning an account to a client. */
 const publicUser = (user) => { const value = { ...user }; delete value.password; delete value.refreshToken; return value; };
+/** Sign a short-lived access token with the account's current identity claims. */
 const makeAccessToken = (user) => jwt.sign({ _id: user._id, email: user.email, username: user.username, fullnamae: user.fullnamae }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: process.env.ACCESS_TOKEN_EXPIRY || '15m' });
+/** Sign the longer-lived token used to rotate an expired access token. */
 const makeRefreshToken = (user) => jwt.sign({ _id: user._id }, process.env.REFRESH_TOKEN_SECRET, { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || '10d' });
+/** Store both authentication tokens in HTTP-only cookies with environment-aware security flags. */
 const setCookies = (res, tokens) => { res.cookie('accessToken', tokens.accessToken, { ...cookieOptions, maxAge: 15 * 60 * 1000 }); res.cookie('refreshToken', tokens.refreshToken, { ...cookieOptions, maxAge: 10 * 24 * 60 * 60 * 1000 }); };
+/** Build the standard token response and sanitize its embedded user object. */
 const tokenResponse = (user) => { const tokens = { accessToken: makeAccessToken(user), refreshToken: makeRefreshToken(user), tokenType: 'Bearer' }; return { ...tokens, user: publicUser(user) }; };
+/** Hash an email verification code with its salt, purpose, and server secret. */
 const hashVerificationCode = (email, purpose, salt, code) =>
   createHmac('sha256', process.env.ACCESS_TOKEN_SECRET).update(`${email}:${purpose}:${salt}:${code}`).digest('hex');
 
+/** Generate, persist, and email a short-lived verification code for an account action. */
 const sendEmailCode = async (email, purpose) => {
   // Store only a salted, keyed hash so a database read cannot reveal an active email code.
   const salt = randomBytes(16).toString('hex');
@@ -62,6 +69,7 @@ const sendEmailCode = async (email, purpose) => {
   }
 };
 
+/** Compare a submitted code to its stored salted hash without leaking comparison timing. */
 const matchingCode = (row, code) => {
   const actual = Buffer.from(hashVerificationCode(row.email, row.purpose, row.code_salt, code), 'hex');
   const expected = Buffer.from(row.code_hash || '', 'hex');
@@ -69,6 +77,7 @@ const matchingCode = (row, code) => {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 };
 
+/** Send a signup verification code after checking registration eligibility and rate limits. */
 export const sendRegistrationCode = async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   if (!email) throw Object.assign(new Error('Email is required'), { statusCode: 400 });
@@ -78,6 +87,7 @@ export const sendRegistrationCode = async (req, res) => {
   res.json({ data: { message: 'A verification code has been sent to your email. It expires in 10 minutes.' } });
 };
 
+/** Verify a signup code and issue the short-lived token required to register. */
 export const verifyRegistrationCode = async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
@@ -118,6 +128,7 @@ export const verifyRegistrationCode = async (req, res) => {
   res.json({ data: { verified: true, verificationToken } });
 };
 
+/** Create a new account only when its email has a valid, unused signup token. */
 export const register = async (req, res) => {
   const { username, fullnamae, password, phone, coverimage, verificationToken } = req.body || {};
   const referralCode = typeof req.body?.referralCode === 'string' ? req.body.referralCode.trim() : '';
@@ -207,6 +218,7 @@ export const register = async (req, res) => {
   res.status(201).json({ data });
 };
 
+/** Authenticate an account, enforce login protections, and issue its token pair. */
 export const login = async (req, res) => {
   const { email, username, password } = req.body;
   if ((!email && !username) || !password) throw Object.assign(new Error('Email or username and password are required'), { statusCode: 400 });
@@ -267,6 +279,7 @@ export const login = async (req, res) => {
   res.json({ data });
 };
 
+/** Start password recovery while avoiding disclosure of whether an email is registered. */
 export const forgotPassword = async (req, res) => {
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   if (!email) throw Object.assign(new Error('Email is required'), { statusCode: 400 });
@@ -316,6 +329,7 @@ export const forgotPassword = async (req, res) => {
   res.json({ data: { message: 'If an account exists for that email, a password reset link has been sent.' } });
 };
 
+/** Validate a password-reset token and replace the account's password hash. */
 export const resetPassword = async (req, res) => {
   const { token, password } = req.body || {};
   if (typeof token !== 'string' || !token) {
@@ -353,11 +367,13 @@ export const resetPassword = async (req, res) => {
   res.json({ data: { message: 'Password reset successfully. You can now sign in.' } });
 };
 
+/** Send a verification code required before the account can be deleted. */
 export const sendAccountDeletionCode = async (req, res) => {
   await sendEmailCode(req.user.email.toLowerCase(), 'delete_account');
   res.json({ data: { message: 'A deletion confirmation code has been sent to your email. It expires in 10 minutes.' } });
 };
 
+/** Send verification codes to the current and proposed email addresses. */
 export const sendEmailChangeCodes = async (req, res) => {
   const newEmail = typeof req.body?.newEmail === 'string' ? req.body.newEmail.trim().toLowerCase() : '';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
@@ -376,6 +392,7 @@ export const sendEmailChangeCodes = async (req, res) => {
   res.json({ data: { message: `Verification codes have been sent to ${req.user.email} and ${newEmail}. Both codes expire in 10 minutes.` } });
 };
 
+/** Change the account email only after both address-verification codes are valid. */
 export const changeEmail = async (req, res) => {
   const newEmail = typeof req.body?.newEmail === 'string' ? req.body.newEmail.trim().toLowerCase() : '';
   const oldCode = typeof req.body?.oldCode === 'string' ? req.body.oldCode.trim() : '';
@@ -465,6 +482,7 @@ export const changeEmail = async (req, res) => {
   res.json({ data: { user: outcome.user, message: 'Email address updated successfully.' } });
 };
 
+/** Verify the deletion code, remove the account, and clear its authentication cookies. */
 export const deleteAccount = async (req, res) => {
   const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
   if (!/^\d{6}$/.test(code)) {
@@ -528,14 +546,20 @@ export const deleteAccount = async (req, res) => {
   res.json({ data: { message: 'Your account and associated data have been permanently deleted.' } });
 };
 
+/** Invalidate the stored refresh token and clear the browser's authentication cookies. */
 export const logout = async (req, res) => { await query('UPDATE users SET refresh_token = NULL WHERE id = $1', [req.user._id]); res.clearCookie('accessToken', cookieOptions); res.clearCookie('refreshToken', cookieOptions); res.json({ data: { message: 'Logged out successfully' } }); };
+/** Rotate a valid refresh token and return a new access/refresh token pair. */
 export const refreshToken = async (req, res) => { const incoming = req.cookies?.refreshToken || req.body.refreshToken; if (!incoming) throw Object.assign(new Error('Refresh token is required'), { statusCode: 401 }); const decoded = jwt.verify(incoming, process.env.REFRESH_TOKEN_SECRET); const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", created_at AS "createdAt" FROM users WHERE id = $1 AND refresh_token = $2', [decoded._id, incoming]); if (!result.rowCount) throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 }); const data = tokenResponse(result.rows[0]); await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, decoded._id]); setCookies(res, data); res.json({ data: { accessToken: data.accessToken, refreshToken: data.refreshToken, tokenType: data.tokenType } }); };
+/** Issue a fresh access token for the currently authenticated account. */
 export const accessToken = async (req, res) => res.json({ data: { accessToken: makeAccessToken(req.user), tokenType: 'Bearer' } });
+/** Return the authenticated account record loaded by the auth middleware. */
 export const currentUser = async (req, res) => res.json({ data: { user: req.user } });
+/** Return the current account's effective feature entitlements. */
 export const getFeatureAccess = async (req, res) => {
   res.json({ data: await getUserFeatureAccess(req.user._id) });
 };
 
+/** List recent notifications belonging to the authenticated account. */
 export const listNotifications = async (req, res) => {
   const result = await query(
     `SELECT id AS "_id", group_id AS "groupId", expense_id AS "expenseId",
@@ -552,6 +576,7 @@ export const listNotifications = async (req, res) => {
   res.json({ data: result.rows });
 };
 
+/** Mark one or all of the authenticated user's notifications as read. */
 export const markNotificationsRead = async (req, res) => {
   const result = await query(
     'UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL',
@@ -560,11 +585,13 @@ export const markNotificationsRead = async (req, res) => {
   res.json({ data: { markedRead: result.rowCount } });
 };
 
+/** Return the current user's email notification preferences. */
 export const getEmailNotificationSettings = async (req, res) => {
   const result = await query('SELECT email_notification_preferences AS preferences FROM users WHERE id = $1', [req.user._id]);
   res.json({ data: { preferences: { ...EMAIL_NOTIFICATION_PREFERENCES, ...result.rows[0].preferences } } });
 };
 
+/** Validate and persist the user's opt-in email notification preferences. */
 export const updateEmailNotificationSettings = async (req, res) => {
   const preferences = req.body?.preferences;
   if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
@@ -583,6 +610,7 @@ export const updateEmailNotificationSettings = async (req, res) => {
   res.json({ data: { preferences: result.rows[0].preferences } });
 };
 
+/** Verify the supplied password against the account's current password hash. */
 const assertCurrentPassword = async (userId, currentPassword) => {
   if (typeof currentPassword !== 'string' || !currentPassword) {
     throw Object.assign(new Error('Current password is required'), { statusCode: 400 });
@@ -593,11 +621,13 @@ const assertCurrentPassword = async (userId, currentPassword) => {
   }
 };
 
+/** Confirm the signed-in user's current password before a sensitive account change. */
 export const verifyCurrentPassword = async (req, res) => {
   await assertCurrentPassword(req.user._id, req.body?.currentPassword);
   res.json({ data: { verified: true } });
 };
 
+/** Check whether a normalized username is available for account updates. */
 export const checkUsernameAvailability = async (req, res) => {
   if (typeof req.query.username !== 'string') {
     throw Object.assign(new Error('Enter a username of 1 to 40 characters'), { statusCode: 400 });
@@ -613,6 +643,7 @@ export const checkUsernameAvailability = async (req, res) => {
   res.json({ data: { available: !result.rows[0].taken } });
 };
 
+/** Validate profile changes, enforce account limits, and persist permitted fields. */
 export const updateProfile = async (req, res) => {
   if (req.params.userId !== req.user._id) throw Object.assign(new Error('You can only update your own profile'), { statusCode: 403 });
 

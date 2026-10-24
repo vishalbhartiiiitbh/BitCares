@@ -6,6 +6,7 @@ const featureDefaults = {
   groupSpendingInsights: false,
 };
 
+/** Resolve a feature's entitlement using Premium defaults and platform overrides. */
 export const isFeatureEnabled = (settings, isPremium, feature) => {
   const featureSettings = settings?.features?.[feature];
   return isPremium
@@ -13,6 +14,7 @@ export const isFeatureEnabled = (settings, isPremium, feature) => {
     : Boolean(featureSettings?.free ?? featureDefaults[feature]);
 };
 
+/** Load platform settings and the user's active plan to build feature access flags. */
 export const getUserFeatureAccess = async (userId) => {
   const result = await query(
     `SELECT u.plan, u.premium_until AS "premiumUntil", s.settings

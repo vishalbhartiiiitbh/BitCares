@@ -11,6 +11,7 @@ const defaultSettings = {
   limits: { freeDailyExpenses: 5, premiumDailyExpenses: null },
 };
 
+/** Validate persisted platform settings and fill any missing options with safe defaults. */
 const readSettings = (value) => ({
   features: {
     currencyConversion: {
@@ -35,6 +36,7 @@ const readSettings = (value) => ({
   },
 });
 
+/** Return platform settings and account counts for the admin dashboard. */
 export const getAdminDashboard = async (_req, res) => {
   const [settings, counts] = await Promise.all([
     query('SELECT settings, updated_at AS "updatedAt" FROM platform_settings WHERE id = TRUE'),
@@ -45,6 +47,7 @@ export const getAdminDashboard = async (_req, res) => {
   res.json({ data: { settings: readSettings(settings.rows[0]?.settings), updatedAt: settings.rows[0]?.updatedAt, counts: counts.rows[0] } });
 };
 
+/** Validate and persist the platform-wide feature and usage-limit settings. */
 export const updateAdminSettings = async (req, res) => {
   const settings = readSettings(req.body?.settings);
   const result = await query(
@@ -55,6 +58,7 @@ export const updateAdminSettings = async (req, res) => {
   res.json({ data: { settings: result.rows[0].settings, updatedAt: result.rows[0].updatedAt } });
 };
 
+/** List ordinary accounts with their Premium and pending-subscription eligibility. */
 export const listAdminUsers = async (_req, res) => {
   const result = await query(
     `SELECT id AS "_id", username, email, fullnamae,
@@ -80,6 +84,7 @@ export const listAdminUsers = async (_req, res) => {
   res.json({ data: result.rows });
 };
 
+/** List coupons with successful and in-progress redemption counts. */
 export const listBillingCoupons = async (_req, res) => {
   const result = await query(
     `SELECT c.id, c.code, c.discount_type AS "discountType",
@@ -97,6 +102,7 @@ export const listBillingCoupons = async (_req, res) => {
   res.json({ data: result.rows });
 };
 
+/** Validate and create an admin coupon, including its limit and Razorpay Offer mapping. */
 export const createBillingCoupon = async (req, res) => {
   const code = typeof req.body?.code === 'string' ? req.body.code.trim().toUpperCase() : '';
   const discountType = req.body?.discountType;
@@ -154,6 +160,7 @@ export const createBillingCoupon = async (req, res) => {
   }
 };
 
+/** Enable or disable an existing coupon without deleting its redemption history. */
 export const updateBillingCoupon = async (req, res) => {
   if (typeof req.body?.active !== 'boolean') {
     throw Object.assign(new Error('Coupon active status must be true or false'), { statusCode: 400 });
@@ -168,6 +175,7 @@ export const updateBillingCoupon = async (req, res) => {
   res.json({ data: result.rows[0] });
 };
 
+/** Return sub-admin accounts for the primary admin's access-management view. */
 export const listSubAdmins = async (_req, res) => {
   const result = await query(
     `SELECT id AS "_id", username, email, fullnamae, role, created_at AS "createdAt"
@@ -176,6 +184,7 @@ export const listSubAdmins = async (_req, res) => {
   res.json({ data: result.rows });
 };
 
+/** Create a sub-admin account after validating its identity and initial password. */
 export const createSubAdmin = async (req, res) => {
   const { username, email, fullnamae, password } = req.body || {};
   if (![username, email, fullnamae, password].every((value) => typeof value === 'string' && value.trim())) {
@@ -197,6 +206,7 @@ export const createSubAdmin = async (req, res) => {
   }
 };
 
+/** Remove a sub-admin account; related account-owned records follow database rules. */
 export const deleteSubAdmin = async (req, res) => {
   const result = await query(
     `DELETE FROM users WHERE id = $1 AND role = 'sub_admin' RETURNING id`,
@@ -206,6 +216,7 @@ export const deleteSubAdmin = async (req, res) => {
   res.json({ data: { deleted: true } });
 };
 
+/** Grant a selected user a fixed Premium period when no active entitlement or subscription exists. */
 export const updateUserPlan = async (req, res) => {
   const { plan, premiumDuration } = req.body || {};
   if (plan !== 'premium') {
@@ -266,6 +277,7 @@ export const updateUserPlan = async (req, res) => {
   res.json({ data: updatedUser });
 };
 
+/** Publish a product update to every user and queue email for opted-in recipients. */
 export const broadcastProductUpdate = async (req, res) => {
   const subject = typeof req.body?.subject === 'string' ? req.body.subject.trim() : '';
   const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';

@@ -26,6 +26,7 @@ const supportedEvents = new Set([
   'payment.failed',
 ]);
 
+/** Create a Razorpay SDK client from server-side credentials or report missing configuration. */
 const razorpayClient = () => {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -35,6 +36,7 @@ const razorpayClient = () => {
   return new Razorpay({ key_id: keyId, key_secret: keySecret });
 };
 
+/** Verify a Razorpay HMAC signature using a constant-time byte comparison. */
 const validSignature = (payload, signature, secret) => {
   if (!secret || typeof signature !== 'string' || !/^[a-f\d]{64}$/i.test(signature)) return false;
   const expected = createHmac('sha256', secret).update(payload).digest();
@@ -42,11 +44,13 @@ const validSignature = (payload, signature, secret) => {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 };
 
+/** Convert a valid positive Unix timestamp to a number, returning null otherwise. */
 const toEpoch = (value) => {
   const timestamp = Number(value);
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
 };
 
+/** Add a weekly, monthly, or yearly billing interval without overflowing month ends. */
 const addBillingInterval = (date, period, interval) => {
   const result = new Date(date);
   if (period === 'weekly') {
@@ -67,6 +71,7 @@ const addBillingInterval = (date, period, interval) => {
   return result;
 };
 
+/** Determine the end of paid Premium access from Razorpay dates or the plan interval. */
 const paidThroughDate = (subscription, payment) => {
   if (subscription.currentEnd) return subscription.currentEnd;
   const period = subscription.billingPeriod;
@@ -78,8 +83,10 @@ const paidThroughDate = (subscription, payment) => {
   return addBillingInterval(new Date(start * 1000), period === 'six_month' ? 'monthly' : period, interval);
 };
 
+/** Normalize user-entered coupon codes before database lookup. */
 const couponCode = (value) => typeof value === 'string' ? value.trim().toUpperCase() : '';
 
+/** Calculate a coupon's discount and payable amount in paise for the selected plan. */
 export const couponQuote = (coupon, period) => {
   const plan = premiumPlans[period];
   const value = Number(coupon.discountValue);
@@ -104,6 +111,7 @@ export const couponQuote = (coupon, period) => {
   };
 };
 
+/** Calculate a free Premium expiry from a start date using calendar billing periods. */
 export const addFreePremiumPeriod = (start, period) => {
   const expiry = new Date(start);
   if (period === 'weekly') {
@@ -119,6 +127,7 @@ export const addFreePremiumPeriod = (start, period) => {
   return expiry;
 };
 
+/** Validate coupon availability and optionally lock its row while reserving a redemption. */
 const findAvailableCoupon = async (client, code, userId, period, lock = false) => {
   const couponResult = await client.query(
     `SELECT id, code, discount_type AS "discountType",
@@ -149,6 +158,7 @@ const findAvailableCoupon = async (client, code, userId, period, lock = false) =
   return { coupon, quote: couponQuote(coupon, period) };
 };
 
+/** Release a reserved coupon when its subscription ends without any captured payment. */
 const releaseUnredeemedCoupon = async (client, subscriptionId) => {
   await client.query(
     `UPDATE billing_coupon_redemptions r
@@ -164,8 +174,10 @@ const releaseUnredeemedCoupon = async (client, subscriptionId) => {
   );
 };
 
+/** Read the configured Razorpay Plan ID for a supported billing period. */
 const planIdFor = (period) => process.env[`RAZORPAY_PLAN_ID_${period.toUpperCase()}`]?.trim();
 
+/** Build a consistent unavailable-plan response for missing or invalid Razorpay plans. */
 const unavailablePlan = (period, planId, reason) => ({
   period,
   ...premiumPlans[period],
@@ -174,6 +186,7 @@ const unavailablePlan = (period, planId, reason) => ({
   configurationError: reason,
 });
 
+/** Fetch and validate a Razorpay plan, caching verified plan details briefly. */
 const fetchPlan = async (period) => {
   const expected = premiumPlans[period];
   const planId = planIdFor(period);
@@ -214,6 +227,7 @@ const fetchPlan = async (period) => {
   return value;
 };
 
+/** Map Razorpay subscription fields into the app's safe database snapshot shape. */
 const safeSubscription = (subscription) => ({
   providerSubscriptionId: subscription.id,
   status: subscription.status || 'created',
@@ -229,6 +243,7 @@ const safeSubscription = (subscription) => ({
     : Boolean(subscription.cancel_at_cycle_end),
 });
 
+/** Persist a webhook or provider subscription snapshot and return its local owner data. */
 const saveSubscriptionSnapshot = async (client, subscription) => {
   if (!subscription?.id) return null;
   const snapshot = safeSubscription(subscription);
@@ -265,6 +280,7 @@ const saveSubscriptionSnapshot = async (client, subscription) => {
   return rows[0] || null;
 };
 
+/** Upsert a Razorpay payment while preventing a captured payment from being downgraded. */
 const savePayment = async (client, payment, userId, status) => {
   if (!payment?.id || !userId) return false;
   const amount = Number(payment.amount);
@@ -302,6 +318,7 @@ const savePayment = async (client, payment, userId, status) => {
   return rowCount > 0;
 };
 
+/** Record a successful subscription payment, redeem its coupon, and extend Premium access. */
 const applySubscriptionPayment = async (client, payment, subscriptionRow) => {
   if (!payment || !subscriptionRow) return;
   await savePayment(client, payment, subscriptionRow.userId, 'captured');
@@ -322,6 +339,7 @@ const applySubscriptionPayment = async (client, payment, subscriptionRow) => {
   );
 };
 
+/** Apply Premium access for the legacy one-time order checkout after verified payment. */
 const createLegacyPremiumGrant = async (client, userId, orderId, paymentId) => {
   await client.query(
     `UPDATE billing_orders SET status = 'paid', provider_payment_id = $1, paid_at = NOW()
@@ -335,6 +353,7 @@ const createLegacyPremiumGrant = async (client, userId, orderId, paymentId) => {
   );
 };
 
+/** Return configured and unavailable Premium plans for the authenticated billing page. */
 export const listSubscriptionPlans = async (_req, res) => {
   const plans = [];
   for (const period of billingPeriods) {
@@ -352,6 +371,7 @@ export const listSubscriptionPlans = async (_req, res) => {
   res.json({ data: { plans } });
 };
 
+/** Check a coupon against the selected plan without reserving its redemption. */
 export const validatePremiumCoupon = async (req, res) => {
   const period = req.body?.period;
   const code = couponCode(req.body?.code);
@@ -365,6 +385,7 @@ export const validatePremiumCoupon = async (req, res) => {
   res.json({ data: result.quote });
 };
 
+/** Create a Razorpay order for the legacy one-time Premium checkout. */
 export const createPremiumOrder = async (req, res) => {
   const amount = Number(process.env.PREMIUM_PRICE_INR || 499) * 100;
   if (!Number.isInteger(amount) || amount < 100) {
@@ -383,6 +404,7 @@ export const createPremiumOrder = async (req, res) => {
   res.status(201).json({ data: { keyId: process.env.RAZORPAY_KEY_ID, orderId: order.id, amount, currency: 'INR' } });
 };
 
+/** Grant a 100% coupon period directly or create a coupon-linked Razorpay subscription. */
 export const createPremiumSubscription = async (req, res) => {
   const period = req.body?.period;
   const code = couponCode(req.body?.couponCode);
@@ -535,6 +557,7 @@ export const createPremiumSubscription = async (req, res) => {
   });
 };
 
+/** Verify the Razorpay subscription authorization signature for its owning user. */
 export const verifyPremiumSubscription = async (req, res) => {
   const {
     razorpay_subscription_id: subscriptionId,
@@ -569,6 +592,7 @@ export const verifyPremiumSubscription = async (req, res) => {
   res.json({ data: { verified: true, message: 'Subscription authorization received; premium access updates after payment confirmation.' } });
 };
 
+/** Return the user's latest subscription, Premium entitlement, and payment history. */
 export const getBillingSummary = async (req, res) => {
   const [subscriptionResult, paymentResult] = await Promise.all([
     query(
@@ -603,6 +627,7 @@ export const getBillingSummary = async (req, res) => {
   });
 };
 
+/** Request cancellation at the end of the current paid period. */
 export const cancelPremiumSubscription = async (req, res) => {
   const { subscriptionId } = req.params;
   const { rows } = await query(
@@ -634,6 +659,7 @@ export const cancelPremiumSubscription = async (req, res) => {
   res.json({ data: result });
 };
 
+/** Cancel an unpaid subscription immediately or schedule cancellation after paid access. */
 export const changePremiumSubscription = async (req, res) => {
   const { subscriptionId } = req.params;
   const current = await query(
@@ -711,6 +737,7 @@ export const changePremiumSubscription = async (req, res) => {
   });
 };
 
+/** Apply a verified Razorpay event to local payment, subscription, and coupon records. */
 const applyWebhookEvent = async (client, eventType, payload) => {
   const subscription = payload.subscription?.entity;
   const payment = payload.payment?.entity;
@@ -776,6 +803,7 @@ const applyWebhookEvent = async (client, eventType, payload) => {
   }
 };
 
+/** Verify, deduplicate, and transactionally process a Razorpay webhook event. */
 export const razorpayWebhook = async (req, res) => {
   const rawBody = req.rawBody;
   const signature = req.headers['x-razorpay-signature'];
@@ -851,6 +879,7 @@ export const razorpayWebhook = async (req, res) => {
   res.json({ received: true, duplicate });
 };
 
+/** Verify a legacy order payment signature and grant Premium once per paid order. */
 export const verifyPremiumPayment = async (req, res) => {
   const { razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: signature } = req.body || {};
   if (

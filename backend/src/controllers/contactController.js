@@ -1,5 +1,6 @@
 import { query, withTransaction } from '../db/index.js';
 
+/** Require non-empty text and enforce the field's maximum length. */
 const requireText = (value, label, maxLength) => {
   if (typeof value !== 'string' || !value.trim()) {
     throw Object.assign(new Error(`${label} is required`), { statusCode: 400 });
@@ -11,6 +12,7 @@ const requireText = (value, label, maxLength) => {
   return text;
 };
 
+/** Normalize an optional text field while rejecting values that exceed its limit. */
 const optionalText = (value, label, maxLength) => {
   if (value === undefined || value === null || value === '') return '';
   if (typeof value !== 'string') {
@@ -23,6 +25,7 @@ const optionalText = (value, label, maxLength) => {
   return text;
 };
 
+/** Check file size and inspect its magic bytes instead of trusting the supplied MIME type. */
 const isSupportedAttachment = (file) => {
   const bytes = file.buffer;
   switch (file.mimetype) {
@@ -42,15 +45,19 @@ const isSupportedAttachment = (file) => {
   }
 };
 
+/** Remove path and control characters before using an uploaded filename in headers. */
 const safeFilename = (filename) => filename
   .split(/[\\/]/)
   .pop()
   .replace(/[\u0000-\u001f\u007f"]/g, '')
   .slice(0, 180) || 'report-attachment';
 
+/** Guard report and attachment lookups against malformed database identifiers. */
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+/** Derive the user-facing ticket number from the report's UUID. */
 const makeTicketId = (id) => `ENQ-${id.replaceAll('-', '').slice(0, 12).toUpperCase()}`;
 
+/** Save a signed-in user's enquiry, verified attachments, and initial history entry. */
 export const submitContactReport = async (req, res) => {
   const purpose = requireText(req.body.purpose, 'Purpose', 120).replace(/[\u0000-\u001f\u007f]/g, ' ');
   const message = requireText(req.body.message, 'Message', 5000);
@@ -125,6 +132,7 @@ const contactReportSelect = `
     LEFT JOIN contact_report_attachments a ON a.report_id = r.id
 `;
 
+/** Return all enquiries with their chronological status and note history for admins. */
 export const listContactReports = async (_req, res) => {
   const result = await query(
     `${contactReportSelect}
@@ -135,6 +143,7 @@ export const listContactReports = async (_req, res) => {
   res.json({ data: result.rows });
 };
 
+/** Return only the signed-in user's enquiries and their update histories. */
 export const listMyContactReports = async (req, res) => {
   const result = await query(
     `${contactReportSelect}
@@ -147,6 +156,7 @@ export const listMyContactReports = async (req, res) => {
   res.json({ data: result.rows });
 };
 
+/** Reopen an owned closed enquiry and append the user's comment to its history. */
 export const reopenMyContactReport = async (req, res) => {
   if (!isUuid(req.params.reportId)) {
     throw Object.assign(new Error('Enquiry not found'), { statusCode: 404 });
@@ -179,6 +189,7 @@ export const reopenMyContactReport = async (req, res) => {
   res.json({ data: result });
 };
 
+/** Append an admin status-and-note update while preserving the enquiry's history. */
 export const updateContactReport = async (req, res) => {
   const { status, note } = req.body || {};
   if (!isUuid(req.params.reportId)) {
@@ -211,6 +222,7 @@ export const updateContactReport = async (req, res) => {
   res.json({ data: result });
 };
 
+/** Stream an attachment only when it belongs to the requested enquiry. */
 export const downloadContactReportAttachment = async (req, res) => {
   if (!isUuid(req.params.reportId) || !isUuid(req.params.attachmentId)) {
     throw Object.assign(new Error('Attachment not found'), { statusCode: 404 });

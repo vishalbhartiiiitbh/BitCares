@@ -2,12 +2,14 @@ import Decimal from 'decimal.js';
 import { query, withTransaction } from '../db/index.js';
 import { getExchangeRate } from './exchangeRateService.js';
 
+/** Return a group's base currency, rejecting requests for missing groups. */
 export const getGroupCurrency = async (groupId) => {
   const result = await query('SELECT currency FROM groups WHERE id = $1', [groupId]);
   if (!result.rowCount) throw Object.assign(new Error('Group not found'), { statusCode: 404 });
   return result.rows[0].currency || 'INR';
 };
 
+/** Convert legacy mixed-currency expenses and balances to the group's base currency. */
 export const normalizeGroupBalancesInTransaction = async (client, groupId, userId) => {
   const groupResult = await client.query(
     `SELECT g.currency, g.is_personal AS "isPersonal", g.is_friend_ledger AS "isFriendLedger"
@@ -131,6 +133,7 @@ export const normalizeGroupBalancesInTransaction = async (client, groupId, userI
   return baseCurrency;
 };
 
+/** Run group balance normalization atomically using a managed database transaction. */
 export const normalizeGroupBalances = async (groupId, userId) => withTransaction(
   (client) => normalizeGroupBalancesInTransaction(client, groupId, userId),
 );

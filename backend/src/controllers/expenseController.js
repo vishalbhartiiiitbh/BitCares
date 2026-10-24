@@ -1,6 +1,7 @@
 import { addExpense, addExpenseComment, deleteExpense, deleteExpenseComment, listExpenses, listPersonalExpenses, updateExpense } from '../services/expenseService.js';
 import { getAvailableCurrencies } from '../services/exchangeRateService.js';
 
+/** Accept an already-parsed array or decode a JSON-encoded multipart field. */
 const parseArray = (value, label) => {
   if (Array.isArray(value)) return value;
   if (typeof value !== 'string') throw Object.assign(new Error(`${label} must be a list`), { statusCode: 400 });
@@ -13,6 +14,7 @@ const parseArray = (value, label) => {
   }
 };
 
+/** Validate expense category, split strategy, and associated strategy settings. */
 export const validateExpenseOptions = (body) => {
   const allowedCategories = ['Entertainment', 'Food and drink', 'Home', 'Life', 'Transportation', 'Uncategorized', 'Utilities'];
   if (!allowedCategories.includes(body.category || 'Uncategorized')) {
@@ -24,19 +26,23 @@ export const validateExpenseOptions = (body) => {
   }
 };
 
+/** List expenses for a group, optionally including activity history. */
 export const list = async (req, res) => {
   const includeHistory = req.query.history === 'true';
   res.json({ data: await listExpenses(req.query.groupId, req.user._id, includeHistory) });
 };
 
+/** List expenses from the signed-in user's personal ledger. */
 export const listPersonal = async (req, res) => {
   res.json({ data: await listPersonalExpenses(req.user._id) });
 };
 
+/** Return currencies available for expense entry and conversion. */
 export const currencies = async (_req, res) => {
   res.json({ data: await getAvailableCurrencies() });
 };
 
+/** Validate request fields and create an expense with its participant splits. */
 export const createExpense = async (req, res) => {
   validateExpenseOptions(req.body);
   if (!req.body.groupId) {
@@ -63,6 +69,7 @@ export const createExpense = async (req, res) => {
   res.status(201).json({ data: expense });
 };
 
+/** Update an existing expense after validating its new split and participants. */
 export const editExpense = async (req, res) => {
   validateExpenseOptions(req.body);
   const expense = await updateExpense({
@@ -81,6 +88,7 @@ export const editExpense = async (req, res) => {
   res.json({ data: expense });
 };
 
+/** Delete an expense and reverse its effect on the relevant balances. */
 export const removeExpense = async (req, res) => {
   res.json({
     data: await deleteExpense({
@@ -90,6 +98,7 @@ export const removeExpense = async (req, res) => {
   });
 };
 
+/** Add a comment to an expense activity thread. */
 export const createComment = async (req, res) => {
   const { content } = req.body || {};
   if (typeof content !== 'string' || !content.trim()) {
@@ -107,6 +116,7 @@ export const createComment = async (req, res) => {
   });
 };
 
+/** Remove a comment when the caller has permission to delete it. */
 export const removeComment = async (req, res) => {
   res.json({
     data: await deleteExpenseComment({

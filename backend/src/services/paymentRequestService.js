@@ -4,9 +4,11 @@ import { simplifyDebts } from './debtSimplifier.js';
 import { queueEmailNotification } from './emailNotificationService.js';
 import { normalizeGroupBalances } from './groupCurrencyService.js';
 
+/** Validate a user or group identifier before creating a payment request. */
 const validId = (id) => typeof id === 'string'
   && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
 
+/** Create a request for an outstanding debt and notify the selected recipient. */
 export const createPaymentRequest = async ({
   groupId,
   requesterId,

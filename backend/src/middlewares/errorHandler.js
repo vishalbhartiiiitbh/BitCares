@@ -1,7 +1,9 @@
+/** Forward rejected async route handlers to Express's centralized error middleware. */
 export const asyncHandler = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
 const genericServerError = "We couldn't complete your request right now. Please try again in a moment.";
 
+/** Map known failures to safe client messages and log unexpected server errors. */
 export const errorHandler = (error, req, res, _next) => {
   const authError = ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError'].includes(error.name);
   const parserError = ['entity.parse.failed', 'entity.too.large'].includes(error.type);
