@@ -121,3 +121,6 @@ dist
 .pnp.*
 
 # End of https://mrkandreev.name/snippets/gitignore-generator/#Node
+
+# Local API reference; do not publish deployment details with the source.
+/api.txt

@@ -67,6 +67,8 @@
 .billing-status.captured, .billing-status.active, .billing-status.resumed { border-color: #bdd4bb; background: #eff8ed; color: #3e6743; }
 .billing-status.failed, .billing-status.halted { border-color: #f2c5a9; background: #fff0e7; color: #9d4b2c; }
 .billing-status.cancelled { border-color: #d5ded4; background: #f3f5f1; color: #718078; }
+.billing-status.expired { border-color: #f2c5a9; background: #fff0e7; color: #9d4b2c; }
+.billing-expired-message { color: #9d4b2c; }
 .billing-plan-options { display: grid; gap: 9px; margin: 16px 0; }
 .billing-coupon { max-width: 620px; margin: 22px 0 16px; color: #4d5d53; font-size: 12px; font-weight: 700; }
 .billing-coupon-row { display: flex; gap: 10px; margin-top: 7px; }

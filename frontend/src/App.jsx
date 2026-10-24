@@ -2097,6 +2097,7 @@ function AdminPanel({ user, accessToken, onLogout }) {
   const [settings, setSettings] = useState(null);
   const [broadcast, setBroadcast] = useState({ subject: '', message: '' });
   const [status, setStatus] = useState('');
+  const [couponMessage, setCouponMessage] = useState('');
   const [busy, setBusy] = useState(true);
   const [couponSaving, setCouponSaving] = useState(false);
   const [userSearch, setUserSearch] = useState('');
@@ -2171,6 +2172,7 @@ function AdminPanel({ user, accessToken, onLogout }) {
   const createCoupon = async (event) => {
     event.preventDefault();
     setCouponSaving(true);
+    setCouponMessage('');
     try {
       await apiRequest('/admin/coupons', {
         method: 'POST',
@@ -2191,8 +2193,12 @@ function AdminPanel({ user, accessToken, onLogout }) {
         maxRedemptions: '',
       });
       await load();
-      setStatus('Coupon created.');
-    } catch (error) { setStatus(error.message); } finally { setCouponSaving(false); }
+      setCouponMessage('Coupon created. Enter a different code to create another coupon.');
+    } catch (error) {
+      setCouponMessage(error.message);
+    } finally {
+      setCouponSaving(false);
+    }
   };
 
   const setCouponActive = async (coupon, active) => {
@@ -2460,11 +2466,16 @@ function AdminPanel({ user, accessToken, onLogout }) {
         </div>
       </section>
       <section className="admin-section admin-users">
-        <div className="admin-section-heading"><div><p className="admin-kicker">PROMOTIONS</p><h2>Coupon codes</h2></div></div>
+        <div className="admin-section-heading"><div><p className="admin-kicker">PROMOTIONS</p><h2>Coupon codes ({coupons.length})</h2></div></div>
         <p className="admin-premium-note">
-          Create a code and set its discount and total redemption limit. Discounts below 100% need a matching Subscription Offer from the Razorpay Dashboard. A 100% code grants the selected billing period for free without checkout or automatic renewal.
+          Create multiple unique coupon codes, one at a time; existing codes stay listed below. Set each code's discount and total redemption limit. Discounts below 100% need a matching Subscription Offer from the Razorpay Dashboard. A 100% code grants the selected billing period for free without checkout or automatic renewal.
         </p>
-        <form className="admin-coupon-form" onSubmit={createCoupon}>
+        <form
+          className="admin-coupon-form"
+          onSubmit={createCoupon}
+          onChangeCapture={() => setCouponMessage('')}
+          onInvalidCapture={() => setCouponMessage('Complete all required fields. Discounts below 100% also require a Razorpay Offer ID; a 100% discount grants one selected billing period for free.')}
+        >
           <label>Coupon code
             <input
               required
@@ -2533,6 +2544,9 @@ function AdminPanel({ user, accessToken, onLogout }) {
           </label>
           <button className="admin-save" type="submit" disabled={couponSaving}>{couponSaving ? 'Creating…' : 'Create coupon'}</button>
         </form>
+        {couponMessage && (
+          <p className="admin-status" role="alert">{couponMessage}</p>
+        )}
         <div className="admin-coupon-list">
           {coupons.length ? coupons.map((coupon) => (
             <div className="admin-user-row" key={coupon.id}>
@@ -2773,7 +2787,15 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
   const paidPeriodEnded = summary?.premiumUntil
     ? new Date(summary.premiumUntil).getTime() <= Date.now()
     : false;
+  const premiumAccessExpired = Boolean(
+    summary?.plan !== 'premium' && summary?.premiumUntil && paidPeriodEnded,
+  );
   const canChoosePlan = !canCancel || (currentSubscription.cancelAtCycleEnd && paidPeriodEnded);
+  const subscriptionStatusLabel = premiumAccessExpired
+    ? 'Premium expired'
+    : currentSubscription?.status === 'cancelled'
+      ? 'Cancelled'
+      : currentSubscription?.status || (summary?.plan === 'premium' ? 'Active' : '');
   const periodLabels = {
     weekly: 'Weekly',
     six_month: 'Every 6 months',
@@ -2797,19 +2819,27 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
       <section className="billing-card">
         <div className="billing-card-header">
           <div><p className="eyebrow">CURRENT PLAN</p><h2>{summary?.plan === 'premium' ? 'Premium' : 'Free'}</h2></div>
-          {currentSubscription
-            && !(currentSubscription.status === 'cancelled' && summary?.plan === 'premium')
-            && <span className={`billing-status ${currentSubscription.status}`}>
-              {currentSubscription.status === 'cancelled' ? 'Cancelled' : currentSubscription.status}
+          {subscriptionStatusLabel
+            && !(currentSubscription?.status === 'cancelled' && summary?.plan === 'premium')
+            && <span className={`billing-status ${premiumAccessExpired ? 'expired' : currentSubscription?.status || 'active'}`}>
+              {subscriptionStatusLabel}
             </span>}
         </div>
         {currentSubscription ? (
           <>
+            {premiumAccessExpired && (
+              <p className="billing-muted billing-expired-message">
+                Your Premium access expired on {dateLabel(summary.premiumUntil)}. Your account is now on the Free plan.
+              </p>
+            )}
             <dl className="billing-details">
               <div><dt>Billing interval</dt><dd>{periodLabels[currentSubscription.billingPeriod] || currentSubscription.billingPeriod}</dd></div>
               <div><dt>Plan price</dt><dd>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: currentSubscription.currency, maximumFractionDigits: 2 }).format(currentSubscription.planAmount / 100)}</dd></div>
               <div><dt>Last successful payment</dt><dd>{dateLabel(summary?.payments.find((payment) => payment.status === 'captured' && payment.subscriptionId === currentSubscription.subscriptionId)?.paidAt)}</dd></div>
-              <div><dt>Next billing date</dt><dd>{dateLabel(currentSubscription.nextBillingAt || currentSubscription.currentEnd)}</dd></div>
+              <div>
+                <dt>{premiumAccessExpired ? 'Last billing period ended' : 'Next billing date'}</dt>
+                <dd>{dateLabel(currentSubscription.nextBillingAt || currentSubscription.currentEnd)}</dd>
+              </div>
               <div><dt>Premium access through</dt><dd>{dateLabel(summary?.premiumUntil)}</dd></div>
               {currentSubscription.cancelAtCycleEnd && <div><dt>Renewal</dt><dd>Cancellation requested at period end</dd></div>}
               {currentSubscription.pausedAt && <div><dt>Paused</dt><dd>{dateLabel(currentSubscription.pausedAt)}</dd></div>}
@@ -2838,11 +2868,29 @@ function BillingPage({ user, accessToken, onProfileUpdated }) {
                 Cancel at period end
               </button>
             )}
-            {canCancel && currentSubscription.cancelAtCycleEnd && (
+            {canCancel && currentSubscription.cancelAtCycleEnd && !premiumAccessExpired && (
               <p className="billing-muted">
                 Your current plan stays active until {dateLabel(summary?.premiumUntil || currentSubscription.currentEnd)}.
                 Choose your next plan after that period ends.
               </p>
+            )}
+          </>
+        ) : premiumAccessExpired ? (
+          <>
+            <p className="billing-muted billing-expired-message">
+              Your Premium access expired on {dateLabel(summary.premiumUntil)}. Your account is now on the Free plan.
+            </p>
+            <dl className="billing-details">
+              <div><dt>Previous Premium access through</dt><dd>{dateLabel(summary.premiumUntil)}</dd></div>
+            </dl>
+          </>
+        ) : summary?.plan === 'premium' ? (
+          <>
+            <p className="billing-muted">Premium access is active. No recurring subscription is associated with this access.</p>
+            {summary.premiumUntil && (
+              <dl className="billing-details">
+                <div><dt>Premium access through</dt><dd>{dateLabel(summary.premiumUntil)}</dd></div>
+              </dl>
             )}
           </>
         ) : (
