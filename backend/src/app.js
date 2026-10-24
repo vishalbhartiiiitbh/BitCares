@@ -5,6 +5,8 @@ import expenseRoutes from './routes/expenseRoutes.js';
 import groupRoutes from './routes/groupRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import friendRoutes from './routes/friendRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import billingRoutes from './routes/billingRoutes.js';
 import './listeners/notificationListener.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 
@@ -23,7 +25,7 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: '16kb' }));
+app.use(express.json({ limit: '16kb', verify: (req, _res, buffer) => { req.rawBody = buffer; } }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 app.use(cookieParser());
 
@@ -34,6 +36,8 @@ app.use('/api/expenses', expenseRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/friends', friendRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/billing', billingRoutes);
 app.use((req, res) => {
   res.status(404).json({
     error: 'That page or endpoint couldn’t be found. Check the address and try again.',

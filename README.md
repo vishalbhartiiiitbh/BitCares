@@ -12,6 +12,19 @@ cp .env.example .env
 
 Update `backend/.env` with your PostgreSQL `DATABASE_URL` and private JWT, Cloudinary, and other credentials. Do not commit `.env`.
 
+The administrator is provisioned only at backend startup from `ADMIN_EMAIL` and
+`ADMIN_PASSWORD`; there is no public admin-registration endpoint. Set
+`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, and
+`PREMIUM_PRICE_INR` to enable premium checkout. The admin workspace is available
+after signing in with that provisioned account. It controls whether currency
+conversion is available to free users, daily expense limits for each plan,
+individual premium access, and product-update broadcasts.
+
+Admin API endpoints are under `/api/admin` and require the provisioned admin
+account. Premium checkout uses `POST /api/billing/premium/order`, then
+`POST /api/billing/premium/verify`; configure the Razorpay webhook URL as
+`/api/billing/webhook` and subscribe it to `payment.captured`.
+
 Currency conversion uses ExchangeRate-API. Set `EXCHANGE_RATE_API_KEY` in
 `backend/.env` (and in the backend host's environment settings) to your private
 API key. The group creator chooses one base currency when creating a group and

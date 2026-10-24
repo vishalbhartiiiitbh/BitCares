@@ -5,6 +5,42 @@
     font-synthesis: none;
 }
 
+.admin-shell {
+    min-height: 100vh;
+    padding: 48px clamp(20px, 6vw, 96px);
+    color: #202c26;
+    background: radial-gradient(circle at 85% 0%, #dce9d9 0, transparent 30%), #f3f2eb;
+}
+.admin-header, .admin-section-heading, .admin-user-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.admin-header { max-width: 1180px; margin: 0 auto 30px; }
+.admin-header h1 { margin: 5px 0 8px; font: 600 clamp(30px, 5vw, 54px)/1.05 Georgia, serif; letter-spacing: 0; }
+.admin-header p:not(.admin-kicker), .admin-section small, .admin-user-row small { color: #718078; }
+.admin-kicker { margin: 0; color: #6d806e; font-size: 10px; letter-spacing: .16em; }
+.admin-logout, .admin-save, .admin-plan { border: 1px solid #cbd8cb; border-radius: 3px; padding: 10px 14px; background: #fffefa; color: #34443a; cursor: pointer; font-weight: 700; }
+.admin-save { background: #ff6840; border-color: #ff6840; color: white; }
+.admin-status { max-width: 1180px; margin: 0 auto 18px; padding: 12px 14px; border-left: 3px solid #ff6840; background: #fffefa; }
+.admin-metrics, .admin-grid, .admin-users { max-width: 1180px; margin: 0 auto; }
+.admin-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.admin-metrics div, .admin-section { border: 1px solid #dbe2d9; background: rgba(255,255,250,.78); box-shadow: 0 14px 35px rgba(52, 68, 58, .06); }
+.admin-metrics div { padding: 18px; }
+.admin-metrics span { display: block; color: #718078; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.admin-metrics strong { display: block; margin-top: 9px; font: 600 28px Georgia, serif; }
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.admin-section { padding: 22px; margin-bottom: 14px; }
+.admin-section h2 { margin: 5px 0 22px; font: 600 24px Georgia, serif; }
+.admin-section label { display: grid; gap: 7px; margin: 16px 0; color: #4d5d53; font-size: 12px; font-weight: 700; }
+.admin-section input, .admin-section textarea { width: 100%; box-sizing: border-box; border: 1px solid #d5ded4; border-radius: 3px; padding: 11px; background: #fff; color: #26352c; font: inherit; }
+.admin-toggle { display: flex !important; grid-template-columns: 1fr auto; align-items: center; justify-content: space-between; }
+.admin-toggle span { display: grid; gap: 5px; }
+.admin-toggle input { width: 18px; height: 18px; accent-color: #466d4c; }
+.admin-user-row { padding: 14px 0; border-top: 1px solid #e1e7df; }
+.sub-admin-form { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+.sub-admin-form input { min-width: 0; }
+.sub-admin-form .admin-save { grid-column: 1 / -1; justify-self: start; }
+.admin-user-row div { display: grid; gap: 4px; }
+.admin-plan.premium { color: #9d4b2c; background: #fff0e7; border-color: #f2c5a9; }
+@media (max-width: 720px) { .admin-shell { padding: 28px 16px; } .admin-header { align-items: flex-start; } .admin-metrics, .admin-grid, .sub-admin-form { grid-template-columns: 1fr; } .admin-user-row { align-items: flex-start; flex-direction: column; } }
+
 /* Expense form, split editor, and payment-proof modal. */
 .modal-backdrop.expense-entry-modal .modal {
     width: min(690px, 100%);

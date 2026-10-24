@@ -164,7 +164,7 @@ export const register = async (req, res) => {
       }
 
       const inserted = await client.query(
-        'INSERT INTO users (username, email, fullnamae, password, phone, coverimage) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", created_at AS "createdAt"',
+        'INSERT INTO users (username, email, fullnamae, password, phone, coverimage) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", role, plan, premium_until AS "premiumUntil", created_at AS "createdAt"',
         [username, email, fullnamae, hash, phone || null, coverimage || null],
       );
       if (referrerId) {
@@ -210,7 +210,7 @@ export const login = async (req, res) => {
   const { email, username, password } = req.body;
   if ((!email && !username) || !password) throw Object.assign(new Error('Email or username and password are required'), { statusCode: 400 });
   const key = (email || username).toLowerCase();
-  const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", password, created_at AS "createdAt", login_locked_until > NOW() AS "isLoginLocked" FROM users WHERE email = $1 OR username = $1', [key]);
+  const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", role, plan, premium_until AS "premiumUntil", password, created_at AS "createdAt", login_locked_until > NOW() AS "isLoginLocked" FROM users WHERE email = $1 OR username = $1', [key]);
   const user = result.rows[0];
   if (!user) throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
   if (user.isLoginLocked) {

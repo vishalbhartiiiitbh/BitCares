@@ -499,6 +499,20 @@ export const addExpense = async ({
     throw Object.assign(new Error('Choose a supported subcategory for this expense category'), { statusCode: 400 });
   }
 
+  const entitlementResult = await query(
+    `SELECT u.plan, u.premium_until AS "premiumUntil", s.settings
+       FROM users u CROSS JOIN platform_settings s WHERE u.id = $1`,
+    [actorId],
+  );
+  if (!entitlementResult.rowCount) throw Object.assign(new Error('User not found'), { statusCode: 401 });
+  const entitlement = entitlementResult.rows[0];
+  const isPremium = entitlement.plan === 'premium'
+    && (!entitlement.premiumUntil || new Date(entitlement.premiumUntil) > new Date());
+  const settings = entitlement.settings || {};
+  const conversionEnabled = isPremium
+    ? settings.features?.currencyConversion?.premium !== false
+    : Boolean(settings.features?.currencyConversion?.free);
+
   if (groupId) {
     const groupResult = await query(
       `SELECT currency, is_personal AS "isPersonal", is_friend_ledger AS "isFriendLedger"
@@ -510,6 +524,9 @@ export const addExpense = async ({
     if (!group.isPersonal && !group.isFriendLedger) {
       await normalizeGroupBalances(groupId, actorId);
       const groupCurrency = group.currency || 'INR';
+      if (currency !== groupCurrency && !conversionEnabled) {
+        throw Object.assign(new Error('Currency conversion is available on the premium plan'), { statusCode: 402 });
+      }
       conversionRate = await getExchangeRate(currency, groupCurrency);
       if (splitStrategy === 'ITEMIZED') {
         items = items.map((item) => ({ ...item, amount: convertMoney(item.amount, conversionRate) }));
@@ -566,6 +583,23 @@ export const addExpense = async ({
   }
   if (isPersonal) groupId = (await ensurePersonalExpenseGroup(paidBy))._id;
   const expense = await withTransaction(async (client) => {
+    const account = await client.query(
+      `SELECT plan, premium_until AS "premiumUntil" FROM users WHERE id = $1 FOR UPDATE`,
+      [actorId],
+    );
+    const currentPremium = account.rows[0]?.plan === 'premium'
+      && (!account.rows[0].premiumUntil || new Date(account.rows[0].premiumUntil) > new Date());
+    const dailyLimit = currentPremium ? settings.limits?.premiumDailyExpenses : settings.limits?.freeDailyExpenses;
+    if (dailyLimit != null) {
+      const usage = await client.query(
+        `SELECT COUNT(*)::integer AS count FROM expenses
+          WHERE paid_by = $1 AND created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'`,
+        [actorId],
+      );
+      if (usage.rows[0].count >= dailyLimit) {
+        throw Object.assign(new Error(`Your ${currentPremium ? 'premium' : 'free'} plan allows ${dailyLimit} expenses per day`), { statusCode: 429 });
+      }
+    }
     if (!isPersonal) {
       const group = await client.query(
         'SELECT is_friend_ledger AS "isFriendLedger" FROM groups WHERE id = $1 FOR SHARE',

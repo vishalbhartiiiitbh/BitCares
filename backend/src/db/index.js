@@ -1,4 +1,5 @@
 import pg from "pg";
+import bcrypt from 'bcrypt';
 
 const { Pool } = pg;
 export const pool = new Pool({
@@ -60,9 +61,15 @@ const connectDB = async () => {
       default_currency VARCHAR(3) NOT NULL DEFAULT 'INR',
       password TEXT NOT NULL,
       refresh_token TEXT,
+      role VARCHAR(20) NOT NULL DEFAULT 'user',
+      plan VARCHAR(20) NOT NULL DEFAULT 'free',
+      premium_until TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS default_currency VARCHAR(3) NOT NULL DEFAULT 'INR';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'free';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_until TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_email_count INTEGER NOT NULL DEFAULT 0;
@@ -92,6 +99,35 @@ const connectDB = async () => {
       ADD CONSTRAINT account_email_codes_purpose_check
       CHECK (purpose IN ('signup', 'delete_account', 'email_change_old', 'email_change_new'));
     CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique ON users (LOWER(email));
+    CREATE UNIQUE INDEX IF NOT EXISTS users_one_admin_idx ON users (role) WHERE role = 'admin';
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+    ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin', 'sub_admin'));
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_plan_check;
+    ALTER TABLE users ADD CONSTRAINT users_plan_check CHECK (plan IN ('free', 'premium'));
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+      settings JSONB NOT NULL DEFAULT '{"features":{"currencyConversion":{"free":false,"premium":true}},"limits":{"freeDailyExpenses":5,"premiumDailyExpenses":null}}'::jsonb,
+      updated_by UUID REFERENCES users(id),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO platform_settings (id) VALUES (TRUE) ON CONFLICT (id) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS billing_orders (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider_order_id TEXT NOT NULL UNIQUE,
+      amount INTEGER NOT NULL,
+      currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+      status VARCHAR(20) NOT NULL DEFAULT 'created',
+      provider_payment_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      paid_at TIMESTAMPTZ
+    );
+    CREATE TABLE IF NOT EXISTS billing_webhook_events (
+      event_id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      payload JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS email_notification_outbox (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -332,6 +368,15 @@ const connectDB = async () => {
             AND n.message = payer.fullnamae || ' paid ' || payee.fullnamae || ' ' || s.currency || ' ' || to_char(s.amount, 'FM999999999990.00') || '.'
        );
   `);
+  if (process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
+    const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD, 12);
+    await query(
+      `INSERT INTO users (username, email, fullnamae, password, role)
+       VALUES ('admin', LOWER($1), 'Splitpayerly Admin', $2, 'admin')
+       ON CONFLICT (email) DO UPDATE SET role = 'admin'`,
+      [process.env.ADMIN_EMAIL, passwordHash],
+    );
+  }
   console.log("PostgreSQL connected and schema ready");
 };
 

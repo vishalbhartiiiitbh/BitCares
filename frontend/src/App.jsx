@@ -823,17 +823,19 @@ function App() {
 
   if (user)
     return (
-      <Dashboard
-        user={user}
-        accessToken={accessToken}
-        onLogout={signOut}
-        onProfileUpdated={setUser}
-        onAccountDeleted={accountDeleted}
-        friendInviteCode={friendInviteCode}
-        onFriendInviteHandled={markFriendInviteHandled}
-        referralMessage={registrationReferralMessage}
-        referralCode={referralCode}
-      />
+      ["admin", "sub_admin"].includes(user.role)
+        ? <AdminPanel user={user} accessToken={accessToken} onLogout={signOut} />
+        : <Dashboard
+            user={user}
+            accessToken={accessToken}
+            onLogout={signOut}
+            onProfileUpdated={setUser}
+            onAccountDeleted={accountDeleted}
+            friendInviteCode={friendInviteCode}
+            onFriendInviteHandled={markFriendInviteHandled}
+            referralMessage={registrationReferralMessage}
+            referralCode={referralCode}
+          />
     );
 
   if (!showAuth) {
@@ -1710,6 +1712,142 @@ function FriendHistoryPage({ friend, history, userId, accessToken, busy, error, 
         </section>}
       </div>
     </div>
+  );
+}
+
+function AdminPanel({ user, accessToken, onLogout }) {
+  const [dashboard, setDashboard] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [subAdmins, setSubAdmins] = useState([]);
+  const [subAdminForm, setSubAdminForm] = useState({ username: '', email: '', fullnamae: '', password: '' });
+  const [settings, setSettings] = useState(null);
+  const [broadcast, setBroadcast] = useState({ subject: '', message: '' });
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(true);
+
+  const load = async () => {
+    setBusy(true);
+    try {
+      const requests = [
+        apiRequest('/admin/dashboard', { headers: { Authorization: `Bearer ${accessToken}` } }),
+        apiRequest('/admin/users', { headers: { Authorization: `Bearer ${accessToken}` } }),
+      ];
+      if (user.role === 'admin') requests.push(apiRequest('/admin/sub-admins', { headers: { Authorization: `Bearer ${accessToken}` } }));
+      const [summary, accounts, administratorAccounts] = await Promise.all(requests);
+      setDashboard(summary);
+      setSettings(summary.settings);
+      setUsers(accounts);
+      setSubAdmins(administratorAccounts || []);
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, [accessToken]);
+
+  const saveSettings = async (event) => {
+    event.preventDefault();
+    setStatus('');
+    try {
+      await apiRequest('/admin/settings', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ settings }),
+      });
+      setStatus('Plan settings saved.');
+    } catch (error) { setStatus(error.message); }
+  };
+
+  const changePlan = async (userId, plan) => {
+    try {
+      await apiRequest(`/admin/users/${userId}/plan`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ plan, premiumUntil: plan === 'premium' ? new Date(Date.now() + 30 * 86400000).toISOString() : null }),
+      });
+      await load();
+      setStatus('User plan updated.');
+    } catch (error) { setStatus(error.message); }
+  };
+
+  const sendBroadcast = async (event) => {
+    event.preventDefault();
+    try {
+      const result = await apiRequest('/admin/broadcasts', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(broadcast),
+      });
+      setBroadcast({ subject: '', message: '' });
+      setStatus(`Update sent to ${result.recipients} users.`);
+    } catch (error) { setStatus(error.message); }
+  };
+
+  const createSubAdmin = async (event) => {
+    event.preventDefault();
+    try {
+      await apiRequest('/admin/sub-admins', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(subAdminForm),
+      });
+      setSubAdminForm({ username: '', email: '', fullnamae: '', password: '' });
+      await load();
+      setStatus('Sub-admin account created.');
+    } catch (error) { setStatus(error.message); }
+  };
+
+  const removeSubAdmin = async (userId) => {
+    try {
+      await apiRequest(`/admin/sub-admins/${userId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
+      await load();
+      setStatus('Sub-admin access removed.');
+    } catch (error) { setStatus(error.message); }
+  };
+
+  if (busy || !settings) return <main className="admin-shell"><p>Loading admin workspace…</p></main>;
+  return (
+    <main className="admin-shell">
+      <header className="admin-header">
+        <div><p className="admin-kicker">SPLITPAYERLY / CONTROL ROOM</p><h1>Admin workspace</h1><p>Signed in as {user.email}</p></div>
+        <button className="admin-logout" type="button" onClick={onLogout}>Sign out</button>
+      </header>
+      {status && <p className="admin-status" role="status">{status}</p>}
+      <section className="admin-metrics">
+        <div><span>Accounts</span><strong>{dashboard?.counts?.users || 0}</strong></div>
+        <div><span>Premium accounts</span><strong>{dashboard?.counts?.premium_users || 0}</strong></div>
+        <div><span>Default free limit</span><strong>{settings.limits.freeDailyExpenses}/day</strong></div>
+      </section>
+      <div className="admin-grid">
+        <form className="admin-section" onSubmit={saveSettings}>
+          <div className="admin-section-heading"><div><p className="admin-kicker">ENTITLEMENTS</p><h2>Plan controls</h2></div><button className="admin-save" type="submit">Save</button></div>
+          <label className="admin-toggle"><span><strong>Currency conversion for free users</strong><small>Allow cross-currency expenses without premium.</small></span><input type="checkbox" checked={settings.features.currencyConversion.free} onChange={(event) => setSettings({ ...settings, features: { ...settings.features, currencyConversion: { ...settings.features.currencyConversion, free: event.target.checked } } })} /></label>
+          <label>Free expenses per day<input type="number" min="0" value={settings.limits.freeDailyExpenses} onChange={(event) => setSettings({ ...settings, limits: { ...settings.limits, freeDailyExpenses: Number(event.target.value) } })} /></label>
+          <label>Premium expenses per day<input type="number" min="0" placeholder="Unlimited" value={settings.limits.premiumDailyExpenses ?? ''} onChange={(event) => setSettings({ ...settings, limits: { ...settings.limits, premiumDailyExpenses: event.target.value === '' ? null : Number(event.target.value) } })} /></label>
+        </form>
+        <form className="admin-section" onSubmit={sendBroadcast}>
+          <div className="admin-section-heading"><div><p className="admin-kicker">COMMUNICATIONS</p><h2>Product update</h2></div><button className="admin-save" type="submit">Send update</button></div>
+          <label>Subject<input maxLength="160" required value={broadcast.subject} onChange={(event) => setBroadcast({ ...broadcast, subject: event.target.value })} /></label>
+          <label>Message<textarea rows="7" maxLength="5000" required value={broadcast.message} onChange={(event) => setBroadcast({ ...broadcast, message: event.target.value })} /></label>
+          <small>Creates an in-app notification for every user and queues email for users who opted into product updates.</small>
+        </form>
+      </div>
+      <section className="admin-section admin-users"><div className="admin-section-heading"><div><p className="admin-kicker">ACCOUNTS</p><h2>Premium access</h2></div></div>
+        {users.map((account) => <div className="admin-user-row" key={account._id}><div><strong>{account.fullnamae || account.username}</strong><small>{account.email}</small></div><button className={account.plan === 'premium' ? 'admin-plan premium' : 'admin-plan'} type="button" onClick={() => changePlan(account._id, account.plan === 'premium' ? 'free' : 'premium')}>{account.plan === 'premium' ? 'Premium · revoke' : 'Grant premium'}</button></div>)}
+      </section>
+      {user.role === 'admin' && <section className="admin-section admin-users"><div className="admin-section-heading"><div><p className="admin-kicker">ADMINISTRATION</p><h2>Sub-admin access</h2></div></div>
+        <form className="sub-admin-form" onSubmit={createSubAdmin}>
+          <input required placeholder="Username" value={subAdminForm.username} onChange={(event) => setSubAdminForm({ ...subAdminForm, username: event.target.value })} />
+          <input required type="email" placeholder="Email" value={subAdminForm.email} onChange={(event) => setSubAdminForm({ ...subAdminForm, email: event.target.value })} />
+          <input required placeholder="Full name" value={subAdminForm.fullnamae} onChange={(event) => setSubAdminForm({ ...subAdminForm, fullnamae: event.target.value })} />
+          <input required minLength="8" type="password" placeholder="Temporary password" value={subAdminForm.password} onChange={(event) => setSubAdminForm({ ...subAdminForm, password: event.target.value })} />
+          <button className="admin-save" type="submit">Create sub-admin</button>
+        </form>
+        {subAdmins.map((account) => <div className="admin-user-row" key={account._id}><div><strong>{account.fullnamae || account.username}</strong><small>{account.email}</small></div><button className="admin-plan" type="button" onClick={() => removeSubAdmin(account._id)}>Remove access</button></div>)}
+      </section>}
+    </main>
   );
 }
 
@@ -3373,7 +3511,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   }}
                 >
                   <span className="notification-copy">
-                    <strong>{notification.notificationType === 'PAYMENT_REQUEST' ? 'Payment request' : 'Payment received'}</strong>
+                    <strong>{notification.notificationType === 'PAYMENT_REQUEST' ? 'Payment request' : notification.notificationType === 'PRODUCT_UPDATE' ? 'Splitpayerly update' : 'Payment received'}</strong>
                     <span>{notification.message}</span>
                     <small>{new Date(notification.createdAt).toLocaleString()}</small>
                   </span>
