@@ -13,6 +13,18 @@ const requireText = (value, label, maxLength) => {
   return text;
 };
 
+const optionalText = (value, label, maxLength) => {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string') {
+    throw Object.assign(new Error(`${label} must be text`), { statusCode: 400 });
+  }
+  const text = value.trim();
+  if (text.length > maxLength) {
+    throw Object.assign(new Error(`${label} must be ${maxLength} characters or fewer`), { statusCode: 400 });
+  }
+  return text;
+};
+
 const isSupportedAttachment = (file) => {
   const bytes = file.buffer;
   switch (file.mimetype) {
@@ -35,16 +47,16 @@ const isSupportedAttachment = (file) => {
 const safeFilename = (filename) => filename
   .split(/[\\/]/)
   .pop()
-  .replace(/[\r\n"]/g, '')
+  .replace(/[\u0000-\u001f\u007f"]/g, '')
   .slice(0, 180) || 'report-attachment';
 
 export const submitContactReport = async (req, res) => {
   const firstName = requireText(req.body.firstName, 'First name', 80);
-  const lastName = requireText(req.body.lastName, 'Last name', 80);
+  const lastName = optionalText(req.body.lastName, 'Last name', 80);
   const email = requireText(req.body.email, 'Email', 254).toLowerCase();
-  const purpose = requireText(req.body.purpose, 'Purpose', 120).replace(/[\r\n]+/g, ' ');
+  const purpose = requireText(req.body.purpose, 'Purpose', 120).replace(/[\u0000-\u001f\u007f]/g, ' ');
   const message = requireText(req.body.message, 'Message', 5000);
-  const phone = typeof req.body.phone === 'string' ? req.body.phone.trim().slice(0, 30) : '';
+  const phone = optionalText(req.body.phone, 'Phone', 30);
 
   if (!validEmail.test(email)) {
     throw Object.assign(new Error('Enter a valid email address'), { statusCode: 400 });
@@ -63,7 +75,7 @@ export const submitContactReport = async (req, res) => {
     throw Object.assign(new Error('Contact email delivery is not configured. Set CONTACT_EMAIL_TO on the backend.'), { statusCode: 503 });
   }
 
-  const fullName = `${firstName} ${lastName}`;
+  const fullName = [firstName, lastName].filter(Boolean).join(' ');
   const text = [
     'A user submitted a contact report through Splitpayerly.',
     '',

@@ -634,143 +634,6 @@ const expenseCategories = [
   { name: 'Utilities', icon: '💡', subcategories: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'] },
 ];
 
-function ContactPage({ user, accessToken }) {
-  const nameParts = (user.fullnamae || '').trim().split(/\s+/);
-  const [details, setDetails] = useState({
-    firstName: nameParts[0] || '',
-    lastName: nameParts.slice(1).join(' '),
-    email: user.email || '',
-    phone: user.phone || '',
-    purpose: '',
-    message: '',
-  });
-  const [attachments, setAttachments] = useState([]);
-  const [attachmentInputKey, setAttachmentInputKey] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-
-  const updateDetails = (event) => {
-    setDetails((current) => ({ ...current, [event.target.name]: event.target.value }));
-    setError('');
-    setSuccess('');
-  };
-
-  const selectAttachments = (event) => {
-    const selected = Array.from(event.target.files || []);
-    const allowedTypes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-    if (selected.length > 3) {
-      setError('You can attach up to 3 files.');
-      return;
-    }
-    if (selected.some((file) => !allowedTypes.has(file.type))) {
-      setError('Attach PDF, JPEG, PNG, GIF, or WebP files only.');
-      return;
-    }
-    if (selected.some((file) => file.size > 5 * 1024 * 1024)) {
-      setError('Each attachment must be 5 MB or smaller.');
-      return;
-    }
-    if (selected.reduce((total, file) => total + file.size, 0) > 10 * 1024 * 1024) {
-      setError('Attachments must total 10 MB or less.');
-      return;
-    }
-    setAttachments(selected);
-    setError('');
-    setSuccess('');
-  };
-
-  const submitReport = async (event) => {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    setSuccess('');
-    const data = new FormData();
-    Object.entries(details).forEach(([key, value]) => data.append(key, value));
-    attachments.forEach((file) => data.append('attachments', file));
-    try {
-      const result = await apiRequest('/users/contact', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: data,
-      });
-      setSuccess(result.message);
-      setDetails((current) => ({ ...current, purpose: '', message: '' }));
-      setAttachments([]);
-      setAttachmentInputKey((current) => current + 1);
-    } catch (submitError) {
-      setError(submitError.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <main className="contact-page">
-      <section className="contact-card">
-        <header className="contact-heading">
-          <h1>Contact Us</h1>
-          <p>Report an issue or send us a message. Attach screenshots or a PDF if they help explain the problem.</p>
-        </header>
-        <form className="contact-form" onSubmit={submitReport}>
-          <div className="contact-fields-grid">
-            <label className="contact-field">
-              <span>First name</span>
-              <input name="firstName" value={details.firstName} onChange={updateDetails} maxLength={80} autoComplete="given-name" required />
-            </label>
-            <label className="contact-field">
-              <span>Last name</span>
-              <input name="lastName" value={details.lastName} onChange={updateDetails} maxLength={80} autoComplete="family-name" required />
-            </label>
-            <label className="contact-field">
-              <span>Email</span>
-              <input name="email" type="email" value={details.email} onChange={updateDetails} maxLength={254} autoComplete="email" required />
-            </label>
-            <label className="contact-field">
-              <span>Phone (optional)</span>
-              <input name="phone" type="tel" value={details.phone} onChange={updateDetails} maxLength={30} autoComplete="tel" />
-            </label>
-          </div>
-          <label className="contact-field">
-            <span>Purpose</span>
-            <input name="purpose" value={details.purpose} onChange={updateDetails} maxLength={120} placeholder="e.g., Report a bug, billing question" required />
-          </label>
-          <label className="contact-field">
-            <span>Message</span>
-            <textarea name="message" value={details.message} onChange={updateDetails} maxLength={5000} rows={6} placeholder="Tell us what happened and how we can help..." required />
-          </label>
-          <label className="contact-field">
-            <span>Proof (optional)</span>
-            <input
-              key={attachmentInputKey}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp"
-              multiple
-              onChange={selectAttachments}
-            />
-            <small>Up to 3 image or PDF files; 5 MB per file and 10 MB total.</small>
-          </label>
-          {attachments.length > 0 && (
-            <ul className="contact-attachments" aria-label="Selected attachments">
-              {attachments.map((file, index) => (
-                <li key={`${file.name}-${file.lastModified}`}>
-                  <span>{file.name} · {(file.size / (1024 * 1024)).toFixed(2)} MB</span>
-                  <button type="button" onClick={() => setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Remove ${file.name}`}>Remove</button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {error && <p className="error-message" role="alert">{error}</p>}
-          {success && <p className="success-message" role="status">{success}</p>}
-          <button className="contact-submit" type="submit" disabled={busy}>
-            {busy ? 'Sending…' : 'Send Message'}
-          </button>
-        </form>
-      </section>
-    </main>
-  );
-}
-
 function App() {
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken") || "");
   const [friendInviteCode, setFriendInviteCode] = useState(() => new URLSearchParams(window.location.search).get("friendCode") || "");
@@ -2388,7 +2251,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const dashboardPageStorageKey = `splitcare-dashboard-page:${user._id}`;
   const [activePage, setActivePage] = useState(() => {
     const savedPage = window.sessionStorage.getItem(dashboardPageStorageKey);
-    return ['overview', 'recent', 'all-expenses', 'non-group-expenses', 'personal', 'friends', 'billing', 'contact'].includes(savedPage)
+    return ['overview', 'recent', 'all-expenses', 'non-group-expenses', 'personal', 'friends', 'billing'].includes(savedPage)
       ? savedPage
       : 'overview';
   });
@@ -3961,7 +3824,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           <button aria-label="Personal expenses" className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => { setActivePage('personal'); setShowMobileNav(false); }}><span className="mobile-nav-label">Personal expenses</span></button>
           <button aria-label="Friends" className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => { setActivePage('friends'); setShowMobileNav(false); }}><span className="mobile-nav-label">Friends</span></button>
           <button aria-label="Billing" className={activePage === 'billing' ? 'active' : ''} type="button" onClick={() => { setActivePage('billing'); setShowMobileNav(false); }}><span className="mobile-nav-label">Billing</span></button>
-          <button aria-label="Contact Us" className={activePage === 'contact' ? 'active' : ''} type="button" onClick={() => { setActivePage('contact'); setShowMobileNav(false); }}><span className="mobile-nav-label">Contact Us</span></button>
         </nav>
         <button
           className="theme-toggle"
@@ -4138,9 +4000,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             </button>
             <button className={`side-link ${activePage === 'billing' ? 'active' : ''}`} onClick={() => setActivePage('billing')} type="button">
               ◈ <span>Billing</span>
-            </button>
-            <button className={`side-link ${activePage === 'contact' ? 'active' : ''}`} onClick={() => setActivePage('contact')} type="button">
-              ✉ <span>Contact Us</span>
             </button>
           </div>
           <div className="side-section">
@@ -4341,8 +4200,6 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             </div>
           ) : activePage === 'billing' ? (
             <BillingPage user={user} accessToken={accessToken} onProfileUpdated={onProfileUpdated} />
-          ) : activePage === 'contact' ? (
-            <ContactPage user={user} accessToken={accessToken} />
           ) : activePage === 'non-group-expenses' ? (
             <ExpenseLedger
               expenses={nonGroupExpenses}
