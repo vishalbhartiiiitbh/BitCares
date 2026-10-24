@@ -1,10 +1,31 @@
 import { Router } from 'express';
-import { accessToken, changeEmail, checkUsernameAvailability, currentUser, deleteAccount, forgotPassword, getEmailNotificationSettings, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, sendAccountDeletionCode, sendEmailChangeCodes, sendRegistrationCode, updateEmailNotificationSettings, updateProfile, verifyCurrentPassword, verifyRegistrationCode } from '../controllers/userController.js';
+import { accessToken, changeEmail, checkUsernameAvailability, currentUser, deleteAccount, forgotPassword, getEmailNotificationSettings, getFeatureAccess, listNotifications, login, logout, markNotificationsRead, refreshToken, register, resetPassword, sendAccountDeletionCode, sendEmailChangeCodes, sendRegistrationCode, updateEmailNotificationSettings, updateProfile, verifyCurrentPassword, verifyRegistrationCode } from '../controllers/userController.js';
+import { submitContactReport } from '../controllers/contactController.js';
 import { asyncHandler } from '../middlewares/errorHandler.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import multer from 'multer';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const contactUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 3, fields: 8, parts: 12 },
+  fileFilter: (_req, file, callback) => {
+    const allowedExtensions = {
+      'application/pdf': /\.pdf$/i,
+      'image/jpeg': /\.jpe?g$/i,
+      'image/png': /\.png$/i,
+      'image/gif': /\.gif$/i,
+      'image/webp': /\.webp$/i,
+    };
+    const extension = allowedExtensions[file.mimetype];
+    if (!extension || !extension.test(file.originalname)) {
+      const error = new Error('Attachments must be PDF, JPEG, PNG, GIF, or WebP files');
+      error.name = 'ValidationError';
+      return callback(error);
+    }
+    callback(null, true);
+  },
+});
 
 const router = Router();
 
@@ -18,6 +39,8 @@ router.post('/refresh-token', asyncHandler(refreshToken));
 router.post('/logout', requireAuth, asyncHandler(logout));
 router.get('/access-token', requireAuth, asyncHandler(accessToken));
 router.get('/me', requireAuth, asyncHandler(currentUser));
+router.get('/feature-access', requireAuth, asyncHandler(getFeatureAccess));
+router.post('/contact', requireAuth, contactUpload.array('attachments', 3), asyncHandler(submitContactReport));
 router.get('/notifications', requireAuth, asyncHandler(listNotifications));
 router.patch('/notifications/read', requireAuth, asyncHandler(markNotificationsRead));
 router.get('/profile/email-notifications', requireAuth, asyncHandler(getEmailNotificationSettings));

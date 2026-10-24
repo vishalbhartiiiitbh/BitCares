@@ -6,6 +6,7 @@ import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 import { importSplitwiseCsv, previewSplitwiseImport } from '../services/splitwiseImportService.js';
 import { getAvailableCurrencies } from '../services/exchangeRateService.js';
 import { normalizeGroupBalances } from '../services/groupCurrencyService.js';
+import { getUserFeatureAccess } from '../services/featureAccessService.js';
 
 const getSplitwiseCsvText = (req) => {
   if (!req.file) throw Object.assign(new Error('Choose a Splitwise CSV file to upload.'), { statusCode: 400 });
@@ -163,6 +164,10 @@ export const update = async (req, res) => {
   if (currency !== undefined && currency !== groupBeforeUpdate.currency
     && !(await getAvailableCurrencies()).includes(currency)) {
     throw Object.assign(new Error('Choose a currency supported by the exchange-rate provider'), { statusCode: 400 });
+  }
+  if (currency !== undefined && currency !== groupBeforeUpdate.currency
+    && !(await getUserFeatureAccess(req.user._id)).features.currencyConversion) {
+    throw Object.assign(new Error('Changing the group currency is a Premium feature. Upgrade to Premium or ask an admin to enable it for free users.'), { statusCode: 402 });
   }
   const previousCover = groupBeforeUpdate.coverImageUrl;
   const coverImageUrl = req.file

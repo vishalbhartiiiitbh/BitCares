@@ -6,6 +6,7 @@ import { deleteImageByUrl, uploadImageBuffer } from '../config/cloudinary.js';
 import { sendEmailVerificationCode, sendPasswordResetEmail, sendWelcomeEmail } from '../services/emailService.js';
 import { EMAIL_NOTIFICATION_PREFERENCES } from '../services/emailNotificationService.js';
 import { getAvailableCurrencies } from '../services/exchangeRateService.js';
+import { getUserFeatureAccess } from '../services/featureAccessService.js';
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax' };
 const publicUser = (user) => { const value = { ...user }; delete value.password; delete value.refreshToken; return value; };
@@ -531,6 +532,9 @@ export const logout = async (req, res) => { await query('UPDATE users SET refres
 export const refreshToken = async (req, res) => { const incoming = req.cookies?.refreshToken || req.body.refreshToken; if (!incoming) throw Object.assign(new Error('Refresh token is required'), { statusCode: 401 }); const decoded = jwt.verify(incoming, process.env.REFRESH_TOKEN_SECRET); const result = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", created_at AS "createdAt" FROM users WHERE id = $1 AND refresh_token = $2', [decoded._id, incoming]); if (!result.rowCount) throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 }); const data = tokenResponse(result.rows[0]); await query('UPDATE users SET refresh_token = $1 WHERE id = $2', [data.refreshToken, decoded._id]); setCookies(res, data); res.json({ data: { accessToken: data.accessToken, refreshToken: data.refreshToken, tokenType: data.tokenType } }); };
 export const accessToken = async (req, res) => res.json({ data: { accessToken: makeAccessToken(req.user), tokenType: 'Bearer' } });
 export const currentUser = async (req, res) => res.json({ data: { user: req.user } });
+export const getFeatureAccess = async (req, res) => {
+  res.json({ data: await getUserFeatureAccess(req.user._id) });
+};
 
 export const listNotifications = async (req, res) => {
   const result = await query(

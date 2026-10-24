@@ -3,7 +3,11 @@ import { queueEmailNotification } from '../services/emailNotificationService.js'
 import bcrypt from 'bcrypt';
 
 const defaultSettings = {
-  features: { currencyConversion: { free: false, premium: true } },
+  features: {
+    currencyConversion: { free: false, premium: true },
+    dashboardSpendingInsights: { free: false, premium: true },
+    groupSpendingInsights: { free: false, premium: true },
+  },
   limits: { freeDailyExpenses: 5, premiumDailyExpenses: null },
 };
 
@@ -12,6 +16,14 @@ const readSettings = (value) => ({
     currencyConversion: {
       free: Boolean(value?.features?.currencyConversion?.free),
       premium: value?.features?.currencyConversion?.premium !== false,
+    },
+    dashboardSpendingInsights: {
+      free: Boolean(value?.features?.dashboardSpendingInsights?.free),
+      premium: value?.features?.dashboardSpendingInsights?.premium !== false,
+    },
+    groupSpendingInsights: {
+      free: Boolean(value?.features?.groupSpendingInsights?.free),
+      premium: value?.features?.groupSpendingInsights?.premium !== false,
     },
   },
   limits: {
@@ -45,7 +57,24 @@ export const updateAdminSettings = async (req, res) => {
 
 export const listAdminUsers = async (_req, res) => {
   const result = await query(
-    `SELECT id AS "_id", username, email, fullnamae, plan, premium_until AS "premiumUntil", created_at AS "createdAt"
+    `SELECT id AS "_id", username, email, fullnamae,
+            CASE WHEN plan = 'premium' AND (premium_until IS NULL OR premium_until > NOW())
+              THEN 'premium' ELSE 'free' END AS plan,
+            premium_until AS "premiumUntil", created_at AS "createdAt",
+            EXISTS (
+              SELECT 1
+                FROM billing_subscriptions s
+               WHERE s.user_id = users.id
+                 AND s.status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused')
+            ) AS "hasOpenRazorpaySubscription",
+            (
+              SELECT s.status
+                FROM billing_subscriptions s
+               WHERE s.user_id = users.id
+                 AND s.status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused')
+               ORDER BY s.created_at DESC
+               LIMIT 1
+            ) AS "razorpaySubscriptionStatus"
        FROM users WHERE role = 'user' ORDER BY created_at DESC`,
   );
   res.json({ data: result.rows });
@@ -90,16 +119,63 @@ export const deleteSubAdmin = async (req, res) => {
 };
 
 export const updateUserPlan = async (req, res) => {
-  const { plan, premiumUntil = null } = req.body || {};
-  if (!['free', 'premium'].includes(plan)) throw Object.assign(new Error('Plan must be free or premium'), { statusCode: 400 });
-  const result = await query(
-    `UPDATE users SET plan = $1, premium_until = CASE WHEN $1 = 'premium' THEN $2::timestamptz ELSE NULL END
-      WHERE id = $3 AND role = 'user'
-      RETURNING id AS "_id", username, email, plan, premium_until AS "premiumUntil"`,
-    [plan, premiumUntil, req.params.userId],
-  );
-  if (!result.rowCount) throw Object.assign(new Error('User not found'), { statusCode: 404 });
-  res.json({ data: result.rows[0] });
+  const { plan, premiumDuration } = req.body || {};
+  if (plan !== 'premium') {
+    throw Object.assign(new Error('This action only grants Premium access; it cannot deactivate or revoke access.'), { statusCode: 400 });
+  }
+  const duration = {
+      weekly: { months: 0, days: 7 },
+      monthly: { months: 1, days: 0 },
+      six_month: { months: 6, days: 0 },
+      yearly: { months: 12, days: 0 },
+    }[premiumDuration];
+  if (!duration) {
+    throw Object.assign(new Error('Choose a valid Premium duration'), { statusCode: 400 });
+  }
+
+  const updatedUser = await withTransaction(async (client) => {
+    const userResult = await client.query(
+      `SELECT premium_until AS "premiumUntil",
+              (plan = 'premium' AND (premium_until IS NULL OR premium_until > NOW())) AS "hasPremiumAccess",
+              EXISTS (
+                SELECT 1
+                  FROM billing_subscriptions s
+                 WHERE s.user_id = users.id
+                   AND s.status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused')
+              ) AS "hasOpenRazorpaySubscription"
+         FROM users WHERE id = $1 AND role = 'user' FOR UPDATE`,
+      [req.params.userId],
+    );
+    if (!userResult.rowCount) throw Object.assign(new Error('User not found'), { statusCode: 404 });
+    if (userResult.rows[0].hasPremiumAccess) {
+      throw Object.assign(new Error('This user already has active Premium access.'), { statusCode: 409 });
+    }
+    if (userResult.rows[0].hasOpenRazorpaySubscription) {
+      throw Object.assign(new Error('This user has a Razorpay subscription in progress. Manual Premium grants are only available when there is no open Razorpay subscription.'), { statusCode: 409 });
+    }
+    const currentExpiry = userResult.rows[0].premiumUntil;
+    const expiry = currentExpiry && new Date(currentExpiry) > new Date()
+      ? new Date(currentExpiry)
+      : new Date();
+    const originalDay = expiry.getUTCDate();
+    if (duration.months) {
+      expiry.setUTCDate(1);
+      expiry.setUTCMonth(expiry.getUTCMonth() + duration.months);
+      const lastDay = new Date(Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth() + 1, 0)).getUTCDate();
+      expiry.setUTCDate(Math.min(originalDay, lastDay));
+    }
+    if (duration.days) expiry.setUTCDate(expiry.getUTCDate() + duration.days);
+    const premiumUntil = expiry.toISOString();
+    const result = await client.query(
+      `UPDATE users SET plan = 'premium', premium_until = $1::timestamptz
+        WHERE id = $2 AND role = 'user'
+        RETURNING id AS "_id", username, email, plan, premium_until AS "premiumUntil"`,
+      [premiumUntil, req.params.userId],
+    );
+    if (!result.rowCount) throw Object.assign(new Error('User not found'), { statusCode: 404 });
+    return result.rows[0];
+  });
+  res.json({ data: updatedUser });
 };
 
 export const broadcastProductUpdate = async (req, res) => {

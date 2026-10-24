@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { withTransaction } from '../db/index.js';
 import { normalizeGroupBalances } from './groupCurrencyService.js';
+import { isFeatureEnabled } from './featureAccessService.js';
 import {
   allocateSplitwiseExpense,
   parseSplitwiseCsv,
@@ -112,7 +113,7 @@ export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappi
   const fileHash = createHash('sha256').update(csvText).digest('hex');
   const result = await withTransaction(async (client) => {
     const groupResult = await client.query(
-      `SELECT g.id, g.name
+      `SELECT g.id, g.name, g.currency
          FROM groups g JOIN group_members gm ON gm.group_id = g.id
         WHERE g.id = $1 AND gm.user_id = $2
           AND NOT g.is_personal AND NOT g.is_friend_ledger
@@ -120,6 +121,23 @@ export const importSplitwiseCsv = async ({ groupId, userId, csvText, memberMappi
       [groupId, userId],
     );
     if (!groupResult.rowCount) throw Object.assign(new Error('Group or membership not found'), { statusCode: 404 });
+    const needsCurrencyConversion = parsed.transactions.some(
+      (transaction) => transaction.currency !== (groupResult.rows[0].currency || 'INR'),
+    );
+    if (needsCurrencyConversion) {
+      const entitlementResult = await client.query(
+        `SELECT u.plan, u.premium_until AS "premiumUntil", s.settings
+           FROM users u CROSS JOIN platform_settings s
+          WHERE u.id = $1`,
+        [userId],
+      );
+      const entitlement = entitlementResult.rows[0];
+      const isPremium = entitlement.plan === 'premium'
+        && (!entitlement.premiumUntil || new Date(entitlement.premiumUntil) > new Date());
+      if (!isFeatureEnabled(entitlement.settings, isPremium, 'currencyConversion')) {
+        throw Object.assign(new Error('Importing expenses in other currencies requires Premium currency conversion. Ask an admin to enable it for free users or import expenses in the group currency.'), { statusCode: 402 });
+      }
+    }
 
     const memberResult = await client.query(
       'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2::uuid[])',

@@ -14,7 +14,12 @@ export const requireAuth = async (req, _res, next) => {
     if (!token) return next(Object.assign(new Error('Access token is required'), { statusCode: 401 }));
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
     // Load the current account record so deleted users and changed profile data take effect immediately.
-    const { rows } = await query('SELECT id AS "_id", username, email, fullnamae, phone, coverimage, default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", role, plan, premium_until AS "premiumUntil", created_at AS "createdAt" FROM users WHERE id = $1', [decoded._id]);
+    const { rows } = await query(`SELECT id AS "_id", username, email, fullnamae, phone, coverimage,
+      default_currency AS "defaultCurrency", username_change_count AS "usernameChangeCount", role,
+      CASE WHEN plan = 'premium' AND premium_until IS NOT NULL AND premium_until <= NOW()
+        THEN 'free' ELSE plan END AS plan,
+      premium_until AS "premiumUntil", created_at AS "createdAt"
+      FROM users WHERE id = $1`, [decoded._id]);
     const user = rows[0];
     if (!user) return next(Object.assign(new Error('User not found'), { statusCode: 401 }));
     req.user = user;

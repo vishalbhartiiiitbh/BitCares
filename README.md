@@ -14,16 +14,80 @@ Update `backend/.env` with your PostgreSQL `DATABASE_URL` and private JWT, Cloud
 
 The administrator is provisioned only at backend startup from `ADMIN_EMAIL` and
 `ADMIN_PASSWORD`; there is no public admin-registration endpoint. Set
-`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, and
-`PREMIUM_PRICE_INR` to enable premium checkout. The admin workspace is available
-after signing in with that provisioned account. It controls whether currency
-conversion is available to free users, daily expense limits for each plan,
-individual premium access, and product-update broadcasts.
+`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET` in
+`backend/.env`. Configure Razorpay Dashboard Plan IDs with
+`RAZORPAY_PLAN_ID_WEEKLY`, `RAZORPAY_PLAN_ID_SIX_MONTH`,
+`RAZORPAY_PLAN_ID_MONTHLY`, and/or `RAZORPAY_PLAN_ID_YEARLY`. Create matching
+Razorpay Dashboard Plans with weekly INR 10, monthly INR 50, six-month INR 275,
+and yearly INR 500 pricing. The six-month Plan must use a monthly period with
+interval 6. The server fetches each configured Plan and rejects it unless its
+period, interval, and exact price match. `PREMIUM_PRICE_INR` remains for the legacy one-time order checkout
+and is not used to price subscription intervals. Unset Plan IDs appear in the
+Billing page but cannot be selected for checkout until configured. Razorpay
+automatically charges recurring payments on the Plan interval after the user
+authorizes the subscription. After each successful charge, Premium access lasts
+through that paid billing period: 7 days for weekly, 1 month for monthly,
+6 months for the six-month plan, and 1 year for yearly. Razorpay's subscription
+period end is used when supplied; the server calculates the configured interval
+if that end date is missing. The admin workspace is available after signing in
+with the provisioned account. It controls whether currency conversion is
+available to free users, daily expense limits for each plan, individual
+premium access, and product-update broadcasts.
+
+Premium entitlements include dashboard spending insights, group spending
+insights, and group currency conversion. Admins can independently enable each
+feature for free accounts from **Admin workspace → Plan controls**. When disabled
+for free users, spending charts show a Premium upgrade prompt, and the backend
+blocks cross-currency group expenses, edits, imports, and group base-currency
+changes. Premium access is checked against the account's current plan expiry.
+Admins can search accounts by email in **Premium access**, grant manual access
+for one week, one month, six months, or one year. The panel is grant-only: it
+does not deactivate accounts, and it hides the grant action for users who
+already have Premium access or a Razorpay subscription in progress (created,
+authenticated, active, pending, halted, or paused). The backend checks these
+conditions again before granting. Manual grants only update that selected
+user's app entitlement; they do not create, cancel, or modify Razorpay
+subscriptions or payment records.
 
 Admin API endpoints are under `/api/admin` and require the provisioned admin
-account. Premium checkout uses `POST /api/billing/premium/order`, then
-`POST /api/billing/premium/verify`; configure the Razorpay webhook URL as
-`/api/billing/webhook` and subscribe it to `payment.captured`.
+account. The dashboard Billing page uses authenticated
+`GET /api/billing/plans`, `POST /api/billing/subscriptions`,
+`POST /api/billing/subscriptions/verify`, `GET /api/billing/summary`, and
+`POST /api/billing/subscriptions/:subscriptionId/cancel`. Cancellation is
+scheduled for the end of the paid period, so access is not revoked immediately.
+The previous one-time checkout endpoints remain available at
+`POST /api/billing/premium/order` and `POST /api/billing/premium/verify`.
+
+Configure the Razorpay webhook URL as `https://<your-public-host>/api/billing/webhook`
+and enable only these events: `subscription.authenticated`,
+`subscription.activated`, `subscription.charged`, `subscription.pending`,
+`subscription.halted`, `subscription.cancelled`, `subscription.completed`,
+`subscription.paused`, `subscription.resumed`, `subscription.updated`,
+`payment.captured`, and `payment.failed`. The webhook signature is verified
+against the raw request body and `RAZORPAY_WEBHOOK_SECRET`; event IDs and payment
+IDs are persisted idempotently. New webhook rows contain event metadata rather
+than full payment payloads.
+
+For local webhook testing, start the backend and frontend, then expose the
+backend port (normally `5000`) through a trusted HTTPS tunnel such as
+`cloudflared tunnel --url http://localhost:5000` or `ngrok http 5000`. Set the
+Dashboard webhook URL to the tunnel's HTTPS URL plus `/api/billing/webhook`,
+use the matching webhook signing secret in `backend/.env`, and trigger test
+events from Razorpay. Keep the tunnel URL and webhook secret private. Use
+Razorpay Test Mode Plans and keys with [Razorpay's documented test card
+details](https://razorpay.com/docs/payments/payments/test-card-details/) and
+test authentication flow; real card details cannot be charged using Test Mode.
+Checkout at `http://localhost:5173/` shows
+the three prices, and enables checkout only for Plan IDs whose Dashboard details
+match the selected interval and price. The dashboard has an **Unlock Premium**
+button that opens Billing. Refresh Billing after the webhook confirms a charge
+to update the displayed account plan.
+
+Run the local app in separate terminals with `cd backend && npm run dev` and
+`cd frontend && npm run dev`. Before testing, create weekly, monthly, and/or
+yearly Plans in the Razorpay Test Mode Dashboard, copy their Plan IDs into the
+matching backend environment variables, configure the listed webhook events,
+and restart the backend so the Plan IDs are loaded.
 
 Currency conversion uses ExchangeRate-API. Set `EXCHANGE_RATE_API_KEY` in
 `backend/.env` (and in the backend host's environment settings) to your private

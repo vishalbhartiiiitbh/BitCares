@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 
-const createTransporter = () => {
+const createTransporter = ({ debug = true } = {}) => {
   const { SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
     throw Object.assign(new Error('Email delivery is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS.'), { statusCode: 503 });
@@ -15,8 +15,8 @@ const createTransporter = () => {
     connectionTimeout: 10000, // Fails after 10 seconds instead of hanging forever
     greetingTimeout: 10000,
     socketTimeout: 10000,
-    logger: true,             // Prints successful/failed email attempts to Render logs
-    debug: true               // Prints full SMTP traffic to Render logs for troubleshooting
+    logger: debug,
+    debug
   });
 };
 
@@ -51,6 +51,18 @@ export const sendNotificationEmail = async (email, subject, text) => {
     to: email,
     subject,
     text,
+  });
+};
+
+export const sendContactReportEmail = async ({ recipient, replyTo, subject, text, attachments }) => {
+  const transporter = createTransporter({ debug: false });
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to: recipient,
+    replyTo,
+    subject,
+    text,
+    attachments,
   });
 };
 

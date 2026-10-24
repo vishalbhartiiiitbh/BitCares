@@ -101,6 +101,19 @@ function getExpenseMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function FeatureUpgradeCard({ title, description, onUpgrade }) {
+  return (
+    <section className="premium-feature-card">
+      <div>
+        <p className="eyebrow">PREMIUM FEATURE</p>
+        <h3>{title}</h3>
+        <p>{description}</p>
+      </div>
+      <button className="primary-action" type="button" onClick={onUpgrade}>View Premium plans</button>
+    </section>
+  );
+}
+
 function SpendingInsights({ transactions, members, userId, personalOnly = false, balanceSummary = null, balanceSummaryBusy = false, scopeLabel = 'GROUP SPENDING' }) {
   const [monthSelection, setMonthSelection] = useState('');
   const [currencySelection, setCurrencySelection] = useState('');
@@ -620,6 +633,143 @@ const expenseCategories = [
   { name: 'Uncategorized', icon: '🧾', subcategories: [] },
   { name: 'Utilities', icon: '💡', subcategories: ['Electricity', 'Internet', 'Water', 'Phone', 'Waste'] },
 ];
+
+function ContactPage({ user, accessToken }) {
+  const nameParts = (user.fullnamae || '').trim().split(/\s+/);
+  const [details, setDetails] = useState({
+    firstName: nameParts[0] || '',
+    lastName: nameParts.slice(1).join(' '),
+    email: user.email || '',
+    phone: user.phone || '',
+    purpose: '',
+    message: '',
+  });
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentInputKey, setAttachmentInputKey] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const updateDetails = (event) => {
+    setDetails((current) => ({ ...current, [event.target.name]: event.target.value }));
+    setError('');
+    setSuccess('');
+  };
+
+  const selectAttachments = (event) => {
+    const selected = Array.from(event.target.files || []);
+    const allowedTypes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+    if (selected.length > 3) {
+      setError('You can attach up to 3 files.');
+      return;
+    }
+    if (selected.some((file) => !allowedTypes.has(file.type))) {
+      setError('Attach PDF, JPEG, PNG, GIF, or WebP files only.');
+      return;
+    }
+    if (selected.some((file) => file.size > 5 * 1024 * 1024)) {
+      setError('Each attachment must be 5 MB or smaller.');
+      return;
+    }
+    if (selected.reduce((total, file) => total + file.size, 0) > 10 * 1024 * 1024) {
+      setError('Attachments must total 10 MB or less.');
+      return;
+    }
+    setAttachments(selected);
+    setError('');
+    setSuccess('');
+  };
+
+  const submitReport = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setSuccess('');
+    const data = new FormData();
+    Object.entries(details).forEach(([key, value]) => data.append(key, value));
+    attachments.forEach((file) => data.append('attachments', file));
+    try {
+      const result = await apiRequest('/users/contact', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: data,
+      });
+      setSuccess(result.message);
+      setDetails((current) => ({ ...current, purpose: '', message: '' }));
+      setAttachments([]);
+      setAttachmentInputKey((current) => current + 1);
+    } catch (submitError) {
+      setError(submitError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="contact-page">
+      <section className="contact-card">
+        <header className="contact-heading">
+          <h1>Contact Us</h1>
+          <p>Report an issue or send us a message. Attach screenshots or a PDF if they help explain the problem.</p>
+        </header>
+        <form className="contact-form" onSubmit={submitReport}>
+          <div className="contact-fields-grid">
+            <label className="contact-field">
+              <span>First name</span>
+              <input name="firstName" value={details.firstName} onChange={updateDetails} maxLength={80} autoComplete="given-name" required />
+            </label>
+            <label className="contact-field">
+              <span>Last name</span>
+              <input name="lastName" value={details.lastName} onChange={updateDetails} maxLength={80} autoComplete="family-name" required />
+            </label>
+            <label className="contact-field">
+              <span>Email</span>
+              <input name="email" type="email" value={details.email} onChange={updateDetails} maxLength={254} autoComplete="email" required />
+            </label>
+            <label className="contact-field">
+              <span>Phone (optional)</span>
+              <input name="phone" type="tel" value={details.phone} onChange={updateDetails} maxLength={30} autoComplete="tel" />
+            </label>
+          </div>
+          <label className="contact-field">
+            <span>Purpose</span>
+            <input name="purpose" value={details.purpose} onChange={updateDetails} maxLength={120} placeholder="e.g., Report a bug, billing question" required />
+          </label>
+          <label className="contact-field">
+            <span>Message</span>
+            <textarea name="message" value={details.message} onChange={updateDetails} maxLength={5000} rows={6} placeholder="Tell us what happened and how we can help..." required />
+          </label>
+          <label className="contact-field">
+            <span>Proof (optional)</span>
+            <input
+              key={attachmentInputKey}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,application/pdf,image/jpeg,image/png,image/gif,image/webp"
+              multiple
+              onChange={selectAttachments}
+            />
+            <small>Up to 3 image or PDF files; 5 MB per file and 10 MB total.</small>
+          </label>
+          {attachments.length > 0 && (
+            <ul className="contact-attachments" aria-label="Selected attachments">
+              {attachments.map((file, index) => (
+                <li key={`${file.name}-${file.lastModified}`}>
+                  <span>{file.name} · {(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                  <button type="button" onClick={() => setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))} aria-label={`Remove ${file.name}`}>Remove</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && <p className="error-message" role="alert">{error}</p>}
+          {success && <p className="success-message" role="status">{success}</p>}
+          <button className="contact-submit" type="submit" disabled={busy}>
+            {busy ? 'Sending…' : 'Send Message'}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
 
 function App() {
   const [resetToken, setResetToken] = useState(() => new URLSearchParams(window.location.search).get("resetToken") || "");
@@ -1724,6 +1874,8 @@ function AdminPanel({ user, accessToken, onLogout }) {
   const [broadcast, setBroadcast] = useState({ subject: '', message: '' });
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(true);
+  const [userSearch, setUserSearch] = useState('');
+  const [premiumDuration, setPremiumDuration] = useState('monthly');
 
   const load = async () => {
     setBusy(true);
@@ -1765,10 +1917,10 @@ function AdminPanel({ user, accessToken, onLogout }) {
       await apiRequest(`/admin/users/${userId}/plan`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ plan, premiumUntil: plan === 'premium' ? new Date(Date.now() + 30 * 86400000).toISOString() : null }),
+        body: JSON.stringify({ plan, ...(plan === 'premium' ? { premiumDuration } : {}) }),
       });
       await load();
-      setStatus('User plan updated.');
+      setStatus(plan === 'premium' ? `Premium granted for ${premiumDuration.replace('_', ' ')}.` : 'Premium access deactivated.');
     } catch (error) { setStatus(error.message); }
   };
 
@@ -1824,6 +1976,8 @@ function AdminPanel({ user, accessToken, onLogout }) {
         <form className="admin-section" onSubmit={saveSettings}>
           <div className="admin-section-heading"><div><p className="admin-kicker">ENTITLEMENTS</p><h2>Plan controls</h2></div><button className="admin-save" type="submit">Save</button></div>
           <label className="admin-toggle"><span><strong>Currency conversion for free users</strong><small>Allow cross-currency expenses without premium.</small></span><input type="checkbox" checked={settings.features.currencyConversion.free} onChange={(event) => setSettings({ ...settings, features: { ...settings.features, currencyConversion: { ...settings.features.currencyConversion, free: event.target.checked } } })} /></label>
+          <label className="admin-toggle"><span><strong>Dashboard spending insights for free users</strong><small>Allow dashboard spending charts without Premium.</small></span><input type="checkbox" checked={settings.features.dashboardSpendingInsights.free} onChange={(event) => setSettings({ ...settings, features: { ...settings.features, dashboardSpendingInsights: { ...settings.features.dashboardSpendingInsights, free: event.target.checked } } })} /></label>
+          <label className="admin-toggle"><span><strong>Group spending insights for free users</strong><small>Allow group spending charts without Premium.</small></span><input type="checkbox" checked={settings.features.groupSpendingInsights.free} onChange={(event) => setSettings({ ...settings, features: { ...settings.features, groupSpendingInsights: { ...settings.features.groupSpendingInsights, free: event.target.checked } } })} /></label>
           <label>Free expenses per day<input type="number" min="0" value={settings.limits.freeDailyExpenses} onChange={(event) => setSettings({ ...settings, limits: { ...settings.limits, freeDailyExpenses: Number(event.target.value) } })} /></label>
           <label>Premium expenses per day<input type="number" min="0" placeholder="Unlimited" value={settings.limits.premiumDailyExpenses ?? ''} onChange={(event) => setSettings({ ...settings, limits: { ...settings.limits, premiumDailyExpenses: event.target.value === '' ? null : Number(event.target.value) } })} /></label>
         </form>
@@ -1834,8 +1988,65 @@ function AdminPanel({ user, accessToken, onLogout }) {
           <small>Creates an in-app notification for every user and queues email for users who opted into product updates.</small>
         </form>
       </div>
-      <section className="admin-section admin-users"><div className="admin-section-heading"><div><p className="admin-kicker">ACCOUNTS</p><h2>Premium access</h2></div></div>
-        {users.map((account) => <div className="admin-user-row" key={account._id}><div><strong>{account.fullnamae || account.username}</strong><small>{account.email}</small></div><button className={account.plan === 'premium' ? 'admin-plan premium' : 'admin-plan'} type="button" onClick={() => changePlan(account._id, account.plan === 'premium' ? 'free' : 'premium')}>{account.plan === 'premium' ? 'Premium · revoke' : 'Grant premium'}</button></div>)}
+      <section className="admin-section admin-users">
+        <div className="admin-section-heading"><div><p className="admin-kicker">ACCOUNTS</p><h2>Premium access</h2></div></div>
+        <div className="admin-premium-tools">
+          <label>Find account by email
+            <input
+              type="search"
+              value={userSearch}
+              onChange={(event) => setUserSearch(event.target.value)}
+              placeholder="Search Gmail or any account email"
+            />
+          </label>
+          <label>Grant Premium for
+            <select value={premiumDuration} onChange={(event) => setPremiumDuration(event.target.value)}>
+              <option value="weekly">1 week</option>
+              <option value="monthly">1 month</option>
+              <option value="six_month">6 months</option>
+              <option value="yearly">1 year</option>
+            </select>
+          </label>
+        </div>
+        <p className="admin-premium-note">
+          This panel only grants manual Premium access to eligible users; it cannot deactivate Premium or alter Razorpay billing.
+          Users with Premium access or a Razorpay subscription in progress are not eligible for a manual grant.
+        </p>
+        {users.filter((account) => {
+          const search = userSearch.trim().toLocaleLowerCase();
+          return !search || account.email.toLocaleLowerCase().includes(search)
+            || account.username.toLocaleLowerCase().includes(search)
+            || (account.fullnamae || '').toLocaleLowerCase().includes(search);
+        }).map((account) => (
+          <div className="admin-user-row" key={account._id}>
+            <div>
+              <strong>{account.fullnamae || account.username}</strong>
+              <small>{account.email}</small>
+              <small>
+                {account.plan === 'premium'
+                  ? `Premium${account.premiumUntil ? ` until ${new Date(account.premiumUntil).toLocaleDateString()}` : ' · no expiry set'}`
+                  : account.hasOpenRazorpaySubscription
+                    ? `Razorpay subscription in progress${account.razorpaySubscriptionStatus ? ` · ${account.razorpaySubscriptionStatus}` : ''}`
+                    : 'Free'}
+              </small>
+            </div>
+            {account.plan !== 'premium' && !account.hasOpenRazorpaySubscription && (
+              <button
+                className="admin-plan"
+                type="button"
+                onClick={() => void changePlan(account._id, 'premium')}
+              >
+                Grant Premium
+              </button>
+            )}
+          </div>
+        ))}
+        {!users.some((account) => {
+          const search = userSearch.trim().toLocaleLowerCase();
+          return !search || account.email.toLocaleLowerCase().includes(search)
+            || account.username.toLocaleLowerCase().includes(search)
+            || (account.fullnamae || '').toLocaleLowerCase().includes(search);
+        }) && <p className="admin-empty-state">No account matches that email or name.</p>}
       </section>
       {user.role === 'admin' && <section className="admin-section admin-users"><div className="admin-section-heading"><div><p className="admin-kicker">ADMINISTRATION</p><h2>Sub-admin access</h2></div></div>
         <form className="sub-admin-form" onSubmit={createSubAdmin}>
@@ -1851,12 +2062,299 @@ function AdminPanel({ user, accessToken, onLogout }) {
   );
 }
 
+function BillingPage({ user, accessToken, onProfileUpdated }) {
+  const [plans, setPlans] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+  const loadBilling = async () => {
+    setError('');
+    try {
+      const [planResult, summaryResult] = await Promise.all([
+        apiRequest('/billing/plans', { headers: authHeaders }),
+        apiRequest('/billing/summary', { headers: authHeaders }),
+      ]);
+      setPlans(planResult.plans);
+      setSummary(summaryResult);
+      if (summaryResult.plan !== user.plan || summaryResult.premiumUntil !== user.premiumUntil) {
+        onProfileUpdated({ ...user, plan: summaryResult.plan, premiumUntil: summaryResult.premiumUntil });
+      }
+      setSelectedPeriod((current) => (
+        current && planResult.plans.some((plan) => plan.period === current && plan.configured)
+          ? current
+          : planResult.plans.find((plan) => plan.configured)?.period || ''
+      ));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  useEffect(() => {
+    void loadBilling();
+  }, [accessToken]);
+
+  const launchCheckout = (created) => {
+    try {
+      if (!window.Razorpay) throw new Error('Razorpay Checkout did not load. Refresh and try again.');
+      const checkout = new window.Razorpay({
+        key: created.keyId,
+        subscription_id: created.subscriptionId,
+        name: 'Splitpayerly',
+        description: `Premium · ${created.plan.label}`,
+        prefill: { name: user.fullnamae || user.username, email: user.email, contact: user.phone || '' },
+        theme: { color: '#466d4c' },
+        handler: async (response) => {
+          try {
+            await apiRequest('/billing/subscriptions/verify', {
+              method: 'POST',
+              headers: authHeaders,
+              body: JSON.stringify(response),
+            });
+            setMessage('Subscription authorization received. Premium access will update after Razorpay confirms the payment.');
+            await loadBilling();
+          } catch (verifyError) {
+            setError(verifyError.message);
+          } finally {
+            setBusy(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setBusy(false);
+            setMessage('Checkout closed. No payment was confirmed.');
+          },
+        },
+      });
+      checkout.on('payment.failed', (response) => {
+        setBusy(false);
+        const failure = response.error || {};
+        const diagnostics = [
+          failure.code && `Code: ${failure.code}`,
+          failure.source && `Source: ${failure.source}`,
+          failure.step && `Step: ${failure.step}`,
+          failure.reason && `Reason: ${failure.reason}`,
+        ].filter(Boolean);
+        const modeGuidance = created.keyId?.startsWith('rzp_test_')
+          ? 'Razorpay Test Mode is enabled. Use a documented Razorpay test card (not a real bank card), then complete the simulated bank/OTP step. See Razorpay’s Test Cards documentation.'
+          : 'Check the failure reason in your Razorpay Dashboard and confirm the payment method is authorized by its issuer.';
+        setError([
+          `Razorpay could not complete the payment: ${failure.description || 'the payment was declined'}.`,
+          ...diagnostics,
+          modeGuidance,
+        ].join(' '));
+      });
+      checkout.open();
+    } catch (requestError) {
+      setBusy(false);
+      setError(requestError.message);
+    }
+  };
+
+  const startSubscription = async () => {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const created = await apiRequest('/billing/subscriptions', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ period: selectedPeriod }),
+      });
+      await loadBilling();
+      launchCheckout(created);
+    } catch (requestError) {
+      setBusy(false);
+      setError(requestError.message);
+    }
+  };
+
+  const cancelSubscription = async () => {
+    if (!summary?.subscription || !window.confirm('Cancel renewal at the end of the current paid period?')) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await apiRequest(`/billing/subscriptions/${encodeURIComponent(summary.subscription.subscriptionId)}/cancel`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      setMessage('Cancellation requested. Your paid access remains available until the current billing period ends.');
+      await loadBilling();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const changeSubscriptionPlan = async () => {
+    if (!currentSubscription || busy) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await apiRequest(
+        `/billing/subscriptions/${encodeURIComponent(currentSubscription.subscriptionId)}/change`,
+        { method: 'POST', headers: authHeaders, body: JSON.stringify({}) },
+      );
+      if (result.effective === 'immediate') {
+        setMessage('Payment was not completed. The unpaid subscription was canceled, and your account remains on the Free plan.');
+      } else if (result.effective === 'period_end') {
+        setMessage('Your current plan remains active through the paid period. You can choose another plan after it ends.');
+      }
+      await loadBilling();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dateLabel = (value) => value ? new Date(value).toLocaleDateString() : '—';
+  const currentSubscription = summary?.subscription;
+  const hasSuccessfulCurrentPayment = currentSubscription && summary?.payments.some(
+    (payment) => payment.subscriptionId === currentSubscription.subscriptionId && payment.status === 'captured',
+  );
+  const terminalStatuses = ['cancelled', 'completed', 'expired'];
+  const canCancel = currentSubscription && !terminalStatuses.includes(currentSubscription.status);
+  const paidPeriodEnded = summary?.premiumUntil
+    ? new Date(summary.premiumUntil).getTime() <= Date.now()
+    : false;
+  const canChoosePlan = !canCancel || (currentSubscription.cancelAtCycleEnd && paidPeriodEnded);
+  const periodLabels = {
+    weekly: 'Weekly',
+    six_month: 'Every 6 months',
+    monthly: 'Monthly',
+    yearly: 'Yearly',
+  };
+
+  return (
+    <main className="billing-page">
+      <header className="billing-heading">
+        <div>
+          <p className="eyebrow">ACCOUNT</p>
+          <h1>Billing</h1>
+          <p className="lede">Manage your Splitpayerly Premium subscription and payment history.</p>
+        </div>
+        <button className="quiet-button" type="button" onClick={() => void loadBilling()} disabled={busy}>Refresh</button>
+      </header>
+      {error && <p className="error-message" role="alert">{error}</p>}
+      {message && <p className="billing-message" role="status">{message}</p>}
+
+      <section className="billing-card">
+        <div className="billing-card-header">
+          <div><p className="eyebrow">CURRENT PLAN</p><h2>{summary?.plan === 'premium' ? 'Premium' : 'Free'}</h2></div>
+          {currentSubscription && <span className={`billing-status ${currentSubscription.status}`}>{currentSubscription.status}</span>}
+        </div>
+        {currentSubscription ? (
+          <>
+            {currentSubscription.status === 'cancelled'
+              && summary?.plan !== 'premium'
+              && !hasSuccessfulCurrentPayment && (
+                <p className="billing-muted" role="status">
+                  Payment was not completed. This subscription was canceled, and your account remains on the Free plan.
+                </p>
+              )}
+            <dl className="billing-details">
+              <div><dt>Billing interval</dt><dd>{periodLabels[currentSubscription.billingPeriod] || currentSubscription.billingPeriod}</dd></div>
+              <div><dt>Plan price</dt><dd>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: currentSubscription.currency, maximumFractionDigits: 2 }).format(currentSubscription.planAmount / 100)}</dd></div>
+              <div><dt>Last successful payment</dt><dd>{dateLabel(summary?.payments.find((payment) => payment.status === 'captured' && payment.subscriptionId === currentSubscription.subscriptionId)?.paidAt)}</dd></div>
+              <div><dt>Next billing date</dt><dd>{dateLabel(currentSubscription.nextBillingAt || currentSubscription.currentEnd)}</dd></div>
+              <div><dt>Premium access through</dt><dd>{dateLabel(summary?.premiumUntil)}</dd></div>
+              {currentSubscription.cancelAtCycleEnd && <div><dt>Renewal</dt><dd>Cancellation requested at period end</dd></div>}
+              {currentSubscription.pausedAt && <div><dt>Paused</dt><dd>{dateLabel(currentSubscription.pausedAt)}</dd></div>}
+            </dl>
+            {['created', 'authenticated'].includes(currentSubscription.status) && (
+              <button className="primary-action" type="button" disabled={busy} onClick={() => {
+                setBusy(true);
+                launchCheckout({
+                  keyId: summary.keyId,
+                  subscriptionId: currentSubscription.subscriptionId,
+                  plan: {
+                    label: periodLabels[currentSubscription.billingPeriod] || currentSubscription.billingPeriod,
+                  },
+                });
+              }}>
+                Continue checkout
+              </button>
+            )}
+            {canCancel && !currentSubscription.cancelAtCycleEnd && (
+              <button className="quiet-button billing-cancel" type="button" disabled={busy} onClick={() => void changeSubscriptionPlan()}>
+                Change plan
+              </button>
+            )}
+            {canCancel && !currentSubscription.cancelAtCycleEnd && (
+              <button className="quiet-button billing-cancel" type="button" disabled={busy} onClick={() => void cancelSubscription()}>
+                Cancel at period end
+              </button>
+            )}
+            {canCancel && currentSubscription.cancelAtCycleEnd && (
+              <p className="billing-muted">
+                Your current plan stays active until {dateLabel(summary?.premiumUntil || currentSubscription.currentEnd)}.
+                Choose your next plan after that period ends.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="billing-muted">No subscription yet. Choose a configured plan below to get started.</p>
+        )}
+      </section>
+
+      {plans.length > 0 && canChoosePlan && (
+        <section className="billing-card">
+          <p className="eyebrow">PREMIUM PLANS</p>
+          <h2>Unlock Premium</h2>
+          <p className="billing-muted">Subscribe to Premium features. Razorpay automatically charges the selected amount each billing period until you cancel.</p>
+          <div className="billing-plan-options">
+            {plans.map((plan) => (
+              <label className={`billing-plan-option ${selectedPeriod === plan.period ? 'selected' : ''} ${!plan.configured ? 'unavailable' : ''}`} key={plan.period}>
+                <input type="radio" name="billing-period" value={plan.period} checked={selectedPeriod === plan.period} disabled={!plan.configured} onChange={() => setSelectedPeriod(plan.period)} />
+                <span><strong>{plan.label}</strong><small>{plan.configured ? `Automatically billed ${plan.period === 'six_month' ? 'every 6 months' : `per ${plan.period}`}` : plan.configurationError || 'Not configured yet'}</small></span>
+                <b>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: plan.currency, maximumFractionDigits: 2 }).format(plan.amount / 100)}</b>
+              </label>
+            ))}
+          </div>
+          <button className="primary-action" type="button" disabled={busy || !selectedPeriod || !plans.some((plan) => plan.period === selectedPeriod && plan.configured)} onClick={() => void startSubscription()}>
+            {busy ? 'Please wait…' : `Subscribe ${selectedPeriod ? `· ${selectedPeriod}` : ''}`}
+          </button>
+          {plans.some((plan) => !plan.configured) && <p className="billing-muted">A plan must have a matching Razorpay Plan ID and billing interval. For example, the yearly plan must be INR 500 per year. Automatic billing starts only after completing Razorpay Checkout.</p>}
+        </section>
+      )}
+
+      <section className="billing-card">
+        <p className="eyebrow">PAYMENTS</p>
+        <h2>Payment history</h2>
+        {summary?.payments.length ? (
+          <div className="billing-payment-list">
+            {summary.payments.map((payment) => (
+              <div className="billing-payment-row" key={payment.paymentId}>
+                <div><strong>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: payment.currency, maximumFractionDigits: 2 }).format(payment.amount / 100)}</strong><small>{dateLabel(payment.paidAt || payment.createdAt)}</small></div>
+                <span className={`billing-status ${payment.status}`}>{payment.status}</span>
+                {payment.failureDescription && <p>{payment.failureDescription}</p>}
+                {payment.status === 'failed' && <p>Check your payment method and retry when Razorpay makes the subscription eligible for another attempt.</p>}
+              </div>
+            ))}
+          </div>
+        ) : <p className="billing-muted">No payment attempts recorded.</p>}
+      </section>
+    </main>
+  );
+}
+
 function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDeleted, friendInviteCode, onFriendInviteHandled, referralMessage, referralCode }) {
   const firstName = user.fullnamae?.split(" ")[0] || user.username;
   const themeStorageKey = `splitcare-theme:${user._id}`;
   const [theme, setTheme] = useState(() => (
     window.localStorage.getItem(themeStorageKey) === 'dark' ? 'dark' : 'light'
   ));
+  const [featureAccess, setFeatureAccess] = useState(null);
+  const [featureAccessBusy, setFeatureAccessBusy] = useState(true);
+  const [featureAccessError, setFeatureAccessError] = useState('');
   const [groups, setGroups] = useState([]);
   const [dashboardBalanceSummary, setDashboardBalanceSummary] = useState(null);
   const [dashboardBalancesBusy, setDashboardBalancesBusy] = useState(true);
@@ -1890,7 +2388,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   const dashboardPageStorageKey = `splitcare-dashboard-page:${user._id}`;
   const [activePage, setActivePage] = useState(() => {
     const savedPage = window.sessionStorage.getItem(dashboardPageStorageKey);
-    return ['overview', 'recent', 'all-expenses', 'non-group-expenses', 'personal', 'friends'].includes(savedPage)
+    return ['overview', 'recent', 'all-expenses', 'non-group-expenses', 'personal', 'friends', 'billing', 'contact'].includes(savedPage)
       ? savedPage
       : 'overview';
   });
@@ -1971,6 +2469,23 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   useEffect(() => {
     window.localStorage.setItem(themeStorageKey, theme);
   }, [themeStorageKey, theme]);
+  useEffect(() => {
+    let active = true;
+    setFeatureAccessBusy(true);
+    setFeatureAccessError('');
+    apiRequest('/users/feature-access', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }).then((result) => {
+      if (active) setFeatureAccess(result);
+    }).catch((error) => {
+      if (!active) return;
+      setFeatureAccess(null);
+      setFeatureAccessError(error.message);
+    }).finally(() => {
+      if (active) setFeatureAccessBusy(false);
+    });
+    return () => { active = false; };
+  }, [accessToken]);
   const notificationControlRef = useRef(null);
   const profileControlRef = useRef(null);
   const [profileForm, setProfileForm] = useState({ username: user.username || '', email: user.email || '', fullnamae: user.fullnamae || '', phone: user.phone || '', defaultCurrency: user.defaultCurrency || 'INR', currentPassword: '', newPassword: '', coverimage: null });
@@ -2680,7 +3195,7 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
     body.set('paidBy', expenseDraft.paidBy);
     body.set('totalAmount', amount);
     body.set('description', expenseDraft.description);
-    body.set('currency', expenseDraft.currency);
+    body.set('currency', groupCurrencyConversionLocked ? expenseGroup.currency : expenseDraft.currency);
     body.set('category', expenseDraft.category);
     body.set('subcategory', expenseDraft.subcategory);
     body.set('splitStrategy', expenseDraft.strategy);
@@ -3324,6 +3839,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
   ));
   const expenseTargetFriend = friends.find((friend) => friend._id === friendExpenseTarget);
   const expenseGroup = groups.find((group) => group._id === expenseDraft.groupId);
+  const groupCurrencyConversionLocked = Boolean(
+    expenseGroup
+    && !expenseGroup.isPersonal
+    && !expenseGroup.isFriendLedger
+    && !featureAccess?.features.currencyConversion,
+  );
   const selectedExpenseFriendGroup = selectedExpense
     ? friendHistory?.groups.find((group) => group.groupId === selectedExpense.groupId && group.isDirect)
       || (selectedExpense.isDirect ? { groupId: selectedExpense.groupId, groupName: 'Direct friend expenses', isDirect: true } : null)
@@ -3439,6 +3960,8 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
           <button aria-label="Non-group expenses" className={activePage === 'non-group-expenses' ? 'active' : ''} type="button" onClick={() => { setActivePage('non-group-expenses'); setShowMobileNav(false); }}><span className="mobile-nav-label">Non-group expenses</span></button>
           <button aria-label="Personal expenses" className={activePage === 'personal' ? 'active' : ''} type="button" onClick={() => { setActivePage('personal'); setShowMobileNav(false); }}><span className="mobile-nav-label">Personal expenses</span></button>
           <button aria-label="Friends" className={activePage === 'friends' || activePage === 'friend-detail' ? 'active' : ''} type="button" onClick={() => { setActivePage('friends'); setShowMobileNav(false); }}><span className="mobile-nav-label">Friends</span></button>
+          <button aria-label="Billing" className={activePage === 'billing' ? 'active' : ''} type="button" onClick={() => { setActivePage('billing'); setShowMobileNav(false); }}><span className="mobile-nav-label">Billing</span></button>
+          <button aria-label="Contact Us" className={activePage === 'contact' ? 'active' : ''} type="button" onClick={() => { setActivePage('contact'); setShowMobileNav(false); }}><span className="mobile-nav-label">Contact Us</span></button>
         </nav>
         <button
           className="theme-toggle"
@@ -3612,6 +4135,12 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
             </button>
             <button className={`side-link ${activePage === 'personal' ? 'active' : ''}`} onClick={() => setActivePage('personal')} type="button">
               ☷ <span>Personal expenses</span>
+            </button>
+            <button className={`side-link ${activePage === 'billing' ? 'active' : ''}`} onClick={() => setActivePage('billing')} type="button">
+              ◈ <span>Billing</span>
+            </button>
+            <button className={`side-link ${activePage === 'contact' ? 'active' : ''}`} onClick={() => setActivePage('contact')} type="button">
+              ✉ <span>Contact Us</span>
             </button>
           </div>
           <div className="side-section">
@@ -3810,6 +4339,10 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                 ) : <p className="friends-request-empty">No friend requests yet.</p>}
               </section>
             </div>
+          ) : activePage === 'billing' ? (
+            <BillingPage user={user} accessToken={accessToken} onProfileUpdated={onProfileUpdated} />
+          ) : activePage === 'contact' ? (
+            <ContactPage user={user} accessToken={accessToken} />
           ) : activePage === 'non-group-expenses' ? (
             <ExpenseLedger
               expenses={nonGroupExpenses}
@@ -3878,6 +4411,15 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               <p className="lede">See what you owe and what’s owed to you.</p>
             </div>
             <div className="action-row">
+              {user.plan !== 'premium' && (
+                <button
+                  className="primary-action premium-upgrade-action"
+                  type="button"
+                  onClick={() => setActivePage('billing')}
+                >
+                  Unlock Premium
+                </button>
+              )}
               <button
                 className="group-entry-button group-entry-create"
                 type="button"
@@ -3988,15 +4530,27 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               )}
             </Panel>
           </div>
-          <SpendingInsights
-            transactions={dashboardSpendingTransactions}
-            members={dashboardSpendingMembers}
-            userId={user._id}
-            personalOnly
-            balanceSummary={dashboardBalanceSummary}
-            balanceSummaryBusy={dashboardBalancesBusy}
-            scopeLabel="ALL YOUR SPENDING"
-          />
+          {featureAccessBusy ? (
+            <p className="empty-state">Checking spending insights access…</p>
+          ) : featureAccessError ? (
+            <p className="error-message" role="alert">Could not load feature access: {featureAccessError}</p>
+          ) : featureAccess?.features.dashboardSpendingInsights ? (
+            <SpendingInsights
+              transactions={dashboardSpendingTransactions}
+              members={dashboardSpendingMembers}
+              userId={user._id}
+              personalOnly
+              balanceSummary={dashboardBalanceSummary}
+              balanceSummaryBusy={dashboardBalancesBusy}
+              scopeLabel="ALL YOUR SPENDING"
+            />
+          ) : (
+            <FeatureUpgradeCard
+              title="Dashboard spending insights"
+              description="Explore monthly spending, who paid, expense shares, and daily and monthly charts across your groups and friends."
+              onUpgrade={() => setActivePage('billing')}
+            />
+          )}
           </>
           )}
           {showSettleUpChooser && (
@@ -4293,14 +4847,31 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
                   <label>Description<input value={expenseDraft.description} onChange={(event) => updateExpenseDraft('description', event.target.value)} placeholder="Dinner at Prego" maxLength="500" required /></label>
                   <label>Amount<input value={expenseDraft.strategy === 'ITEMIZED' ? itemizedTotal.toFixed(2) : expenseDraft.totalAmount} onChange={(event) => updateExpenseDraft('totalAmount', event.target.value)} type="number" min="0.01" step="0.01" placeholder="0.00" readOnly={expenseDraft.strategy === 'ITEMIZED'} required /></label>
                   <label>Currency
-                    <select value={expenseDraft.currency} onChange={(event) => updateExpenseDraft('currency', event.target.value)}>
-                      {[...new Set([expenseDraft.currency, ...currencyOptions])].map((currency) => (
+                    <select
+                      value={groupCurrencyConversionLocked ? expenseGroup.currency : expenseDraft.currency}
+                      disabled={groupCurrencyConversionLocked}
+                      onChange={(event) => updateExpenseDraft('currency', event.target.value)}
+                    >
+                      {[...new Set([
+                        groupCurrencyConversionLocked ? expenseGroup.currency : expenseDraft.currency,
+                        ...(!groupCurrencyConversionLocked ? currencyOptions : []),
+                      ])].map((currency) => (
                         <option key={currency} value={currency}>{currency}</option>
                       ))}
                     </select>
                   </label>
                 </div>
-                <p className="modal-help">This expense will be converted into the group base currency ({groups.find((group) => group._id === expenseDraft.groupId)?.currency || expenseDraft.currency}) before it affects balances.</p>
+                <p className="modal-help">
+                  {groupCurrencyConversionLocked
+                    ? `Free plan group expenses must use the group base currency (${expenseGroup.currency}). Upgrade to Premium or ask an admin to enable conversion for free users.`
+                    : `This expense will be converted into the group base currency (${expenseGroup?.currency || expenseDraft.currency}) before it affects balances.`}
+                </p>
+                {groupCurrencyConversionLocked && (
+                  <button type="button" className="quiet-button" onClick={() => {
+                    setShowExpenseForm(false);
+                    setActivePage('billing');
+                  }}>View Premium plans</button>
+                )}
                 {currencyOptionsError && <p className="error-message" role="alert">{currencyOptionsError}</p>}
                 <div className="expense-category-picker">
                   <button
@@ -4700,6 +5271,13 @@ function Dashboard({ user, accessToken, onLogout, onProfileUpdated, onAccountDel
               settingsError={groupSettingsError}
               currencyOptions={currencyOptions}
               currencyOptionsError={currencyOptionsError}
+              featureAccess={featureAccess}
+              featureAccessBusy={featureAccessBusy}
+              featureAccessError={featureAccessError}
+              onViewPremium={() => {
+                setSelectedGroup(null);
+                setActivePage('billing');
+              }}
               addMemberBusy={addMemberBusy}
               addMemberError={addMemberError}
               friends={friends}
@@ -4837,6 +5415,10 @@ function GroupDetails({
   settingsError,
   currencyOptions,
   currencyOptionsError,
+  featureAccess,
+  featureAccessBusy,
+  featureAccessError,
+  onViewPremium,
   addMemberBusy,
   addMemberError,
   friends,
@@ -5316,14 +5898,15 @@ function GroupDetails({
 
   const saveSettings = async (event) => {
     event.preventDefault();
-    if (isOwner && groupCurrencyDraft !== (group.currency || 'INR')
+    const canConvertGroupCurrency = featureAccess?.features.currencyConversion === true;
+    if (isOwner && canConvertGroupCurrency && groupCurrencyDraft !== (group.currency || 'INR')
       && !window.confirm(`Change the group currency from ${group.currency || 'INR'} to ${groupCurrencyDraft}? Existing financial history will be converted using current exchange rates.`)) {
       return;
     }
     const saved = await onSaveSettings({
       name: nameDraft.trim(),
       simplifyDebts: simplifyDebtsDraft,
-      currency: groupCurrencyDraft,
+      currency: canConvertGroupCurrency ? groupCurrencyDraft : group.currency,
       coverImage: coverImageDraft,
       removeCoverImage,
     });
@@ -5464,7 +6047,19 @@ function GroupDetails({
                     })}
                   </div>
                 ) : <p className="empty-state">You’re settled up in this group.</p>}
-                <SpendingInsights transactions={transactions} members={group.members || []} userId={user._id} />
+                {featureAccessBusy ? (
+                  <p className="empty-state">Checking group insights access…</p>
+                ) : featureAccessError ? (
+                  <p className="error-message" role="alert">Could not load feature access: {featureAccessError}</p>
+                ) : featureAccess?.features.groupSpendingInsights ? (
+                  <SpendingInsights transactions={transactions} members={group.members || []} userId={user._id} />
+                ) : (
+                  <FeatureUpgradeCard
+                    title="Group spending insights"
+                    description="See who paid, each member’s expense share, and group spending trends with monthly charts."
+                    onUpgrade={onViewPremium}
+                  />
+                )}
               </section>
             )}
             {activeTab === 'settings' && (
@@ -5492,12 +6087,27 @@ function GroupDetails({
                   <label>Group name<input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} maxLength="120" required /></label>
                   {isOwner && (
                     <label>Group base currency
-                      <select value={groupCurrencyDraft} onChange={(event) => setGroupCurrencyDraft(event.target.value)} disabled={settingsBusy}>
-                        {[...new Set([groupCurrencyDraft, ...currencyOptions])].map((currency) => (
+                      <select
+                        value={featureAccess?.features.currencyConversion ? groupCurrencyDraft : group.currency || 'INR'}
+                        onChange={(event) => setGroupCurrencyDraft(event.target.value)}
+                        disabled={settingsBusy || !featureAccess?.features.currencyConversion}
+                      >
+                        {[...new Set([groupCurrencyDraft, group.currency || 'INR', ...currencyOptions])].map((currency) => (
                           <option key={currency} value={currency}>{currency}</option>
                         ))}
                       </select>
-                      <small>Changing this converts existing group balances, expenses, settlements, and payment history using current exchange rates.</small>
+                      <small>
+                        {featureAccessBusy
+                          ? 'Checking currency conversion access…'
+                          : featureAccessError
+                            ? `Could not load feature access: ${featureAccessError}`
+                            : featureAccess?.features.currencyConversion
+                          ? 'Changing this converts existing group balances, expenses, settlements, and payment history using current exchange rates.'
+                          : 'Changing group currency is a Premium feature. Upgrade to Premium or ask an admin to enable conversion for free users.'}
+                      </small>
+                      {!featureAccessBusy && !featureAccessError && !featureAccess?.features.currencyConversion && (
+                        <button type="button" className="quiet-button" onClick={onViewPremium}>View Premium plans</button>
+                      )}
                       {currencyOptionsError && <small className="error-message">{currencyOptionsError}</small>}
                     </label>
                   )}

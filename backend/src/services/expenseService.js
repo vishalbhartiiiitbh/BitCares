@@ -7,6 +7,7 @@ import { ensurePersonalExpenseGroup } from './groupService.js';
 import { recordGroupActivity } from './groupActivityService.js';
 import { getExchangeRate } from './exchangeRateService.js';
 import { normalizeGroupBalances } from './groupCurrencyService.js';
+import { getUserFeatureAccess, isFeatureEnabled } from './featureAccessService.js';
 
 const expenseSubcategories = {
   Entertainment: ['Games', 'Music', 'Movies', 'Sports', 'Events'],
@@ -509,9 +510,7 @@ export const addExpense = async ({
   const isPremium = entitlement.plan === 'premium'
     && (!entitlement.premiumUntil || new Date(entitlement.premiumUntil) > new Date());
   const settings = entitlement.settings || {};
-  const conversionEnabled = isPremium
-    ? settings.features?.currencyConversion?.premium !== false
-    : Boolean(settings.features?.currencyConversion?.free);
+  const conversionEnabled = isFeatureEnabled(settings, isPremium, 'currencyConversion');
 
   if (groupId) {
     const groupResult = await query(
@@ -525,7 +524,7 @@ export const addExpense = async ({
       await normalizeGroupBalances(groupId, actorId);
       const groupCurrency = group.currency || 'INR';
       if (currency !== groupCurrency && !conversionEnabled) {
-        throw Object.assign(new Error('Currency conversion is available on the premium plan'), { statusCode: 402 });
+        throw Object.assign(new Error('Group currency conversion is a Premium feature. Upgrade to Premium or ask an admin to enable it for free users.'), { statusCode: 402 });
       }
       conversionRate = await getExchangeRate(currency, groupCurrency);
       if (splitStrategy === 'ITEMIZED') {
@@ -735,6 +734,10 @@ export const updateExpense = async ({
   if (!context.isPersonal && !context.isFriendLedger) {
     await normalizeGroupBalances(context.groupId, editorId);
     const groupCurrency = context.groupCurrency || 'INR';
+    if (currency !== groupCurrency
+      && !(await getUserFeatureAccess(editorId)).features.currencyConversion) {
+      throw Object.assign(new Error('Group currency conversion is a Premium feature. Upgrade to Premium or ask an admin to enable it for free users.'), { statusCode: 402 });
+    }
     conversionRate = await getExchangeRate(currency, groupCurrency);
     if (splitStrategy === 'ITEMIZED') {
       items = items.map((item) => ({ ...item, amount: convertMoney(item.amount, conversionRate) }));

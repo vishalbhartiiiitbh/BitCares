@@ -106,7 +106,7 @@ const connectDB = async () => {
     ALTER TABLE users ADD CONSTRAINT users_plan_check CHECK (plan IN ('free', 'premium'));
     CREATE TABLE IF NOT EXISTS platform_settings (
       id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
-      settings JSONB NOT NULL DEFAULT '{"features":{"currencyConversion":{"free":false,"premium":true}},"limits":{"freeDailyExpenses":5,"premiumDailyExpenses":null}}'::jsonb,
+      settings JSONB NOT NULL DEFAULT '{"features":{"currencyConversion":{"free":false,"premium":true},"dashboardSpendingInsights":{"free":false,"premium":true},"groupSpendingInsights":{"free":false,"premium":true}},"limits":{"freeDailyExpenses":5,"premiumDailyExpenses":null}}'::jsonb,
       updated_by UUID REFERENCES users(id),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -122,12 +122,65 @@ const connectDB = async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       paid_at TIMESTAMPTZ
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS billing_orders_provider_payment_id_unique
+      ON billing_orders (provider_payment_id) WHERE provider_payment_id IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS billing_subscriptions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider_subscription_id TEXT NOT NULL UNIQUE,
+      provider_plan_id TEXT NOT NULL,
+      billing_period TEXT NOT NULL,
+      billing_interval INTEGER NOT NULL DEFAULT 1,
+      plan_amount INTEGER NOT NULL DEFAULT 0,
+      currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+      status TEXT NOT NULL,
+      current_start TIMESTAMPTZ,
+      current_end TIMESTAMPTZ,
+      next_billing_at TIMESTAMPTZ,
+      started_at TIMESTAMPTZ,
+      ended_at TIMESTAMPTZ,
+      cancelled_at TIMESTAMPTZ,
+      paused_at TIMESTAMPTZ,
+      cancel_at_cycle_end BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS billing_subscriptions_user_created_idx
+      ON billing_subscriptions (user_id, created_at DESC);
+    ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS plan_amount INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'INR';
+    CREATE UNIQUE INDEX IF NOT EXISTS billing_subscriptions_one_open_per_user
+      ON billing_subscriptions (user_id)
+      WHERE status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused');
+    CREATE TABLE IF NOT EXISTS billing_payments (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider_payment_id TEXT NOT NULL UNIQUE,
+      provider_order_id TEXT,
+      provider_subscription_id TEXT,
+      amount INTEGER NOT NULL,
+      currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+      status TEXT NOT NULL,
+      paid_at TIMESTAMPTZ,
+      failure_code TEXT,
+      failure_description TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS billing_payments_user_created_idx
+      ON billing_payments (user_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS billing_webhook_events (
       event_id TEXT PRIMARY KEY,
       event_type TEXT NOT NULL,
       payload JSONB NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS processing_status TEXT NOT NULL DEFAULT 'processed';
+    ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS processed_at TIMESTAMPTZ;
+    ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS safe_error TEXT;
+    ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 1;
+    UPDATE billing_webhook_events SET payload = '{}'::jsonb WHERE payload <> '{}'::jsonb;
     CREATE TABLE IF NOT EXISTS email_notification_outbox (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
